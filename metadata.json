@@ -1,0 +1,5 @@
+{
+  "name": "Visual Code Review PoC",
+  "description": "An interactive code review visualization application transforming pull request data into an intuitive visual experience with file tree, diff viewer, and context-aware chat.",
+  "requestFramePermissions": []
+}
