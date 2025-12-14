@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { computeDiff, DiffLine } from '../../utils/diffUtils';
 import clsx from 'clsx';
 import { LineMarker } from './LineMarker';
@@ -15,6 +15,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
   const diffLines = useMemo(() => computeDiff(oldContent, newContent), [oldContent, newContent]);
   const visibleLines = React.useRef(new Set<number>());
   const updateTimeout = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const { walkthrough, activeSectionId, setSelectionState } = usePR();
 
   const handleLineVisibility = (lineNumber: number, isVisible: boolean) => {
     if (isVisible) {
@@ -35,8 +36,56 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
     }, 100);
   };
 
+  // Handle Text Selection to create "User Markers"
+  const handleMouseUp = useCallback(() => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+      // Don't clear immediately to allow click-to-copy, but if needed we can setSelectionState(null);
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    const startNode = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentElement : range.startContainer;
+    const endNode = range.endContainer.nodeType === Node.TEXT_NODE ? range.endContainer.parentElement : range.endContainer;
+
+    // Helper to find closest line number attribute
+    const findLineNumber = (node: Node | null): number | null => {
+      let curr = node as HTMLElement;
+      while (curr && curr.getAttribute) {
+        const line = curr.getAttribute('data-line-number');
+        if (line) return parseInt(line, 10);
+        curr = curr.parentElement as HTMLElement;
+      }
+      return null;
+    };
+
+    const startLine = findLineNumber(startNode);
+    const endLine = findLineNumber(endNode);
+
+    if (startLine !== null && endLine !== null) {
+      const actualStart = Math.min(startLine, endLine);
+      const actualEnd = Math.max(startLine, endLine);
+      
+      // Extract content from diffLines based on line numbers
+      // This is cleaner than extracting from DOM which might contain line numbers/markers
+      const selectedContent = diffLines
+        .filter(l => l.newLineNumber && l.newLineNumber >= actualStart && l.newLineNumber <= actualEnd)
+        .map(l => l.content)
+        .join('\n');
+
+      setSelectionState({
+        file: filePath,
+        startLine: actualStart,
+        endLine: actualEnd,
+        content: selectedContent
+      });
+      
+      console.log(`Selection: Lines ${actualStart}-${actualEnd}`);
+    }
+  }, [diffLines, filePath, setSelectionState]);
+
+
   // Check for highlights from walkthrough
-  const { walkthrough, activeSectionId } = usePR();
   const highlights = useMemo(() => {
       if (!activeSectionId || !walkthrough) return [];
       const section = walkthrough.sections.find(s => s.id === activeSectionId);
@@ -54,13 +103,16 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
   };
 
   return (
-    <div className="font-mono text-xs md:text-sm bg-gray-950 min-h-full">
+    <div 
+      className="font-mono text-xs md:text-sm bg-gray-950 min-h-full"
+      onMouseUp={handleMouseUp}
+    >
       {diffLines.map((line, idx) => {
         const isAdded = line.type === 'add';
         const isRemoved = line.type === 'remove';
         const isHighlighted = isLineHighlighted(line.newLineNumber);
         const note = getHighlightNote(line.newLineNumber);
-        const showNote = note && line.newLineNumber && highlights.find(h => h.lines[0] === line.newLineNumber); // Only show note on start line
+        const showNote = note && line.newLineNumber && highlights.find(h => h.lines[0] === line.newLineNumber); 
 
         return (
           <div 
@@ -71,6 +123,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
               isRemoved && "bg-red-900/20",
               isHighlighted && "bg-purple-900/30 ring-1 ring-purple-500/50 z-10"
             )}
+            data-line-number={line.newLineNumber} // Data attribute for markers
           >
             {/* Markers for tracking viewport */}
             {line.newLineNumber && (
@@ -106,7 +159,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
 
              {/* Inline Walkthrough Note */}
              {showNote && (
-                 <div className="absolute right-4 top-0 bg-purple-600 text-white px-2 py-0.5 text-xs rounded shadow-lg opacity-90 pointer-events-none">
+                 <div className="absolute right-4 top-0 bg-purple-600 text-white px-2 py-0.5 text-xs rounded shadow-lg opacity-90 pointer-events-none select-none">
                      {note}
                  </div>
              )}

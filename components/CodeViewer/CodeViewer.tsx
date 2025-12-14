@@ -1,14 +1,39 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { usePR } from '../../contexts/PRContext';
 import { DiffView } from './DiffView';
 import { FileCode2 } from 'lucide-react';
 
 export const CodeViewer: React.FC = () => {
-  const { selectedFile, updateViewport, isDiffMode } = usePR();
+  const { selectedFile, updateViewport, isDiffMode, activeSectionId, walkthrough } = usePR();
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const handleViewportChange = (file: string, start: number, end: number) => {
     updateViewport({ file, startLine: start, endLine: end });
   };
+
+  // Auto-scroll to walkthrough highlights
+  useEffect(() => {
+    if (!selectedFile || !activeSectionId || !walkthrough) return;
+
+    const section = walkthrough.sections.find(s => s.id === activeSectionId);
+    if (!section) return;
+
+    // Find the highlight for the current file in this section
+    const highlight = section.highlights?.find(h => h.file === selectedFile.path);
+    
+    if (highlight) {
+        const lineToScroll = highlight.lines[0];
+        // Short timeout to allow DiffView to render if file just changed
+        const timer = setTimeout(() => {
+            // Find the LineMarker element by its data attribute
+            const marker = document.querySelector(`[data-line-id="${selectedFile.path}:${lineToScroll}"]`);
+            if (marker) {
+                marker.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }, 150);
+        return () => clearTimeout(timer);
+    }
+  }, [selectedFile, activeSectionId, walkthrough]);
 
   if (!selectedFile) {
     return (
@@ -18,15 +43,6 @@ export const CodeViewer: React.FC = () => {
       </div>
     );
   }
-
-  // If isDiffMode is false, we technically want to see just the new file content without diff colors.
-  // For this PoC, we will reuse DiffView but we could conditionally pass oldContent=undefined to simulate "Just the file".
-  // However, normally a code viewer needs standard syntax highlighting. 
-  // We'll stick to the diff view but maybe suppress colors if !isDiffMode?
-  // For simplicity in this PoC, we render DiffView always but toggle display styles or props.
-  
-  // Actually, let's just use the DiffView. The prompt requested separate logic for "unchanged" vs "changed".
-  // DiffView handles both via computeDiff.
 
   return (
     <div className="h-full flex flex-col bg-gray-950 overflow-hidden">
@@ -39,7 +55,10 @@ export const CodeViewer: React.FC = () => {
         </div>
       </div>
       
-      <div className="flex-1 overflow-auto custom-scrollbar relative">
+      <div 
+        ref={containerRef}
+        className="flex-1 overflow-auto custom-scrollbar relative scroll-smooth"
+      >
         <DiffView 
           key={selectedFile.path} // Force re-render on file switch
           oldContent={isDiffMode ? selectedFile.oldContent : undefined} 

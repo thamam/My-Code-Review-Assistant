@@ -2,43 +2,43 @@ import React, { useState, useEffect } from 'react';
 import { Github, Loader2, PlayCircle, AlertCircle, HelpCircle, CheckSquare, Square, History, Database, RefreshCw, Upload, FileJson, Clock, FileText } from 'lucide-react';
 import { usePR } from '../contexts/PRContext';
 import { GitHubService } from '../services/github';
-import { SAMPLE_PR } from '../mock/samplePR';
+import { SAMPLE_PR, SAMPLE_WALKTHROUGH } from '../mock/samplePR';
 import { PRData, Walkthrough, PRHistoryItem, WalkthroughSection } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 
 export const WelcomeScreen: React.FC = () => {
   const { setPRData, loadWalkthrough } = usePR();
+  
+  // Initialize state lazily from localStorage to prevent loss on refresh/code updates
   const [url, setUrl] = useState('');
-  const [token, setToken] = useState('');
-  const [rememberToken, setRememberToken] = useState(true);
+  
+  const [token, setToken] = useState(() => {
+    try { return localStorage.getItem('vcr_gh_token') || ''; } catch { return ''; }
+  });
+  
+  const [rememberToken, setRememberToken] = useState(() => {
+    try { 
+        const saved = localStorage.getItem('vcr_remember_pref');
+        return saved !== null ? saved === 'true' : true; 
+    } catch { return true; }
+  });
+
+  const [history, setHistory] = useState<PRHistoryItem[]>(() => {
+    try {
+        const saved = localStorage.getItem('vcr_history');
+        return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  const [history, setHistory] = useState<PRHistoryItem[]>([]);
   const [cachedData, setCachedData] = useState<PRData | null>(null);
   const [walkthroughFile, setWalkthroughFile] = useState<Walkthrough | null>(null);
   const [walkthroughFileName, setWalkthroughFileName] = useState<string>('');
 
-  useEffect(() => {
-    try {
-        const savedToken = localStorage.getItem('vcr_gh_token');
-        const savedPref = localStorage.getItem('vcr_remember_pref');
-
-        if (savedToken) {
-            setToken(savedToken);
-            setRememberToken(true);
-        } else if (savedPref !== null) {
-            setRememberToken(savedPref === 'true');
-        }
-
-        const savedHistory = localStorage.getItem('vcr_history');
-        if (savedHistory) {
-            setHistory(JSON.parse(savedHistory));
-        }
-    } catch (e) {
-        console.error("LocalStorage access failed", e);
-    }
-  }, []);
+  // We no longer need the useEffect for initial loading of token/history 
+  // since we use lazy initialization in useState above.
 
   useEffect(() => {
     const checkCache = async () => {
@@ -210,12 +210,18 @@ export const WelcomeScreen: React.FC = () => {
     setIsLoading(true);
     setError(null);
 
+    // Save token settings
     try {
         localStorage.setItem('vcr_remember_pref', String(rememberToken));
         if (rememberToken && token.trim()) {
             localStorage.setItem('vcr_gh_token', token.trim());
         } else {
-            localStorage.removeItem('vcr_gh_token');
+            // Only remove if specifically checking valid token logic, but 
+            // generally if user unchecks remember, we should probably clear it.
+            // But if they just re-load without changing, keep it.
+            if (!rememberToken) {
+                 localStorage.removeItem('vcr_gh_token');
+            }
         }
     } catch (e) {
         console.warn("Failed to persist token settings", e);
@@ -245,6 +251,7 @@ export const WelcomeScreen: React.FC = () => {
 
   const loadSample = () => {
     setPRData(SAMPLE_PR);
+    loadWalkthrough(SAMPLE_WALKTHROUGH);
   };
 
   return (

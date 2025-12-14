@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { PRData, FileChange, ViewportState, Walkthrough } from '../types';
+import { PRData, FileChange, ViewportState, Walkthrough, SelectionState } from '../types';
 // SAMPLE_PR is no longer default but available for manual load
 
 interface PRContextType {
@@ -9,6 +9,8 @@ interface PRContextType {
   selectFile: (file: FileChange) => void;
   viewportState: ViewportState;
   updateViewport: (state: Partial<ViewportState>) => void;
+  selectionState: SelectionState | null;
+  setSelectionState: (state: SelectionState | null) => void;
   walkthrough: Walkthrough | null;
   loadWalkthrough: (data: Walkthrough) => void;
   activeSectionId: string | null;
@@ -32,6 +34,8 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     endLine: 0
   });
 
+  const [selectionState, setSelectionState] = useState<SelectionState | null>(null);
+
   // Select first file on load or when prData changes
   useEffect(() => {
     if (prData && prData.files.length > 0) {
@@ -50,8 +54,9 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
   const selectFile = (file: FileChange) => {
     setSelectedFile(file);
-    // Reset viewport when file changes
+    // Reset viewport and selection when file changes
     setViewportState({ file: file.path, startLine: 0, endLine: 0 });
+    setSelectionState(null);
   };
 
   const loadWalkthrough = (data: Walkthrough) => {
@@ -71,6 +76,8 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       selectFile,
       viewportState,
       updateViewport,
+      selectionState,
+      setSelectionState,
       walkthrough,
       loadWalkthrough,
       activeSectionId,

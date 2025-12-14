@@ -46,6 +46,13 @@ export interface ViewportState {
   endLine: number;
 }
 
+export interface SelectionState {
+  file: string;
+  startLine: number;
+  endLine: number;
+  content: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'system' | 'assistant';
