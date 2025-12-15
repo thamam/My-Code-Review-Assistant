@@ -4,6 +4,7 @@ import { getFileColor, getStatusColorClass } from '../../utils/colorUtils';
 import { ChevronRight, ChevronDown, File, Folder, FileJson, FileCode, FileText } from 'lucide-react';
 import clsx from 'clsx';
 import { usePR } from '../../contexts/PRContext';
+import { arePathsEquivalent } from '../../utils/fileUtils';
 
 interface FileNodeProps {
   node: FileTreeNode;
@@ -25,7 +26,9 @@ export const FileNode: React.FC<FileNodeProps> = ({ node, depth = 0 }) => {
   const isSelected = !isDirectory && selectedFile?.path === node.data?.path;
   
   // Walkthrough highlight logic
-  const isHighlightedInActiveSection = activeSectionId && walkthrough?.sections.find(s => s.id === activeSectionId)?.files.includes(node.data?.path || '');
+  const isHighlightedInActiveSection = activeSectionId && walkthrough?.sections.find(s => s.id === activeSectionId)?.files.some(f => 
+      node.data && arePathsEquivalent(f, node.data.path)
+  );
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();

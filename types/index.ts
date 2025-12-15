@@ -80,3 +80,15 @@ export interface PRHistoryItem {
   timestamp: number;
   author: string;
 }
+
+export type AnnotationType = 'marker' | 'label';
+
+export interface Annotation {
+  id: string;
+  file: string;
+  line: number;
+  type: AnnotationType;
+  title?: string; // e.g. "marker_1" or "Needs Refactor"
+  description?: string; // For labels
+  timestamp: number;
+}

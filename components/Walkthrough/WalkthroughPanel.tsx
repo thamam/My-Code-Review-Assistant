@@ -2,6 +2,7 @@ import React from 'react';
 import { usePR } from '../../contexts/PRContext';
 import { Map, MapPin } from 'lucide-react';
 import clsx from 'clsx';
+import { arePathsEquivalent } from '../../utils/fileUtils';
 
 export const WalkthroughPanel: React.FC = () => {
   const { walkthrough, activeSectionId, setActiveSectionId, selectFile, prData } = usePR();
@@ -12,8 +13,10 @@ export const WalkthroughPanel: React.FC = () => {
     setActiveSectionId(sectionId);
     const section = walkthrough.sections.find(s => s.id === sectionId);
     if (section && section.files.length > 0 && prData) {
-        // Find the full file object to select it
-        const fileToSelect = prData.files.find(f => f.path === section.files[0]);
+        // Find the full file object to select it using fuzzy matching
+        const fileToSelect = prData.files.find(f => 
+            arePathsEquivalent(f.path, section.files[0])
+        );
         if (fileToSelect) {
             selectFile(fileToSelect);
         }

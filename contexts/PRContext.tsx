@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { PRData, FileChange, ViewportState, Walkthrough, SelectionState } from '../types';
-// SAMPLE_PR is no longer default but available for manual load
+import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation } from '../types';
 
 interface PRContextType {
   prData: PRData | null;
@@ -17,6 +16,12 @@ interface PRContextType {
   setActiveSectionId: (id: string | null) => void;
   isDiffMode: boolean;
   toggleDiffMode: () => void;
+  
+  // Annotations
+  annotations: Annotation[];
+  addAnnotation: (file: string, line: number, type: 'marker' | 'label', text?: string) => void;
+  removeAnnotation: (id: string) => void;
+  updateAnnotation: (id: string, updates: Partial<Annotation>) => void;
 }
 
 const PRContext = createContext<PRContextType | undefined>(undefined);
@@ -35,11 +40,11 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   });
 
   const [selectionState, setSelectionState] = useState<SelectionState | null>(null);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
 
   // Select first file on load or when prData changes
   useEffect(() => {
     if (prData && prData.files.length > 0) {
-      // If no file is selected, or the selected file is not in the new PR, select the first one
       if (!selectedFile || !prData.files.find(f => f.path === selectedFile.path)) {
         setSelectedFile(prData.files[0]);
       }
@@ -54,19 +59,41 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
   const selectFile = (file: FileChange) => {
     setSelectedFile(file);
-    // Reset viewport and selection when file changes
     setViewportState({ file: file.path, startLine: 0, endLine: 0 });
     setSelectionState(null);
   };
 
   const loadWalkthrough = (data: Walkthrough) => {
     setWalkthrough(data);
-    if (data.sections.length > 0) {
-        // Optional: Auto-select first section?
-    }
   };
 
   const toggleDiffMode = () => setIsDiffMode(prev => !prev);
+
+  // Annotation Methods
+  const addAnnotation = (file: string, line: number, type: 'marker' | 'label', text?: string) => {
+      const id = `${type}_${Date.now()}`;
+      // Auto-name markers if no text provided
+      const defaultTitle = type === 'marker' ? `marker_${annotations.filter(a => a.type === 'marker').length + 1}` : 'New Label';
+      
+      const newAnnotation: Annotation = {
+          id,
+          file,
+          line,
+          type,
+          title: type === 'marker' ? (text || defaultTitle) : (text || defaultTitle),
+          description: type === 'label' ? '' : undefined,
+          timestamp: Date.now()
+      };
+      setAnnotations(prev => [...prev, newAnnotation]);
+  };
+
+  const removeAnnotation = (id: string) => {
+      setAnnotations(prev => prev.filter(a => a.id !== id));
+  };
+
+  const updateAnnotation = (id: string, updates: Partial<Annotation>) => {
+      setAnnotations(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
+  };
 
   return (
     <PRContext.Provider value={{
@@ -83,7 +110,11 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       activeSectionId,
       setActiveSectionId,
       isDiffMode,
-      toggleDiffMode
+      toggleDiffMode,
+      annotations,
+      addAnnotation,
+      removeAnnotation,
+      updateAnnotation
     }}>
       {children}
     </PRContext.Provider>

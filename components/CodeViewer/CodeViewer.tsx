@@ -1,7 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import { usePR } from '../../contexts/PRContext';
 import { DiffView } from './DiffView';
+import { SourceView } from './SourceView';
 import { FileCode2 } from 'lucide-react';
+import { arePathsEquivalent } from '../../utils/fileUtils';
 
 export const CodeViewer: React.FC = () => {
   const { selectedFile, updateViewport, isDiffMode, activeSectionId, walkthrough } = usePR();
@@ -11,21 +13,17 @@ export const CodeViewer: React.FC = () => {
     updateViewport({ file, startLine: start, endLine: end });
   };
 
-  // Auto-scroll to walkthrough highlights
   useEffect(() => {
     if (!selectedFile || !activeSectionId || !walkthrough) return;
 
     const section = walkthrough.sections.find(s => s.id === activeSectionId);
     if (!section) return;
 
-    // Find the highlight for the current file in this section
-    const highlight = section.highlights?.find(h => h.file === selectedFile.path);
+    const highlight = section.highlights?.find(h => arePathsEquivalent(h.file, selectedFile.path));
     
     if (highlight) {
         const lineToScroll = highlight.lines[0];
-        // Short timeout to allow DiffView to render if file just changed
         const timer = setTimeout(() => {
-            // Find the LineMarker element by its data attribute
             const marker = document.querySelector(`[data-line-id="${selectedFile.path}:${lineToScroll}"]`);
             if (marker) {
                 marker.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -44,6 +42,12 @@ export const CodeViewer: React.FC = () => {
     );
   }
 
+  // Determine if we should show SourceView
+  // If file is 'unchanged', or if we are not in Diff Mode (Show Raw)
+  // However, DiffView handles "Show Raw" by passing undefined oldContent usually.
+  // But user specifically asked for "full content of unchanged files... instead of a diff view".
+  const useSourceView = selectedFile.status === 'unchanged';
+
   return (
     <div className="h-full flex flex-col bg-gray-950 overflow-hidden">
       <div className="flex items-center justify-between p-3 border-b border-gray-800 bg-gray-900">
@@ -59,13 +63,21 @@ export const CodeViewer: React.FC = () => {
         ref={containerRef}
         className="flex-1 overflow-auto custom-scrollbar relative scroll-smooth"
       >
-        <DiffView 
-          key={selectedFile.path} // Force re-render on file switch
-          oldContent={isDiffMode ? selectedFile.oldContent : undefined} 
-          newContent={selectedFile.newContent}
-          filePath={selectedFile.path}
-          onViewportChange={handleViewportChange}
-        />
+        {useSourceView ? (
+            <SourceView 
+                key={selectedFile.path}
+                content={selectedFile.newContent}
+                filePath={selectedFile.path}
+            />
+        ) : (
+            <DiffView 
+                key={selectedFile.path}
+                oldContent={isDiffMode ? selectedFile.oldContent : undefined} 
+                newContent={selectedFile.newContent}
+                filePath={selectedFile.path}
+                onViewportChange={handleViewportChange}
+            />
+        )}
       </div>
     </div>
   );

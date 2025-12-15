@@ -5,22 +5,47 @@ import { GitHubService } from '../services/github';
 import { SAMPLE_PR, SAMPLE_WALKTHROUGH } from '../mock/samplePR';
 import { PRData, Walkthrough, PRHistoryItem, WalkthroughSection } from '../types';
 import { formatDistanceToNow } from 'date-fns';
+import { USER_CONFIG } from '../userConfig';
 
 export const WelcomeScreen: React.FC = () => {
   const { setPRData, loadWalkthrough } = usePR();
   
-  // Initialize state lazily from localStorage to prevent loss on refresh/code updates
-  const [url, setUrl] = useState('');
+  // --- Robust Initialization ---
   
-  const [token, setToken] = useState(() => {
-    try { return localStorage.getItem('vcr_gh_token') || ''; } catch { return ''; }
+  // Priority: 
+  // 1. URL Query Param (?pr=...)
+  // 2. Local Storage
+  // 3. User Config (Hardcoded file)
+  const [url, setUrl] = useState(() => {
+    try { 
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('pr')) return params.get('pr') || '';
+        
+        const local = localStorage.getItem('vcr_last_url');
+        if (local) return local;
+
+        return USER_CONFIG.DEFAULT_PR_URL || '';
+    } catch { return ''; }
   });
   
   const [rememberToken, setRememberToken] = useState(() => {
     try { 
         const saved = localStorage.getItem('vcr_remember_pref');
-        return saved !== null ? saved === 'true' : true; 
+        return saved !== 'false'; 
     } catch { return true; }
+  });
+
+  // Priority:
+  // 1. Local Storage
+  // 2. Session Storage
+  // 3. User Config (Hardcoded file)
+  const [token, setToken] = useState(() => {
+    try { 
+        // Always check config first if provided, as it implies explicit intent in dev
+        if (USER_CONFIG.GITHUB_TOKEN) return USER_CONFIG.GITHUB_TOKEN;
+
+        return localStorage.getItem('vcr_gh_token') || sessionStorage.getItem('vcr_gh_token') || ''; 
+    } catch { return ''; }
   });
 
   const [history, setHistory] = useState<PRHistoryItem[]>(() => {
@@ -37,8 +62,44 @@ export const WelcomeScreen: React.FC = () => {
   const [walkthroughFile, setWalkthroughFile] = useState<Walkthrough | null>(null);
   const [walkthroughFileName, setWalkthroughFileName] = useState<string>('');
 
-  // We no longer need the useEffect for initial loading of token/history 
-  // since we use lazy initialization in useState above.
+
+  // --- Direct Change Handlers ---
+
+  const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const newValue = e.target.value;
+      setUrl(newValue);
+      setError(null);
+      try { localStorage.setItem('vcr_last_url', newValue); } catch {}
+  };
+
+  const handleTokenChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const newValue = e.target.value;
+      setToken(newValue);
+      setError(null);
+      
+      try {
+          if (rememberToken) {
+              localStorage.setItem('vcr_gh_token', newValue);
+          } else {
+              sessionStorage.setItem('vcr_gh_token', newValue);
+          }
+      } catch {}
+  };
+
+  const toggleRemember = () => {
+      const newState = !rememberToken;
+      setRememberToken(newState);
+      try {
+          localStorage.setItem('vcr_remember_pref', String(newState));
+          if (newState) {
+              localStorage.setItem('vcr_gh_token', token);
+              sessionStorage.removeItem('vcr_gh_token');
+          } else {
+              localStorage.removeItem('vcr_gh_token');
+              if (token) sessionStorage.setItem('vcr_gh_token', token);
+          }
+      } catch {}
+  };
 
   useEffect(() => {
     const checkCache = async () => {
@@ -89,18 +150,17 @@ export const WelcomeScreen: React.FC = () => {
       }
   };
 
+  // ... [Keep existing walkthrough parsing logic] ...
   const parseMarkdownWalkthrough = (text: string): Walkthrough => {
     const lines = text.split('\n');
     let title = "Walkthrough";
     let author = "Anonymous";
     const sections: WalkthroughSection[] = [];
-    
     let currentSection: any = null;
 
     for (let line of lines) {
         line = line.trim();
         if (!line) continue;
-
         if (line.startsWith('# ')) {
             title = line.substring(2).trim();
         } else if (line.toLowerCase().startsWith('author:')) {
@@ -110,67 +170,45 @@ export const WelcomeScreen: React.FC = () => {
             currentSection = {
                 id: `sec-${sections.length + 1}`,
                 title: line.substring(3).trim(),
-                files: [],
-                description: '',
-                highlights: []
+                files: [], description: '', highlights: []
             };
         } else if (currentSection) {
             if (line.toLowerCase().startsWith('files:')) {
-                const filesStr = line.substring(6);
-                currentSection.files = filesStr.split(',').map((f: string) => f.trim());
+                currentSection.files = line.substring(6).split(',').map((f: string) => f.trim());
             } else if (line.startsWith('- ') && line.includes(':')) {
-                // Expect format: - path/file: start-end: note
+                // Simplified parsing logic for brevity in this update, same as before
                 const firstColon = line.indexOf(':');
                 if (firstColon > -1) {
                     const file = line.substring(2, firstColon).trim();
                     const rest = line.substring(firstColon + 1).trim();
                     const secondColon = rest.indexOf(':');
-                    
                     if (secondColon > -1) {
                         const range = rest.substring(0, secondColon).trim();
                         const note = rest.substring(secondColon + 1).trim();
-                        
                         let start = 0, end = 0;
                         if (range.includes('-')) {
                              const parts = range.split('-');
                              start = parseInt(parts[0]);
                              end = parseInt(parts[1]);
-                        } else {
-                             start = parseInt(range);
-                             end = start;
-                        }
-
+                        } else { start = parseInt(range); end = start; }
                         if (!isNaN(start)) {
                             currentSection.highlights.push({ file, lines: [start, end], note });
-                            if (!currentSection.files.includes(file)) {
-                                currentSection.files.push(file);
-                            }
-                        } else {
-                            currentSection.description += line + '\n';
-                        }
-                    } else {
-                        currentSection.description += line + '\n';
-                    }
-                } else {
-                    currentSection.description += line + '\n';
-                }
-            } else {
-                currentSection.description += line + '\n';
-            }
+                            if (!currentSection.files.includes(file)) currentSection.files.push(file);
+                        } else currentSection.description += line + '\n';
+                    } else currentSection.description += line + '\n';
+                } else currentSection.description += line + '\n';
+            } else currentSection.description += line + '\n';
         }
     }
     if (currentSection) sections.push(currentSection);
-
     return { title, author, sections };
   };
 
   const handleWalkthroughUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-
       setWalkthroughFileName(file.name);
       const reader = new FileReader();
-      
       reader.onload = (event) => {
           const content = event.target?.result as string;
           try {
@@ -179,17 +217,14 @@ export const WelcomeScreen: React.FC = () => {
                   setWalkthroughFile(json as Walkthrough);
                   setError(null);
               } else {
-                  // Assume Markdown
                   const parsed = parseMarkdownWalkthrough(content);
-                  if (parsed.sections.length === 0) {
-                      throw new Error("No sections found in Markdown.");
-                  }
+                  if (parsed.sections.length === 0) throw new Error("No sections found in Markdown.");
                   setWalkthroughFile(parsed);
                   setError(null);
               }
           } catch (err) {
               console.error(err);
-              setError("Invalid file format. Please use JSON or valid Markdown.");
+              setError("Invalid file format.");
               setWalkthroughFile(null);
           }
       };
@@ -201,6 +236,15 @@ export const WelcomeScreen: React.FC = () => {
       if (walkthroughFile) {
           loadWalkthrough(walkthroughFile);
       }
+      
+      try {
+        // Update URL to include PR param for sharing/persistence
+        const newUrl = new URL(window.location.href);
+        newUrl.searchParams.set('pr', url);
+        window.history.replaceState({}, '', newUrl.toString());
+      } catch (e) {
+        console.warn("Could not update URL history", e);
+      }
   };
 
   const handleLoad = async (e: React.FormEvent | null, forceRefresh: boolean = false) => {
@@ -209,23 +253,6 @@ export const WelcomeScreen: React.FC = () => {
 
     setIsLoading(true);
     setError(null);
-
-    // Save token settings
-    try {
-        localStorage.setItem('vcr_remember_pref', String(rememberToken));
-        if (rememberToken && token.trim()) {
-            localStorage.setItem('vcr_gh_token', token.trim());
-        } else {
-            // Only remove if specifically checking valid token logic, but 
-            // generally if user unchecks remember, we should probably clear it.
-            // But if they just re-load without changing, keep it.
-            if (!rememberToken) {
-                 localStorage.removeItem('vcr_gh_token');
-            }
-        }
-    } catch (e) {
-        console.warn("Failed to persist token settings", e);
-    }
 
     try {
       if (!forceRefresh && cachedData) {
@@ -243,7 +270,7 @@ export const WelcomeScreen: React.FC = () => {
 
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Failed to load PR. Check the URL and try again.");
+      setError(err.message || "Failed to load PR.");
     } finally {
       setIsLoading(false);
     }
@@ -276,7 +303,7 @@ export const WelcomeScreen: React.FC = () => {
               <input
                 type="text"
                 value={url}
-                onChange={(e) => { setUrl(e.target.value); setError(null); }}
+                onChange={handleUrlChange}
                 placeholder="https://github.com/owner/repo/pull/123"
                 className="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                 disabled={isLoading}
@@ -289,23 +316,23 @@ export const WelcomeScreen: React.FC = () => {
                 <div className="group relative cursor-help">
                   <HelpCircle size={14} className="text-gray-500 hover:text-gray-300" />
                   <div className="absolute right-0 bottom-full mb-2 w-64 p-2 bg-gray-800 border border-gray-700 rounded text-[10px] text-gray-300 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                    Use a <strong>Classic Token</strong> with <code>repo</code> scope for private repos. For public repos, no scope is needed (just increases rate limit).
+                    Set <strong>GITHUB_TOKEN</strong> in <code>userConfig.ts</code> for persistence, or enter here.
                   </div>
                 </div>
               </label>
               <input
                 type="password"
                 value={token}
-                onChange={(e) => { setToken(e.target.value); setError(null); }}
-                placeholder="github_pat_..."
-                className="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                onChange={handleTokenChange}
+                placeholder={USER_CONFIG.GITHUB_TOKEN ? "Loaded from userConfig.ts" : "github_pat_..."}
+                className={ `w-full bg-gray-950 border rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors ${USER_CONFIG.GITHUB_TOKEN ? 'border-green-900 text-green-400' : 'border-gray-700'}` }
                 disabled={isLoading}
               />
               
               <div className="flex items-center mt-3 gap-2">
                 <button
                     type="button"
-                    onClick={() => setRememberToken(!rememberToken)}
+                    onClick={toggleRemember}
                     className="flex items-center gap-2 text-gray-400 hover:text-gray-300 transition-colors group"
                 >
                     {rememberToken ? (
@@ -318,6 +345,7 @@ export const WelcomeScreen: React.FC = () => {
               </div>
             </div>
 
+             {/* Walkthrough Input */}
              <div>
                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
                     Walkthrough File (Optional)
@@ -336,17 +364,9 @@ export const WelcomeScreen: React.FC = () => {
                         <span className={`text-sm truncate ${walkthroughFileName ? "text-purple-200" : "text-gray-400 group-hover:text-gray-300"}`}>
                             {walkthroughFileName || "Select Markdown / JSON"}
                         </span>
-                        <input 
-                            type="file" 
-                            accept=".json, .md, .txt" 
-                            className="hidden" 
-                            onChange={handleWalkthroughUpload}
-                        />
+                        <input type="file" accept=".json, .md, .txt" className="hidden" onChange={handleWalkthroughUpload} />
                     </label>
                  </div>
-                 <p className="text-[10px] text-gray-600 mt-1 ml-1">
-                     Loads specific walkthrough context. Supports <code>.md</code> or <code>.json</code>.
-                 </p>
             </div>
 
             {error && (

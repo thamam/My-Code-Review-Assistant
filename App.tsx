@@ -7,7 +7,8 @@ import { CodeViewer } from './components/CodeViewer/CodeViewer';
 import { ChatPanel } from './components/ChatPanel/ChatPanel';
 import { WalkthroughPanel } from './components/Walkthrough/WalkthroughPanel';
 import { WelcomeScreen } from './components/WelcomeScreen';
-import { GitPullRequest, Layout, MessageSquare, ArrowLeft, GripVertical, Mic, MicOff, Radio, Loader2, StopCircle } from 'lucide-react';
+import { AnnotationList } from './components/Annotations/AnnotationList';
+import { GitPullRequest, Layout, MessageSquare, ArrowLeft, Mic, Loader2, BookMarked, FolderTree } from 'lucide-react';
 import clsx from 'clsx';
 
 const VoiceControls = () => {
@@ -41,7 +42,6 @@ const VoiceControls = () => {
                     <>
                         <div className="relative">
                             <Mic size={16} className="text-red-400 relative z-10" />
-                            {/* Glow Ring */}
                             <div 
                                 className="absolute inset-0 rounded-full bg-red-500 opacity-50 z-0 transition-transform duration-75"
                                 style={{ transform: `scale(${1 + volume * 1.5})` }}
@@ -69,31 +69,48 @@ const MainLayout = () => {
   const [showChat, setShowChat] = useState(true);
   const [showTree, setShowTree] = useState(true);
   
-  // Resizable Chat Panel State
+  // Left Sidebar Tab State
+  const [leftTab, setLeftTab] = useState<'files' | 'annotations'>('files');
+  
+  // Resizable Panel States
   const [chatWidth, setChatWidth] = useState(350);
-  const [isResizing, setIsResizing] = useState(false);
+  const [fileTreeWidth, setFileTreeWidth] = useState(260);
+  
+  const [isResizingChat, setIsResizingChat] = useState(false);
+  const [isResizingTree, setIsResizingTree] = useState(false);
 
-  const startResizing = useCallback((e: React.MouseEvent) => {
+  const startResizingChat = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    setIsResizing(true);
+    setIsResizingChat(true);
+  }, []);
+
+  const startResizingTree = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingTree(true);
   }, []);
 
   const stopResizing = useCallback(() => {
-    setIsResizing(false);
+    setIsResizingChat(false);
+    setIsResizingTree(false);
   }, []);
 
   const resize = useCallback((e: MouseEvent) => {
-    if (isResizing) {
+    if (isResizingChat) {
         const newWidth = document.body.clientWidth - e.clientX;
-        // Limit width between 250px and 50% of screen
         if (newWidth > 250 && newWidth < document.body.clientWidth * 0.6) {
             setChatWidth(newWidth);
         }
     }
-  }, [isResizing]);
+    if (isResizingTree) {
+        const newWidth = e.clientX;
+        if (newWidth > 150 && newWidth < document.body.clientWidth * 0.4) {
+            setFileTreeWidth(newWidth);
+        }
+    }
+  }, [isResizingChat, isResizingTree]);
 
   useEffect(() => {
-    if (isResizing) {
+    if (isResizingChat || isResizingTree) {
         window.addEventListener('mousemove', resize);
         window.addEventListener('mouseup', stopResizing);
     }
@@ -101,7 +118,7 @@ const MainLayout = () => {
         window.removeEventListener('mousemove', resize);
         window.removeEventListener('mouseup', stopResizing);
     };
-  }, [isResizing, resize, stopResizing]);
+  }, [isResizingChat, isResizingTree, resize, stopResizing]);
 
 
   if (!prData) {
@@ -109,12 +126,11 @@ const MainLayout = () => {
   }
 
   return (
-    <div className={clsx("flex flex-col h-screen bg-gray-950 text-white font-sans", isResizing && "cursor-col-resize select-none")}>
-      {/* Header */}
+    <div className={clsx("flex flex-col h-screen bg-gray-950 text-white font-sans", (isResizingChat || isResizingTree) && "cursor-col-resize select-none")}>
       <header className="h-14 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-4 shrink-0">
         <div className="flex items-center gap-3">
           <button 
-             onClick={() => setPRData(null as any)} // Cast to any to allow nulling out to go back
+             onClick={() => setPRData(null as any)}
              className="text-gray-500 hover:text-white transition-colors"
              title="Back to Welcome Screen"
           >
@@ -133,7 +149,6 @@ const MainLayout = () => {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
-           {/* Voice Controls */}
            <VoiceControls />
            
            <div className="h-6 w-px bg-gray-700 mx-1" />
@@ -155,22 +170,43 @@ const MainLayout = () => {
         </div>
       </header>
 
-      {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar: File Tree */}
+        {/* Sidebar: File Tree / Annotations */}
         {showTree && (
-            <div className="w-[260px] flex-shrink-0 transition-all duration-300">
-              <FileTree />
+            <div className="flex shrink-0 h-full relative flex-col" style={{ width: fileTreeWidth }}>
+                <div className="flex border-b border-gray-800 bg-gray-900">
+                    <button 
+                        onClick={() => setLeftTab('files')}
+                        className={clsx("flex-1 py-2 text-xs font-medium flex items-center justify-center gap-2", leftTab === 'files' ? "text-blue-400 border-b-2 border-blue-400" : "text-gray-500 hover:text-gray-300")}
+                    >
+                        <FolderTree size={14} /> Files
+                    </button>
+                    <button 
+                        onClick={() => setLeftTab('annotations')}
+                        className={clsx("flex-1 py-2 text-xs font-medium flex items-center justify-center gap-2", leftTab === 'annotations' ? "text-blue-400 border-b-2 border-blue-400" : "text-gray-500 hover:text-gray-300")}
+                    >
+                        <BookMarked size={14} /> Annotations
+                    </button>
+                </div>
+                
+                <div className="w-full flex-1 overflow-hidden">
+                    {leftTab === 'files' ? <FileTree /> : <AnnotationList />}
+                </div>
+
+                <div 
+                    onMouseDown={startResizingTree}
+                    className="absolute right-0 top-0 bottom-0 w-1 bg-gray-800 hover:bg-blue-500 cursor-col-resize z-30 transition-colors flex items-center justify-center group"
+                >
+                     <div className="h-8 w-1 bg-gray-600 rounded-full opacity-0 group-hover:opacity-100" />
+                </div>
             </div>
         )}
 
-        {/* Center: Walkthrough Panel (Top) + Code Viewer */}
+        {/* Center */}
         <div className="flex-1 flex flex-col min-w-0 bg-gray-950 border-r border-gray-800">
             {walkthrough && <WalkthroughPanel />}
             <div className="flex-1 overflow-hidden relative">
                 <CodeViewer />
-                
-                {/* Floating Status Bar */}
                 <div className="absolute bottom-4 right-8 bg-gray-900/90 border border-gray-700 rounded-full px-4 py-1.5 text-xs text-gray-400 shadow-xl backdrop-blur-sm pointer-events-none transition-opacity duration-500 z-20">
                     {viewportState.file ? (
                         <span>
@@ -184,12 +220,11 @@ const MainLayout = () => {
             </div>
         </div>
 
-        {/* Sidebar: Chat */}
+        {/* Chat */}
         {showChat && (
              <div className="flex shrink-0 h-full relative" style={{ width: chatWidth }}>
-                {/* Resize Handle */}
                 <div 
-                    onMouseDown={startResizing}
+                    onMouseDown={startResizingChat}
                     className="absolute left-0 top-0 bottom-0 w-1 bg-gray-800 hover:bg-blue-500 cursor-col-resize z-30 transition-colors flex items-center justify-center group"
                 >
                      <div className="h-8 w-1 bg-gray-600 rounded-full opacity-0 group-hover:opacity-100" />

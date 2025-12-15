@@ -29,7 +29,7 @@ export const ChatPanel: React.FC = () => {
     : "Summarize this PR";
 
   return (
-    <div className="h-full flex flex-col bg-gray-900 border-l border-gray-800 w-[350px]">
+    <div className="h-full flex flex-col bg-gray-900 border-l border-gray-800 w-full">
       <div className="p-3 border-b border-gray-800 flex items-center gap-2">
         <Sparkles size={16} className="text-purple-400" />
         <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Review Assistant</h2>
