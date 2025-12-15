@@ -16,7 +16,7 @@ import { Walkthrough, WalkthroughSection } from './types';
 
 const VoiceControls = () => {
     const { isActive, isConnecting, connect, disconnect, error, volume, sendText } = useLive();
-    const { clearMessages } = useChat();
+    const { resetChat } = useChat();
     const [confirmReset, setConfirmReset] = useState(false);
 
     useEffect(() => {
@@ -32,7 +32,7 @@ const VoiceControls = () => {
             return;
         }
         disconnect();
-        clearMessages();
+        resetChat();
         setConfirmReset(false);
     };
     
@@ -43,12 +43,15 @@ const VoiceControls = () => {
             <button
                 onClick={handleReset}
                 className={clsx(
-                    "p-1.5 rounded transition-colors border",
-                    confirmReset ? "bg-red-900 border-red-500 text-white" : "bg-gray-800 border-gray-700 text-gray-400 hover:text-white"
+                    "flex items-center gap-1 px-2 py-1.5 rounded transition-all border",
+                    confirmReset 
+                        ? "bg-red-900 border-red-500 text-white animate-pulse" 
+                        : "bg-gray-800 border-gray-700 text-gray-400 hover:text-white"
                 )}
-                title={confirmReset ? "Confirm Reset Chat" : "Reset Chat History"}
+                title={confirmReset ? "Click again to confirm reset" : "Reset Chat History"}
             >
                 <RotateCcw size={14} />
+                {confirmReset && <span className="text-[10px] font-bold">Confirm</span>}
             </button>
 
             {isActive && (

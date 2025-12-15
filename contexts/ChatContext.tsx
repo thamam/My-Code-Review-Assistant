@@ -8,7 +8,7 @@ interface ChatContextType {
   sendMessage: (text: string) => Promise<void>;
   addLocalMessage: (message: ChatMessage) => void;
   upsertMessage: (message: ChatMessage) => void;
-  clearMessages: () => void;
+  resetChat: () => void;
   isTyping: boolean;
   currentModel: string;
   setModel: (model: string) => void;
@@ -21,16 +21,30 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [currentModel, setModel] = useState('gemini-2.5-flash');
+  const [sessionId, setSessionId] = useState(0);
   
   // Ref to hold the active chat session
   const chatSessionRef = useRef<Chat | null>(null);
 
-  const clearMessages = () => {
-      setMessages([]);
+  const resetChat = () => {
+      if (!prData) return;
       chatSessionRef.current = null;
+      // Increment sessionId to trigger effect for backend session recreation
+      setSessionId(prev => prev + 1);
+      
+      // Immediately reset UI messages to Welcome state
+      // This avoids race conditions with useEffect relying on empty state
+      setMessages([
+          {
+              id: 'welcome',
+              role: 'system',
+              content: `Welcome! I've analyzed the ${prData.files.length} changed files${linearIssue ? ` and the linked issue ${linearIssue.identifier}` : ''}. Ask me anything about the code!`,
+              timestamp: Date.now()
+          }
+      ]);
   };
 
-  // Initialize or Re-initialize Chat Session when PR Data, Walkthrough, Linear Issue OR Model changes
+  // Initialize or Re-initialize Chat Session when PR Data, Walkthrough, Linear Issue, Model, or Session ID changes
   useEffect(() => {
     if (!prData) return;
 
@@ -74,8 +88,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         },
       });
 
-      // If messages are empty (fresh start), add welcome
-      // We check if it's a fresh load (no messages) or a model switch (messages exist)
+      // Only add welcome if messages are completely empty (Initial Load)
+      // resetChat handles its own welcome message setting to be synchronous with click
       if (messages.length === 0) {
         setMessages([
             {
@@ -98,7 +112,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       ]);
     }
-  }, [prData, walkthrough, linearIssue, currentModel]);
+  }, [prData, walkthrough, linearIssue, currentModel, sessionId]);
 
   const addLocalMessage = (message: ChatMessage) => {
       setMessages(prev => [...prev, message]);
@@ -210,7 +224,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   return (
-    <ChatContext.Provider value={{ messages, sendMessage, addLocalMessage, upsertMessage, isTyping, clearMessages, currentModel, setModel }}>
+    <ChatContext.Provider value={{ messages, sendMessage, addLocalMessage, upsertMessage, isTyping, resetChat, currentModel, setModel }}>
       {children}
     </ChatContext.Provider>
   );

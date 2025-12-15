@@ -56,25 +56,31 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const outputTranscriptRef = useRef<string>('');
   const currentTurnInputIdRef = useRef<string | null>(null);
   const currentTurnOutputIdRef = useRef<string | null>(null);
+  
+  // Debounce refs
+  const selectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const fileTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // --- Helper to Send Text (Method Discovery) ---
   const sendTextToSession = async (text: string) => {
       if (!activeSessionRef.current) return;
-      const session = await activeSessionRef.current;
       
-      console.log("[Live] Attempting to send text:", text);
-
-      const fullPayload = {
-        clientContent: {
-            turns: [{
-                role: 'user',
-                parts: [{ text: text }]
-            }],
-            turnComplete: true 
-        }
-      };
-
       try {
+          const session = await activeSessionRef.current;
+          
+          console.log("[Live] Attempting to send text update");
+
+          const fullPayload = {
+            clientContent: {
+                turns: [{
+                    role: 'user',
+                    parts: [{ text: text }]
+                }],
+                turnComplete: true 
+            }
+          };
+
+          // Safe send with checks
           if (typeof session.send === 'function') {
               session.send(fullPayload);
               return;
@@ -85,38 +91,52 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                return;
           }
       } catch (e) {
-          console.error("[Live] Failed to send text:", e);
+          console.error("[Live] Failed to send text (session might be closed):", e);
       }
   };
 
-  // 1. Monitor Selection Changes
+  // 1. Monitor Selection Changes (Debounced)
   useEffect(() => {
     if (!isActive || !selectionState) return;
-    const update = `[SYSTEM CONTEXT UPDATE]: User highlighted code in ${selectionState.file}, lines ${selectionState.startLine}-${selectionState.endLine}. Content: \n${selectionState.content}`;
-    sendTextToSession(update);
+
+    if (selectionTimeoutRef.current) clearTimeout(selectionTimeoutRef.current);
+    
+    selectionTimeoutRef.current = setTimeout(() => {
+        const update = `[SYSTEM CONTEXT UPDATE]: User highlighted code in ${selectionState.file}, lines ${selectionState.startLine}-${selectionState.endLine}. Content: \n${selectionState.content}`;
+        sendTextToSession(update);
+    }, 1000); // 1 second debounce
+
+    return () => { if (selectionTimeoutRef.current) clearTimeout(selectionTimeoutRef.current); };
   }, [selectionState, isActive]);
 
-  // 2. Monitor File Navigation Changes
+  // 2. Monitor File Navigation Changes (Debounced)
   useEffect(() => {
       if (!isActive || !selectedFile) return;
       
-      const content = selectedFile.newContent || selectedFile.oldContent || "";
-      // Injecting content is crucial to prevent the model from guessing/hallucinating file contents.
-      // 50k characters is roughly 1000 lines of code, covering most files entirely.
-      const contentSnippet = content.slice(0, 50000); 
-      
-      let update = `[SYSTEM CONTEXT UPDATE]: User navigated to file: ${selectedFile.path}. File Status: ${selectedFile.status}.\n`;
-      
-      if (contentSnippet) {
-          update += `\nFILE CONTENT PREVIEW (Truncated to 50k chars):\n\`\`\`\n${contentSnippet}\n\`\`\`\n`;
-      } else {
-          update += `\n(File content is empty or could not be loaded)\n`;
-      }
+      if (fileTimeoutRef.current) clearTimeout(fileTimeoutRef.current);
 
-      sendTextToSession(update);
+      fileTimeoutRef.current = setTimeout(() => {
+          const content = selectedFile.newContent || selectedFile.oldContent || "";
+          // Injecting content is crucial to prevent the model from guessing/hallucinating file contents.
+          // 50k characters is roughly 1000 lines of code, covering most files entirely.
+          const contentSnippet = content.slice(0, 50000); 
+          
+          let update = `[SYSTEM CONTEXT UPDATE]: User navigated to file: ${selectedFile.path}. File Status: ${selectedFile.status}.\n`;
+          
+          if (contentSnippet) {
+              update += `\nFILE CONTENT PREVIEW (Truncated to 50k chars):\n\`\`\`\n${contentSnippet}\n\`\`\`\n`;
+          } else {
+              update += `\n(File content is empty or could not be loaded)\n`;
+          }
+
+          sendTextToSession(update);
+      }, 1500); // 1.5 second debounce
+
+      return () => { if (fileTimeoutRef.current) clearTimeout(fileTimeoutRef.current); };
   }, [selectedFile?.path, isActive]);
 
   const disconnect = () => {
+    // 1. Close Audio Contexts
     if (inputContextRef.current) {
         try { inputContextRef.current.close(); } catch(e) {}
         inputContextRef.current = null;
@@ -125,6 +145,8 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         try { outputContextRef.current.close(); } catch(e) {}
         outputContextRef.current = null;
     }
+    
+    // 2. Stop Media Stream
     if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
@@ -133,12 +155,31 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         try { processorRef.current.disconnect(); } catch(e) {}
         processorRef.current = null;
     }
+
+    // 3. Clear Audio Sources
     audioSourcesRef.current.forEach(source => {
         try { source.stop(); } catch (e) {}
     });
     audioSourcesRef.current.clear();
     nextStartTimeRef.current = 0;
-    activeSessionRef.current = null;
+
+    // 4. Close Gemini Session
+    if (activeSessionRef.current) {
+        const currentPromise = activeSessionRef.current;
+        currentPromise.then(session => {
+            try { 
+                console.log("[Live] Closing session");
+                session.close(); 
+            } catch (e) { 
+                console.error("[Live] Error closing session", e); 
+            }
+        }).catch(() => {});
+        activeSessionRef.current = null;
+    }
+    
+    // Clear timeouts
+    if (selectionTimeoutRef.current) clearTimeout(selectionTimeoutRef.current);
+    if (fileTimeoutRef.current) clearTimeout(fileTimeoutRef.current);
 
     setIsActive(false);
     setIsConnecting(false);
@@ -171,7 +212,8 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const inputContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
         inputContextRef.current = inputContext;
         const source = inputContext.createMediaStreamSource(stream);
-        const processor = inputContext.createScriptProcessor(2048, 1, 1);
+        // INCREASED BUFFER SIZE to 4096 to reduce frequency of WebSocket messages
+        const processor = inputContext.createScriptProcessor(4096, 1, 1);
         processorRef.current = processor;
         source.connect(processor);
         processor.connect(inputContext.destination);
@@ -184,29 +226,28 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         
-        let systemInstruction = `You are a conversational voice assistant helping a developer review a Pull Request. `;
-        systemInstruction += `PR: "${prData.title}" by ${prData.author}. `;
+        let systemInstructionText = `You are a conversational voice assistant helping a developer review a Pull Request. `;
+        systemInstructionText += `PR: "${prData.title}" by ${prData.author}. `;
         const filesList = prData.files.map(f => f.path).join(', ');
-        systemInstruction += `Changed Files: ${filesList.slice(0, 500)}. `;
+        systemInstructionText += `Changed Files: ${filesList.slice(0, 500)}. `;
         
         if (linearIssue) {
-            systemInstruction += `\nLINKED ISSUE CONTEXT: ${linearIssue.identifier} - ${linearIssue.title}. `;
-            systemInstruction += `Description: ${linearIssue.description.slice(0, 1000)}. `;
+            systemInstructionText += `\nLINKED ISSUE CONTEXT: ${linearIssue.identifier} - ${linearIssue.title}. `;
+            systemInstructionText += `Description: ${linearIssue.description.slice(0, 1000)}. `;
         }
 
-        if (messages.length > 0) {
-             systemInstruction += `\n\nPREVIOUS CONVERSATION HISTORY (Resume from here):\n`;
-             messages.slice(-10).forEach(m => { 
-                 systemInstruction += `${m.role.toUpperCase()}: ${m.content.slice(0, 300)}\n`;
+        const historyMessages = messages.filter(m => m.id !== 'welcome');
+
+        if (historyMessages.length > 0) {
+             systemInstructionText += `\n\nPREVIOUS CONVERSATION HISTORY (Resume from here):\n`;
+             historyMessages.slice(-10).forEach(m => { 
+                 systemInstructionText += `${m.role.toUpperCase()}: ${m.content.slice(0, 300)}\n`;
              });
-             systemInstruction += `\nNOTE: You are resuming a session. Do NOT introduce yourself again. Just say "I'm ready" or "Listening".`;
-        } else {
-             systemInstruction += `\nIMPORTANT: When the session starts, IMMEDIATELY say "Hi, I'm your code review assistant." DO NOT WAIT for user input.`;
-        }
+             systemInstructionText += `\nNOTE: You are resuming a session. Do NOT introduce yourself again. Just say "I'm ready" or "Listening".`;
+        } 
 
-        systemInstruction += `If they ask "what is this", refer to the most recent highlighted code context. `;
+        systemInstructionText += `If they ask "what is this", refer to the most recent highlighted code context. `;
         
-        // Use simpler string format for systemInstruction to avoid strict type validation issues causing Network Error
         const sessionPromise = ai.live.connect({
             model: 'gemini-2.5-flash-native-audio-preview-09-2025',
             config: {
@@ -216,10 +257,16 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 speechConfig: {
                     voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }
                 },
-                systemInstruction: systemInstruction, // Changed from object to string
+                // Updated to explicit Content object structure
+                systemInstruction: { parts: [{ text: systemInstructionText }] }, 
             },
             callbacks: {
                 onopen: () => {
+                    if (activeSessionRef.current !== sessionPromise) {
+                        console.log("[Live] Stale session opened, ignoring.");
+                        return;
+                    }
+
                     console.log('Gemini Live Connected');
                     setIsActive(true);
                     setIsConnecting(false);
@@ -236,7 +283,9 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         }).catch(e => console.error("[Live] Failed wake-up burst", e));
 
                         setTimeout(() => {
-                            const hasHistory = messages.length > 0;
+                            if (activeSessionRef.current !== sessionPromise) return;
+
+                            const hasHistory = messages.filter(m => m.id !== 'welcome').length > 0;
                             const isNewbie = USER_CONFIG.NEWBIE_MODE;
                             
                             let prompt = "";
@@ -253,6 +302,8 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     }, 200);
                 },
                 onmessage: async (message: LiveServerMessage) => {
+                    if (activeSessionRef.current !== sessionPromise) return;
+
                     const audioData = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
                     if (audioData) {
                          const pcmData = base64ToUint8Array(audioData);
@@ -313,19 +364,28 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     }
                 },
                 onclose: () => {
-                    disconnect();
+                    if (activeSessionRef.current === sessionPromise) {
+                        disconnect();
+                    }
                 },
                 onerror: (err) => {
-                    console.error("Live Error", err);
-                    setError("Connection error");
-                    disconnect();
+                    if (activeSessionRef.current === sessionPromise) {
+                        console.error("Live Error", err);
+                        // Extract useful message if possible
+                        const msg = (err as any).message || "Connection error";
+                        setError(msg);
+                        disconnect();
+                    }
                 }
             }
         });
         
         sessionPromise.catch(err => {
-             setError(err.message || "Failed to connect");
-             disconnect();
+             if (activeSessionRef.current === sessionPromise) {
+                console.error("Live Session Promise catch:", err);
+                setError(err.message || "Failed to connect");
+                disconnect();
+             }
         });
 
         activeSessionRef.current = sessionPromise;
@@ -345,9 +405,13 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
             if (activeSessionRef.current === sessionPromise) {
                 sessionPromise.then(session => {
-                    session.sendRealtimeInput({
-                        media: { mimeType: 'audio/pcm;rate=16000', data: base64Audio }
-                    });
+                    try {
+                        session.sendRealtimeInput({
+                            media: { mimeType: 'audio/pcm;rate=16000', data: base64Audio }
+                        });
+                    } catch (innerErr) {
+                         // Silent fail for stream chunks to avoid spamming console
+                    }
                 }).catch(() => {});
             }
         };

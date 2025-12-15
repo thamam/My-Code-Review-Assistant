@@ -1,9 +1,48 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import Prism from 'prismjs';
 import { usePR } from '../../contexts/PRContext';
 import { Annotation } from '../../types';
 import { MessageSquare, MapPin, Tag } from 'lucide-react';
 import clsx from 'clsx';
+
+// --- Syntax Highlighting Helpers ---
+
+const renderToken = (token: string | Prism.Token, key: number): React.ReactNode => {
+    if (typeof token === 'string') return token;
+    
+    const className = `token ${token.type} ${token.alias || ''}`;
+    
+    const content = Array.isArray(token.content) 
+        ? token.content.map((t, i) => renderToken(t, i)) 
+        : token.content.toString();
+
+    return (
+        <span key={key} className={className}>
+            {content}
+        </span>
+    );
+};
+
+const HighlightedText: React.FC<{ text: string, language: string }> = React.memo(({ text, language }) => {
+    // Optimization for very long lines
+    if (text.length > 1000) return <>{text}</>;
+
+    try {
+        const grammar = Prism.languages[language] || Prism.languages.clike;
+        // Fallback for languages not loaded
+        if (!grammar) return <>{text}</>;
+        
+        const tokens = Prism.tokenize(text, grammar);
+        return (
+            <>
+                {tokens.map((token, i) => renderToken(token, i))}
+            </>
+        );
+    } catch (e) {
+        console.warn("Tokenization failed", e);
+        return <>{text}</>;
+    }
+});
 
 interface SourceViewProps {
   content: string;
@@ -11,26 +50,23 @@ interface SourceViewProps {
 }
 
 export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => {
-  const codeRef = useRef<HTMLElement>(null);
   const { annotations, addAnnotation, removeAnnotation, selectionState, setSelectionState } = usePR();
   const [hoveredLine, setHoveredLine] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (codeRef.current) {
-      Prism.highlightElement(codeRef.current);
-    }
-  }, [content, filePath]);
 
   const fileAnnotations = annotations.filter(a => a.file === filePath);
   
   const getLanguage = (path: string) => {
-    if (path.endsWith('.ts') || path.endsWith('.tsx')) return 'javascript';
+    if (path.endsWith('.ts') || path.endsWith('.tsx')) return 'javascript'; // Prism often uses 'javascript' for TS basics in lightweight setups
     if (path.endsWith('.js') || path.endsWith('.jsx')) return 'javascript';
+    if (path.endsWith('.py')) return 'python';
     if (path.endsWith('.css')) return 'css';
     if (path.endsWith('.html')) return 'html';
     if (path.endsWith('.json')) return 'json';
+    if (path.endsWith('.md')) return 'markdown';
     return 'clike';
   };
+
+  const language = getLanguage(filePath);
 
   const handleLineClick = (e: React.MouseEvent, lineNum: number) => {
      e.stopPropagation();
@@ -56,14 +92,12 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
       }, 10);
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = useCallback(() => {
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
       
       const range = selection.getRangeAt(0);
-      const startNode = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentElement : range.startContainer;
-      const endNode = range.endContainer.nodeType === Node.TEXT_NODE ? range.endContainer.parentElement : range.endContainer;
-
+      // Traverse up to find the line container
       const findLineNumber = (node: Node | null): number | null => {
         let curr = node as HTMLElement;
         while (curr) {
@@ -75,37 +109,39 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
         return null;
       };
 
-      const startLine = findLineNumber(startNode);
-      const endLine = findLineNumber(endNode);
+      const startLine = findLineNumber(range.startContainer);
+      const endLine = findLineNumber(range.endContainer);
 
       if (startLine !== null && endLine !== null) {
           const actualStart = Math.min(startLine, endLine);
           const actualEnd = Math.max(startLine, endLine);
           const lines = content.split('\n');
+          // Adjust for 0-based index vs 1-based lines
           const selectedText = lines.slice(actualStart - 1, actualEnd).join('\n');
           
-          setSelectionState({
-              file: filePath,
-              startLine: actualStart,
-              endLine: actualEnd,
-              content: selectedText
-          });
+          if (selectedText) {
+            setSelectionState({
+                file: filePath,
+                startLine: actualStart,
+                endLine: actualEnd,
+                content: selectedText
+            });
+          }
       }
-  };
+  }, [content, filePath, setSelectionState]);
 
   const lines = content.split('\n');
 
   return (
     <div className="flex min-h-full font-mono text-sm bg-gray-950" onMouseUp={handleMouseUp}>
       {/* Gutter */}
-      <div className="flex-shrink-0 w-12 bg-gray-900 border-r border-gray-800 text-gray-600 text-right select-none">
+      <div className="flex-shrink-0 w-12 bg-gray-900 border-r border-gray-800 text-gray-600 text-right select-none pt-2">
          {lines.map((_, i) => {
              const lineNum = i + 1;
              const lineAnnotations = fileAnnotations.filter(a => a.line === lineNum);
              const hasMarker = lineAnnotations.some(a => a.type === 'marker');
              const hasLabel = lineAnnotations.some(a => a.type === 'label');
              
-             // VISUAL INDICATOR FOR SELECTION
              const isSelected = selectionState && selectionState.file === filePath && 
                                 lineNum >= selectionState.startLine && lineNum <= selectionState.endLine;
 
@@ -142,45 +178,47 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
          })}
       </div>
 
-      {/* Code */}
-      <div className="flex-1 overflow-x-auto">
-        <pre className={`language-${getLanguage(filePath)} !bg-transparent !m-0 !p-0 !overflow-visible`}>
-          <code ref={codeRef} className={`language-${getLanguage(filePath)} !bg-transparent !p-0 block`}>
-            <div className="leading-6">
-                {lines.map((line, i) => {
-                     const lineNum = i + 1;
-                     const lineAnnotations = fileAnnotations.filter(a => a.line === lineNum);
-                     const isSelected = selectionState && selectionState.file === filePath && 
-                                lineNum >= selectionState.startLine && lineNum <= selectionState.endLine;
+      {/* Code Area */}
+      <div className="flex-1 overflow-x-auto pt-2">
+        {/* We use a specific class to ensure Prism styles apply to our spans, without Prism taking over the DOM */}
+        <div className={`language-${language} !bg-transparent`}>
+            {lines.map((line, i) => {
+                 const lineNum = i + 1;
+                 const lineAnnotations = fileAnnotations.filter(a => a.line === lineNum);
+                 const isSelected = selectionState && selectionState.file === filePath && 
+                            lineNum >= selectionState.startLine && lineNum <= selectionState.endLine;
 
-                     return (
-                         <div 
-                             key={i} 
-                             className={clsx("relative h-6 whitespace-pre transition-colors duration-150", isSelected && "bg-blue-500/10")} 
-                             data-line-number={lineNum}
-                         >
-                             {line || '\n'}
-                             {/* Annotation Overlays */}
-                             {lineAnnotations.map(a => (
-                                 <div key={a.id} className="absolute right-4 top-0 z-10 pointer-events-none">
-                                     {a.type === 'label' && (
-                                         <span className="bg-yellow-900/80 text-yellow-200 text-xs px-2 rounded flex items-center gap-1">
-                                             <Tag size={10} /> {a.title}
-                                         </span>
-                                     )}
-                                     {a.type === 'marker' && (
-                                          <span className="bg-blue-900/80 text-blue-200 text-xs px-1 rounded opacity-50 hover:opacity-100">
-                                              @{a.title}
-                                          </span>
-                                     )}
-                                 </div>
-                             ))}
-                         </div>
-                     );
-                })}
-            </div>
-          </code>
-        </pre>
+                 return (
+                     <div 
+                         key={i} 
+                         className={clsx(
+                             "relative h-6 leading-6 whitespace-pre px-4 transition-colors duration-150 flex items-center", 
+                             isSelected && "bg-blue-500/10"
+                         )} 
+                         data-line-number={lineNum}
+                     >
+                         <span className="inline-block min-w-full">
+                            <HighlightedText text={line || ' '} language={language} />
+                         </span>
+                         
+                         {/* Annotation Overlays */}
+                         {lineAnnotations.length > 0 && (
+                             <div className="absolute right-4 top-0 h-full flex items-center gap-2 pointer-events-none opacity-80">
+                                 {lineAnnotations.map(a => (
+                                     <span key={a.id} className={clsx(
+                                         "text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1 shadow-sm",
+                                         a.type === 'label' ? "bg-yellow-900 text-yellow-200" : "bg-blue-900 text-blue-200"
+                                     )}>
+                                         {a.type === 'label' ? <Tag size={10} /> : <MapPin size={10} />}
+                                         {a.title}
+                                     </span>
+                                 ))}
+                             </div>
+                         )}
+                     </div>
+                 );
+            })}
+        </div>
       </div>
     </div>
   );

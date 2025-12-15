@@ -51,7 +51,8 @@ export const CodeViewer: React.FC = () => {
     );
   }
 
-  const useSourceView = selectedFile.status === 'unchanged';
+  // Use SourceView if the file is unchanged OR if the user explicitly toggled "Show Raw" (isDiffMode === false)
+  const useSourceView = selectedFile.status === 'unchanged' || !isDiffMode;
 
   return (
     <div className="h-full flex flex-col bg-gray-950 overflow-hidden">
@@ -62,6 +63,18 @@ export const CodeViewer: React.FC = () => {
              {selectedFile.status}
            </span>
         </div>
+        {!useSourceView && (
+             <div className="flex items-center gap-4 text-[10px] text-gray-500">
+                 <div className="flex items-center gap-1">
+                     <div className="w-2 h-2 bg-green-900/50 border border-green-700 rounded-sm"></div>
+                     <span>Added</span>
+                 </div>
+                 <div className="flex items-center gap-1">
+                     <div className="w-2 h-2 bg-red-900/50 border border-red-700 rounded-sm"></div>
+                     <span>Deleted</span>
+                 </div>
+             </div>
+        )}
       </div>
       
       <div 
@@ -71,13 +84,13 @@ export const CodeViewer: React.FC = () => {
         {useSourceView ? (
             <SourceView 
                 key={selectedFile.path}
-                content={selectedFile.newContent}
+                content={selectedFile.newContent || selectedFile.oldContent || ""}
                 filePath={selectedFile.path}
             />
         ) : (
             <DiffView 
                 key={selectedFile.path}
-                oldContent={isDiffMode ? selectedFile.oldContent : undefined} 
+                oldContent={selectedFile.oldContent} 
                 newContent={selectedFile.newContent}
                 filePath={selectedFile.path}
                 onViewportChange={handleViewportChange}

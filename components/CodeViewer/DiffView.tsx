@@ -5,6 +5,7 @@ import { LineMarker } from './LineMarker';
 import { usePR } from '../../contexts/PRContext';
 import { arePathsEquivalent } from '../../utils/fileUtils';
 import { MapPin, MessageSquare, Tag } from 'lucide-react';
+import Prism from 'prismjs';
 
 interface DiffViewProps {
   oldContent?: string;
@@ -12,6 +13,53 @@ interface DiffViewProps {
   filePath: string;
   onViewportChange: (file: string, start: number, end: number) => void;
 }
+
+// Helper to determine Prism language
+const getLanguage = (path: string) => {
+    if (path.endsWith('.ts') || path.endsWith('.tsx')) return 'javascript'; // Prism often uses 'javascript' for TS basics in lightweight setups, or 'typescript' if loaded
+    if (path.endsWith('.js') || path.endsWith('.jsx')) return 'javascript';
+    if (path.endsWith('.css')) return 'css';
+    if (path.endsWith('.html')) return 'html';
+    if (path.endsWith('.json')) return 'json';
+    if (path.endsWith('.md')) return 'markdown';
+    return 'clike';
+};
+
+// Helper to render Prism tokens to React nodes
+const renderToken = (token: string | Prism.Token, key: number): React.ReactNode => {
+    if (typeof token === 'string') return token;
+    
+    const className = `token ${token.type} ${token.alias || ''}`;
+    
+    const content = Array.isArray(token.content) 
+        ? token.content.map((t, i) => renderToken(t, i)) 
+        : token.content.toString();
+
+    return (
+        <span key={key} className={className}>
+            {content}
+        </span>
+    );
+};
+
+const HighlightedText: React.FC<{ text: string, language: string }> = React.memo(({ text, language }) => {
+    // If text is extremely long, fallback to plain text to prevent freeze
+    if (text.length > 500) return <>{text}</>;
+
+    try {
+        const grammar = Prism.languages[language] || Prism.languages.clike;
+        if (!grammar) return <>{text}</>;
+        
+        const tokens = Prism.tokenize(text, grammar);
+        return (
+            <>
+                {tokens.map((token, i) => renderToken(token, i))}
+            </>
+        );
+    } catch (e) {
+        return <>{text}</>;
+    }
+});
 
 export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, filePath, onViewportChange }) => {
   const diffLines = useMemo(() => computeDiff(oldContent, newContent), [oldContent, newContent]);
@@ -21,6 +69,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
   const [hoveredLine, setHoveredLine] = useState<number | null>(null);
 
   const fileAnnotations = annotations.filter(a => a.file === filePath);
+  const language = getLanguage(filePath);
 
   const handleLineVisibility = (lineNumber: number, isVisible: boolean) => {
     if (isVisible) visibleLines.current.add(lineNumber);
@@ -196,33 +245,33 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
             </div>
 
             <div className={clsx("flex-1 whitespace-pre py-0.5 pl-2 relative transition-colors duration-150", 
-                isAdded && "text-green-200",
-                isRemoved && "text-red-300 line-through opacity-60",
+                isAdded && "text-green-100", // Brighter text for readability on green bg
+                isRemoved && "text-red-200 line-through opacity-60",
                 !isAdded && !isRemoved && "text-gray-300",
                 isSelected && "bg-blue-500/10"
             )}>
-              {/* Word-level diff rendering */}
+              {/* Word-level diff rendering OR Syntax Highlighting */}
               {line.diffParts ? (
                   <span>
                       {line.diffParts.map((part, i) => (
                           <span key={i} className={clsx(
-                              part.added && isAdded && "bg-green-700/50 font-bold",
-                              part.removed && isRemoved && "bg-red-700/50 font-bold text-red-100 decoration-2",
-                              !part.added && !part.removed && "opacity-70"
+                              part.added && isAdded && "bg-green-600/50 font-bold text-white",
+                              part.removed && isRemoved && "bg-red-700/50 font-bold text-white decoration-2",
+                              !part.added && !part.removed && "opacity-80"
                           )}>
                               {part.value}
                           </span>
                       ))}
                   </span>
               ) : (
-                  line.content
+                  <HighlightedText text={line.content} language={language} />
               )}
               
               {/* Annotations */}
-              <div className="absolute right-4 top-0 flex gap-2">
+              <div className="absolute right-4 top-0 flex gap-2 pointer-events-none">
                  {lineAnnotations.map(a => (
                      <span key={a.id} className={clsx(
-                         "text-[10px] px-1.5 rounded flex items-center gap-1 opacity-75 hover:opacity-100 cursor-help",
+                         "text-[10px] px-1.5 rounded flex items-center gap-1 opacity-75 pointer-events-auto hover:opacity-100 cursor-help",
                          a.type === 'label' ? "bg-yellow-900 text-yellow-200" : "bg-blue-900 text-blue-200"
                      )} title={a.title}>
                          {a.type === 'label' ? <Tag size={8} /> : '@'} {a.title}
