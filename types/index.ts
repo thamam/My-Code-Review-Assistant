@@ -7,6 +7,7 @@ export interface PRData {
   baseRef: string;
   headRef: string;
   files: FileChange[];
+  warning?: string; // New field for UI feedback about limits
 }
 
 export type FileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'unchanged';

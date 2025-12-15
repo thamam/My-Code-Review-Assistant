@@ -64,67 +64,96 @@ export class GitHubService {
     
     const prData: GitHubPR = await prResponse.json();
 
-    // 2. Fetch Files List
-    const filesResponse = await fetch(`${baseUrl}/pulls/${number}/files?per_page=100`, { headers });
-    if (!filesResponse.ok) throw new Error(`Failed to fetch files: ${filesResponse.statusText}`);
-    const filesData: GitHubFile[] = await filesResponse.json();
+    // 2. Fetch Files List with Pagination
+    let allFiles: GitHubFile[] = [];
+    let page = 1;
+    let keepFetching = true;
+    const MAX_FILES = 1000; // Hard safety limit
+    const PER_PAGE = 100;
+    let warningMsg = undefined;
 
-    // 3. Process Files and Fetch Content
-    // Limit to first 20 files to avoid rate limits/performance issues in this PoC
-    const filesToProcess = filesData.slice(0, 20);
-    
-    const processedFiles: FileChange[] = await Promise.all(filesToProcess.map(async (file) => {
-      let oldContent = '';
-      let newContent = '';
-
-      // Helper to fetch raw content
-      // Strategy: 
-      // - If Token is provided, use API (supports Private repos).
-      // - If No Token, use raw.githubusercontent.com (saves API Rate Limit for Public repos).
-      const fetchContent = async (sha: string, path: string) => {
-        try {
-          if (this.token) {
-             const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${sha}`, {
-                 headers: {
-                     ...this.getHeaders(),
-                     'Accept': 'application/vnd.github.v3.raw' // Returns raw content directly
-                 }
-             });
-             if (res.ok) return await res.text();
-             console.warn(`Failed to fetch content via API for ${path}: ${res.status} ${res.statusText}`);
-             return '';
-          } else {
-             // Fallback to raw domain for public repos to save API quota
-             const res = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${sha}/${path}`);
-             if (res.ok) return await res.text();
-             console.warn(`Failed to fetch content via Raw for ${path}: ${res.status}`);
-             return '';
-          }
-        } catch (e) {
-          console.error(`Failed to fetch content for ${path}`, e);
-          return '';
-        }
-      };
-
-      if (file.status !== 'added') {
-        // If renamed, the file was at 'previous_filename' in the base commit
-        const originalPath = file.previous_filename || file.filename;
-        oldContent = await fetchContent(prData.base.sha, originalPath);
-      }
+    while (keepFetching) {
+      const filesUrl = `${baseUrl}/pulls/${number}/files?per_page=${PER_PAGE}&page=${page}`;
+      const filesResponse = await fetch(filesUrl, { headers });
       
-      if (file.status !== 'removed') {
-        newContent = await fetchContent(prData.head.sha, file.filename);
+      if (!filesResponse.ok) {
+        console.warn(`Failed to fetch files page ${page}: ${filesResponse.statusText}`);
+        warningMsg = `Partial file list loaded (stopped at page ${page - 1} due to API error)`;
+        break;
       }
 
-      return {
-        path: file.filename,
-        status: this.mapStatus(file.status),
-        additions: file.additions,
-        deletions: file.deletions,
-        oldContent: oldContent || undefined,
-        newContent: newContent || ''
-      };
-    }));
+      const pageData: GitHubFile[] = await filesResponse.json();
+      allFiles = allFiles.concat(pageData);
+
+      if (pageData.length < PER_PAGE) {
+        keepFetching = false;
+      } else {
+        page++;
+      }
+
+      if (allFiles.length >= MAX_FILES) {
+        keepFetching = false;
+        warningMsg = `PR is too large. Only the first ${MAX_FILES} files were loaded.`;
+      }
+    }
+
+    // 3. Process Files and Fetch Content (Batched)
+    // We limit concurrency to prevent browser/network bottlenecks
+    const BATCH_SIZE = 20;
+    const processedFiles: FileChange[] = [];
+
+    const fetchContent = async (sha: string, path: string) => {
+      try {
+        if (this.token) {
+           const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${sha}`, {
+               headers: {
+                   ...this.getHeaders(),
+                   'Accept': 'application/vnd.github.v3.raw' 
+               }
+           });
+           if (res.ok) return await res.text();
+           return '';
+        } else {
+           const res = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${sha}/${path}`);
+           if (res.ok) return await res.text();
+           return '';
+        }
+      } catch (e) {
+        console.error(`Failed to fetch content for ${path}`, e);
+        return '';
+      }
+    };
+
+    // Helper to process a single file
+    const processFile = async (file: GitHubFile): Promise<FileChange> => {
+       let oldContent = '';
+       let newContent = '';
+
+       if (file.status !== 'added') {
+          const originalPath = file.previous_filename || file.filename;
+          oldContent = await fetchContent(prData.base.sha, originalPath);
+       }
+       
+       if (file.status !== 'removed') {
+          newContent = await fetchContent(prData.head.sha, file.filename);
+       }
+
+       return {
+          path: file.filename,
+          status: this.mapStatus(file.status),
+          additions: file.additions,
+          deletions: file.deletions,
+          oldContent: oldContent || undefined,
+          newContent: newContent || ''
+       };
+    };
+
+    // Execute batches
+    for (let i = 0; i < allFiles.length; i += BATCH_SIZE) {
+        const batch = allFiles.slice(i, i + BATCH_SIZE);
+        const results = await Promise.all(batch.map(file => processFile(file)));
+        processedFiles.push(...results);
+    }
 
     return {
       id: prData.number.toString(),
@@ -133,7 +162,8 @@ export class GitHubService {
       author: prData.user.login,
       baseRef: prData.base.ref,
       headRef: prData.head.ref,
-      files: processedFiles
+      files: processedFiles,
+      warning: warningMsg
     };
   }
 }

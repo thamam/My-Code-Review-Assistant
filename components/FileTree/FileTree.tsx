@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { usePR } from '../../contexts/PRContext';
 import { buildFileTree } from '../../utils/fileUtils';
 import { FileNode } from './FileNode';
+import { AlertTriangle } from 'lucide-react';
 
 export const FileTree: React.FC = () => {
   const { prData } = usePR();
@@ -20,6 +21,14 @@ export const FileTree: React.FC = () => {
             {prData.files.filter(f => f.status !== 'unchanged').length} changed files
         </div>
       </div>
+      
+      {prData.warning && (
+          <div className="bg-yellow-900/20 border-b border-yellow-800 p-2 flex items-start gap-2">
+              <AlertTriangle size={14} className="text-yellow-500 shrink-0 mt-0.5" />
+              <span className="text-[10px] text-yellow-200 leading-tight">{prData.warning}</span>
+          </div>
+      )}
+
       <div className="flex-1 overflow-y-auto py-2 custom-scrollbar" role="tree">
         {treeData.map(node => (
           <FileNode key={node.path} node={node} />

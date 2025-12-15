@@ -17,7 +17,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
   const diffLines = useMemo(() => computeDiff(oldContent, newContent), [oldContent, newContent]);
   const visibleLines = React.useRef(new Set<number>());
   const updateTimeout = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const { walkthrough, activeSectionId, selectionState, setSelectionState, annotations, addAnnotation } = usePR();
+  const { walkthrough, activeSectionId, selectionState, setSelectionState, annotations, addAnnotation, removeAnnotation } = usePR();
   const [hoveredLine, setHoveredLine] = useState<number | null>(null);
 
   const fileAnnotations = annotations.filter(a => a.file === filePath);
@@ -90,8 +90,29 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
       return highlights.find(h => newLineNum >= h.lines[0] && newLineNum <= h.lines[1])?.note;
   };
 
-  const handleGutterClick = (lineNum: number) => {
-      addAnnotation(filePath, lineNum, 'marker');
+  const handleGutterClick = (e: React.MouseEvent, lineNum: number) => {
+      e.stopPropagation();
+      e.preventDefault();
+      // Toggle Marker
+      const existingMarker = fileAnnotations.find(a => a.line === lineNum && a.type === 'marker');
+      if (existingMarker) {
+          removeAnnotation(existingMarker.id);
+      } else {
+          addAnnotation(filePath, lineNum, 'marker');
+      }
+  };
+
+  const handleGutterContextMenu = (e: React.MouseEvent, lineNum: number) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // Add Label
+      // We use a small timeout to ensure no other events interfere
+      setTimeout(() => {
+          const note = prompt("Enter a label/note for line " + lineNum + ":");
+          if (note) {
+              addAnnotation(filePath, lineNum, 'label', note);
+          }
+      }, 10);
   };
 
   return (
@@ -145,23 +166,25 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
             
             <div 
                 className={clsx(
-                    "w-12 text-right pr-3 select-none border-r py-0.5 relative cursor-pointer hover:text-gray-400 transition-all duration-150",
+                    "w-12 text-right pr-3 select-none border-r py-0.5 relative cursor-pointer hover:text-gray-400 transition-all duration-150 z-20",
                     isSelected 
                         ? "bg-blue-900/30 text-blue-200 border-blue-500 font-bold" 
                         : "bg-gray-900/50 border-gray-800 text-gray-600"
                 )}
-                onClick={() => line.newLineNumber && handleGutterClick(line.newLineNumber)}
+                onClick={(e) => line.newLineNumber && handleGutterClick(e, line.newLineNumber)}
+                onContextMenu={(e) => line.newLineNumber && handleGutterContextMenu(e, line.newLineNumber)}
                 onMouseEnter={() => line.newLineNumber && setHoveredLine(line.newLineNumber)}
                 onMouseLeave={() => setHoveredLine(null)}
+                title="Left-click: Marker | Right-click: Label"
             >
               {line.newLineNumber || ''}
               
               {/* Indicators */}
               {line.newLineNumber && hoveredLine === line.newLineNumber && !hasMarker && !hasLabel && !isSelected && (
-                  <div className="absolute left-1 top-1 text-gray-500 opacity-50"><MapPin size={8} /></div>
+                  <div className="absolute left-1 top-1 text-gray-500 opacity-50 pointer-events-none"><MapPin size={8} /></div>
               )}
               {(hasMarker || hasLabel) && (
-                 <div className="absolute left-1 top-1 text-blue-400">
+                 <div className="absolute left-1 top-1 text-blue-400 pointer-events-none">
                     {hasLabel ? <MessageSquare size={8} className="text-yellow-400" /> : <MapPin size={8} />}
                  </div>
               )}

@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useChat } from '../../contexts/ChatContext';
 import { ChatMessage } from './ChatMessage';
-import { Send, Sparkles } from 'lucide-react';
+import { Send, Sparkles, BrainCircuit, Zap } from 'lucide-react';
 import { usePR } from '../../contexts/PRContext';
 
 export const ChatPanel: React.FC = () => {
-  const { messages, sendMessage, isTyping } = useChat();
+  const { messages, sendMessage, isTyping, currentModel, setModel } = useChat();
   const { viewportState } = usePR();
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -28,11 +28,24 @@ export const ChatPanel: React.FC = () => {
     ? `Explain changes in lines ${viewportState.startLine}-${viewportState.endLine}`
     : "Summarize this PR";
 
+  const isPro = currentModel.includes('pro');
+
   return (
     <div className="h-full flex flex-col bg-gray-900 border-l border-gray-800 w-full">
-      <div className="p-3 border-b border-gray-800 flex items-center gap-2">
-        <Sparkles size={16} className="text-purple-400" />
-        <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Review Assistant</h2>
+      <div className="p-3 border-b border-gray-800 flex items-center justify-between shrink-0">
+         <div className="flex items-center gap-2">
+            {isPro ? <BrainCircuit size={16} className="text-pink-400" /> : <Zap size={16} className="text-yellow-400" />}
+            <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Assistant</h2>
+         </div>
+         
+         <select 
+            value={currentModel}
+            onChange={(e) => setModel(e.target.value)}
+            className="bg-gray-800 text-[10px] text-gray-300 border border-gray-700 rounded px-2 py-1 outline-none focus:border-blue-500 cursor-pointer hover:bg-gray-750"
+         >
+            <option value="gemini-2.5-flash">Flash 2.5 (Fast)</option>
+            <option value="gemini-3-pro-preview">Pro 3 (Smart)</option>
+         </select>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 custom-scrollbar" ref={scrollRef}>
@@ -48,7 +61,7 @@ export const ChatPanel: React.FC = () => {
         )}
       </div>
 
-      <div className="p-4 border-t border-gray-800">
+      <div className="p-4 border-t border-gray-800 shrink-0">
         <button 
           onClick={() => setInput(suggestion)}
           className="text-xs text-purple-400 hover:text-purple-300 mb-2 truncate max-w-full text-left"

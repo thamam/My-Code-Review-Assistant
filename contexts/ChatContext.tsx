@@ -10,6 +10,8 @@ interface ChatContextType {
   upsertMessage: (message: ChatMessage) => void;
   clearMessages: () => void;
   isTyping: boolean;
+  currentModel: string;
+  setModel: (model: string) => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -18,19 +20,17 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const { prData, selectedFile, viewportState, selectionState, walkthrough, linearIssue } = usePR();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
+  const [currentModel, setModel] = useState('gemini-2.5-flash');
   
   // Ref to hold the active chat session
   const chatSessionRef = useRef<Chat | null>(null);
 
   const clearMessages = () => {
       setMessages([]);
-      // Force re-init of session to clear backend context if needed, though usually new session obj is enough
       chatSessionRef.current = null;
-      // Re-trigger the effect to create new session
-      // We can hack this by depending on messages length 0, but better to rely on prData/linearIssue change
   };
 
-  // Initialize or Re-initialize Chat Session when PR Data, Walkthrough, or Linear Issue changes
+  // Initialize or Re-initialize Chat Session when PR Data, Walkthrough, Linear Issue OR Model changes
   useEffect(() => {
     if (!prData) return;
 
@@ -68,13 +68,14 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // Create the chat session
       chatSessionRef.current = ai.chats.create({
-        model: 'gemini-2.5-flash',
+        model: currentModel,
         config: {
           systemInstruction: systemInstruction,
         },
       });
 
       // If messages are empty (fresh start), add welcome
+      // We check if it's a fresh load (no messages) or a model switch (messages exist)
       if (messages.length === 0) {
         setMessages([
             {
@@ -97,7 +98,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       ]);
     }
-  }, [prData, walkthrough, linearIssue]);
+  }, [prData, walkthrough, linearIssue, currentModel]);
 
   const addLocalMessage = (message: ChatMessage) => {
       setMessages(prev => [...prev, message]);
@@ -209,7 +210,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   return (
-    <ChatContext.Provider value={{ messages, sendMessage, addLocalMessage, upsertMessage, isTyping, clearMessages }}>
+    <ChatContext.Provider value={{ messages, sendMessage, addLocalMessage, upsertMessage, isTyping, clearMessages, currentModel, setModel }}>
       {children}
     </ChatContext.Provider>
   );

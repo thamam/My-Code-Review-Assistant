@@ -36,7 +36,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 }
 
 export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { prData, walkthrough, selectionState, linearIssue } = usePR();
+  const { prData, walkthrough, selectionState, linearIssue, selectedFile } = usePR();
   const { upsertMessage, messages } = useChat();
   const [isActive, setIsActive] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -64,8 +64,6 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       console.log("[Live] Attempting to send text:", text);
 
-      // Construct the standard client content payload
-      // This is the full structure expected by a generic 'send' method
       const fullPayload = {
         clientContent: {
             turns: [{
@@ -77,52 +75,46 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
 
       try {
-          // Attempt 1: Standard 'send' (Unified)
           if (typeof session.send === 'function') {
-              console.log("[Live] Using session.send");
               session.send(fullPayload);
               return;
           }
           
-          // Attempt 2: Specific 'sendClientContent'
-          // If this method exists, it likely expects the inner Content object, not the wrapper.
           if (typeof (session as any).sendClientContent === 'function') {
-               console.log(`[Live] Using detected method: session.sendClientContent`);
                (session as any).sendClientContent(fullPayload.clientContent);
                return;
           }
-
-          // Attempt 3: Check for other common method names in the prototype
-          const proto = Object.getPrototypeOf(session);
-          const methods = Object.getOwnPropertyNames(proto);
-          console.log("[Live] Session methods available:", methods);
-
-          // Heuristic search for a send-like method if above failed
-          const sendMethod = methods.find(m => m.startsWith('send') && !m.includes('Realtime') && !m.includes('Tool'));
-          
-          if (sendMethod && typeof (session as any)[sendMethod] === 'function') {
-               console.log(`[Live] Using detected method: session.${sendMethod} (Fallback)`);
-               // Try passing the inner content first as it's more likely for specific methods
-               try {
-                   (session as any)[sendMethod](fullPayload.clientContent);
-               } catch {
-                   // If that fails, maybe it wants the full payload?
-                   (session as any)[sendMethod](fullPayload);
-               }
-               return;
-          }
-
-          console.warn("[Live] Could not find a method to send text.");
       } catch (e) {
           console.error("[Live] Failed to send text:", e);
       }
   };
 
+  // 1. Monitor Selection Changes
   useEffect(() => {
     if (!isActive || !selectionState) return;
     const update = `[SYSTEM CONTEXT UPDATE]: User highlighted code in ${selectionState.file}, lines ${selectionState.startLine}-${selectionState.endLine}. Content: \n${selectionState.content}`;
     sendTextToSession(update);
   }, [selectionState, isActive]);
+
+  // 2. Monitor File Navigation Changes
+  useEffect(() => {
+      if (!isActive || !selectedFile) return;
+      
+      const content = selectedFile.newContent || selectedFile.oldContent || "";
+      // Injecting content is crucial to prevent the model from guessing/hallucinating file contents.
+      // 50k characters is roughly 1000 lines of code, covering most files entirely.
+      const contentSnippet = content.slice(0, 50000); 
+      
+      let update = `[SYSTEM CONTEXT UPDATE]: User navigated to file: ${selectedFile.path}. File Status: ${selectedFile.status}.\n`;
+      
+      if (contentSnippet) {
+          update += `\nFILE CONTENT PREVIEW (Truncated to 50k chars):\n\`\`\`\n${contentSnippet}\n\`\`\`\n`;
+      } else {
+          update += `\n(File content is empty or could not be loaded)\n`;
+      }
+
+      sendTextToSession(update);
+  }, [selectedFile?.path, isActive]);
 
   const disconnect = () => {
     if (inputContextRef.current) {
@@ -192,7 +184,6 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         
-        // --- System Instruction ---
         let systemInstruction = `You are a conversational voice assistant helping a developer review a Pull Request. `;
         systemInstruction += `PR: "${prData.title}" by ${prData.author}. `;
         const filesList = prData.files.map(f => f.path).join(', ');
@@ -203,10 +194,9 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             systemInstruction += `Description: ${linearIssue.description.slice(0, 1000)}. `;
         }
 
-        // Restore context from existing Chat history if available
         if (messages.length > 0) {
              systemInstruction += `\n\nPREVIOUS CONVERSATION HISTORY (Resume from here):\n`;
-             messages.slice(-10).forEach(m => { // Last 10 messages
+             messages.slice(-10).forEach(m => { 
                  systemInstruction += `${m.role.toUpperCase()}: ${m.content.slice(0, 300)}\n`;
              });
              systemInstruction += `\nNOTE: You are resuming a session. Do NOT introduce yourself again. Just say "I'm ready" or "Listening".`;
@@ -216,6 +206,7 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         systemInstruction += `If they ask "what is this", refer to the most recent highlighted code context. `;
         
+        // Use simpler string format for systemInstruction to avoid strict type validation issues causing Network Error
         const sessionPromise = ai.live.connect({
             model: 'gemini-2.5-flash-native-audio-preview-09-2025',
             config: {
@@ -225,7 +216,7 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 speechConfig: {
                     voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }
                 },
-                systemInstruction: { parts: [{ text: systemInstruction }] },
+                systemInstruction: systemInstruction, // Changed from object to string
             },
             callbacks: {
                 onopen: () => {
@@ -234,9 +225,7 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     setIsConnecting(false);
                     nextStartTimeRef.current = outputContext.currentTime;
 
-                    // --- 1. Silent Wake-Up Burst ---
                     setTimeout(() => {
-                        console.log("[Live] Sending silent wake-up burst...");
                         const silence = new Float32Array(3200); 
                         const pcmBuffer = new Int16Array(silence.length);
                         const base64Audio = arrayBufferToBase64(pcmBuffer.buffer);
@@ -246,7 +235,6 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                             });
                         }).catch(e => console.error("[Live] Failed wake-up burst", e));
 
-                        // --- 2. Greeting / Resume Trigger ---
                         setTimeout(() => {
                             const hasHistory = messages.length > 0;
                             const isNewbie = USER_CONFIG.NEWBIE_MODE;

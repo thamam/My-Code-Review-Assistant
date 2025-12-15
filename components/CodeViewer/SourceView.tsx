@@ -12,7 +12,7 @@ interface SourceViewProps {
 
 export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => {
   const codeRef = useRef<HTMLElement>(null);
-  const { annotations, addAnnotation, selectionState, setSelectionState } = usePR();
+  const { annotations, addAnnotation, removeAnnotation, selectionState, setSelectionState } = usePR();
   const [hoveredLine, setHoveredLine] = useState<number | null>(null);
 
   useEffect(() => {
@@ -32,8 +32,28 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
     return 'clike';
   };
 
-  const handleLineClick = (lineNum: number) => {
-     addAnnotation(filePath, lineNum, 'marker');
+  const handleLineClick = (e: React.MouseEvent, lineNum: number) => {
+     e.stopPropagation();
+     e.preventDefault();
+     // Toggle Marker
+     const existingMarker = fileAnnotations.find(a => a.line === lineNum && a.type === 'marker');
+     if (existingMarker) {
+         removeAnnotation(existingMarker.id);
+     } else {
+         addAnnotation(filePath, lineNum, 'marker');
+     }
+  };
+
+  const handleLineContextMenu = (e: React.MouseEvent, lineNum: number) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // Add Label
+      setTimeout(() => {
+          const note = prompt("Enter a label/note for line " + lineNum + ":");
+          if (note) {
+              addAnnotation(filePath, lineNum, 'label', note);
+          }
+      }, 10);
   };
 
   const handleMouseUp = () => {
@@ -93,25 +113,27 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
                  <div 
                     key={i} 
                     className={clsx(
-                        "h-6 leading-6 pr-2 relative hover:bg-gray-800 cursor-pointer group transition-all duration-150",
+                        "h-6 leading-6 pr-2 relative hover:bg-gray-800 cursor-pointer group transition-all duration-150 z-20",
                         isSelected 
                             ? "bg-blue-900/30 text-blue-200 border-l-4 border-blue-500 font-bold" 
                             : "border-l-4 border-transparent"
                     )}
                     onMouseEnter={() => setHoveredLine(lineNum)}
                     onMouseLeave={() => setHoveredLine(null)}
-                    onClick={() => handleLineClick(lineNum)}
+                    onClick={(e) => handleLineClick(e, lineNum)}
+                    onContextMenu={(e) => handleLineContextMenu(e, lineNum)}
+                    title="Left-click: Marker | Right-click: Label"
                  >
                      {lineNum}
                      {/* Hover Add Icon */}
                      {hoveredLine === lineNum && !hasMarker && !hasLabel && !isSelected && (
-                         <div className="absolute left-1 top-1 text-gray-500 opacity-50">
+                         <div className="absolute left-1 top-1 text-gray-500 opacity-50 pointer-events-none">
                              <MapPin size={10} />
                          </div>
                      )}
                      {/* Annotation Indicators */}
                      {(hasMarker || hasLabel) && (
-                         <div className="absolute left-1 top-1 text-blue-400">
+                         <div className="absolute left-1 top-1 text-blue-400 pointer-events-none">
                              {hasLabel ? <MessageSquare size={10} className="text-yellow-400" /> : <MapPin size={10} />}
                          </div>
                      )}
@@ -140,7 +162,7 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
                              {line || '\n'}
                              {/* Annotation Overlays */}
                              {lineAnnotations.map(a => (
-                                 <div key={a.id} className="absolute right-4 top-0 z-10">
+                                 <div key={a.id} className="absolute right-4 top-0 z-10 pointer-events-none">
                                      {a.type === 'label' && (
                                          <span className="bg-yellow-900/80 text-yellow-200 text-xs px-2 rounded flex items-center gap-1">
                                              <Tag size={10} /> {a.title}
