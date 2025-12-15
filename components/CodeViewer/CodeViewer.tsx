@@ -19,6 +19,10 @@ export const CodeViewer: React.FC = () => {
     const section = walkthrough.sections.find(s => s.id === activeSectionId);
     if (!section) return;
 
+    // Check if the current file is part of the section
+    const isFileInSection = section.files.some(f => arePathsEquivalent(f, selectedFile.path));
+    if (!isFileInSection) return;
+
     const highlight = section.highlights?.find(h => arePathsEquivalent(h.file, selectedFile.path));
     
     if (highlight) {
@@ -30,6 +34,11 @@ export const CodeViewer: React.FC = () => {
             }
         }, 150);
         return () => clearTimeout(timer);
+    } else {
+        // If no specific highlight but we are in the section's file, scroll to top to ensure context
+        if (containerRef.current) {
+            containerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+        }
     }
   }, [selectedFile, activeSectionId, walkthrough]);
 
@@ -42,10 +51,6 @@ export const CodeViewer: React.FC = () => {
     );
   }
 
-  // Determine if we should show SourceView
-  // If file is 'unchanged', or if we are not in Diff Mode (Show Raw)
-  // However, DiffView handles "Show Raw" by passing undefined oldContent usually.
-  // But user specifically asked for "full content of unchanged files... instead of a diff view".
   const useSourceView = selectedFile.status === 'unchanged';
 
   return (

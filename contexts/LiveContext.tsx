@@ -36,8 +36,8 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 }
 
 export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { prData, walkthrough, selectionState } = usePR();
-  const { upsertMessage } = useChat();
+  const { prData, walkthrough, selectionState, linearIssue } = usePR();
+  const { upsertMessage, messages } = useChat();
   const [isActive, setIsActive] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -197,9 +197,25 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         systemInstruction += `PR: "${prData.title}" by ${prData.author}. `;
         const filesList = prData.files.map(f => f.path).join(', ');
         systemInstruction += `Changed Files: ${filesList.slice(0, 500)}. `;
-        systemInstruction += `If they ask "what is this", refer to the most recent highlighted code context. `;
-        systemInstruction += `\nIMPORTANT: When the session starts, IMMEDIATELY say "Hi, I'm your code review assistant." DO NOT WAIT for user input.`;
+        
+        if (linearIssue) {
+            systemInstruction += `\nLINKED ISSUE CONTEXT: ${linearIssue.identifier} - ${linearIssue.title}. `;
+            systemInstruction += `Description: ${linearIssue.description.slice(0, 1000)}. `;
+        }
 
+        // Restore context from existing Chat history if available
+        if (messages.length > 0) {
+             systemInstruction += `\n\nPREVIOUS CONVERSATION HISTORY (Resume from here):\n`;
+             messages.slice(-10).forEach(m => { // Last 10 messages
+                 systemInstruction += `${m.role.toUpperCase()}: ${m.content.slice(0, 300)}\n`;
+             });
+             systemInstruction += `\nNOTE: You are resuming a session. Do NOT introduce yourself again. Just say "I'm ready" or "Listening".`;
+        } else {
+             systemInstruction += `\nIMPORTANT: When the session starts, IMMEDIATELY say "Hi, I'm your code review assistant." DO NOT WAIT for user input.`;
+        }
+
+        systemInstruction += `If they ask "what is this", refer to the most recent highlighted code context. `;
+        
         const sessionPromise = ai.live.connect({
             model: 'gemini-2.5-flash-native-audio-preview-09-2025',
             config: {
@@ -219,10 +235,9 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     nextStartTimeRef.current = outputContext.currentTime;
 
                     // --- 1. Silent Wake-Up Burst ---
-                    // Delayed to prevent race conditions with session establishment
                     setTimeout(() => {
                         console.log("[Live] Sending silent wake-up burst...");
-                        const silence = new Float32Array(3200); // ~0.2s at 16kHz
+                        const silence = new Float32Array(3200); 
                         const pcmBuffer = new Int16Array(silence.length);
                         const base64Audio = arrayBufferToBase64(pcmBuffer.buffer);
                         sessionPromise.then(session => {
@@ -231,12 +246,19 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                             });
                         }).catch(e => console.error("[Live] Failed wake-up burst", e));
 
-                        // --- 2. Explicit Text Greeting Trigger ---
+                        // --- 2. Greeting / Resume Trigger ---
                         setTimeout(() => {
+                            const hasHistory = messages.length > 0;
                             const isNewbie = USER_CONFIG.NEWBIE_MODE;
-                            const prompt = isNewbie 
+                            
+                            let prompt = "";
+                            if (hasHistory) {
+                                prompt = "Say 'I'm listening' or 'Ready to continue' briefly.";
+                            } else {
+                                prompt = isNewbie 
                                 ? `Say "Hi, I'm your code review assistant." exactly. Then briefly mention you can help.`
                                 : `Say "Hi, I'm your code review assistant."`;
+                            }
                             sendTextToSession(prompt);
                         }, 500);
 

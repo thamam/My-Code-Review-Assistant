@@ -92,3 +92,11 @@ export interface Annotation {
   description?: string; // For labels
   timestamp: number;
 }
+
+export interface LinearIssue {
+  identifier: string;
+  title: string;
+  description: string;
+  url: string;
+  state?: string;
+}

@@ -3,7 +3,7 @@ import { ChatMessage as ChatMessageType } from '../../types';
 import clsx from 'clsx';
 import { Bot, User, Copy, Check } from 'lucide-react';
 
-const CodeBlock = ({ content }: { content: string }) => {
+const CodeBlock: React.FC<{ content: string }> = ({ content }) => {
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {

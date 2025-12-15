@@ -17,7 +17,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
   const diffLines = useMemo(() => computeDiff(oldContent, newContent), [oldContent, newContent]);
   const visibleLines = React.useRef(new Set<number>());
   const updateTimeout = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const { walkthrough, activeSectionId, setSelectionState, annotations, addAnnotation } = usePR();
+  const { walkthrough, activeSectionId, selectionState, setSelectionState, annotations, addAnnotation } = usePR();
   const [hoveredLine, setHoveredLine] = useState<number | null>(null);
 
   const fileAnnotations = annotations.filter(a => a.file === filePath);
@@ -30,7 +30,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
 
     updateTimeout.current = setTimeout(() => {
       if (visibleLines.current.size === 0) return;
-      const lines = Array.from(visibleLines.current).sort((a, b) => a - b);
+      const lines = Array.from(visibleLines.current).sort((a: number, b: number) => a - b);
       if (lines.length > 0) onViewportChange(filePath, lines[0], lines[lines.length - 1]);
     }, 100);
   };
@@ -109,6 +109,10 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
         const lineAnnotations = line.newLineNumber ? fileAnnotations.filter(a => a.line === line.newLineNumber) : [];
         const hasMarker = lineAnnotations.some(a => a.type === 'marker');
         const hasLabel = lineAnnotations.some(a => a.type === 'label');
+        
+        // VISUAL INDICATOR FOR SELECTION
+        const isSelected = line.newLineNumber && selectionState && selectionState.file === filePath && 
+                           line.newLineNumber >= selectionState.startLine && line.newLineNumber <= selectionState.endLine;
 
         return (
           <div 
@@ -130,17 +134,30 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
             )}
 
             {/* Line Numbers with Gutter Actions */}
-            <div className="w-12 text-right pr-3 text-gray-600 select-none bg-gray-900/50 border-r border-gray-800 py-0.5 relative">
+            <div className={clsx(
+                "w-12 text-right pr-3 text-gray-600 select-none border-r py-0.5 relative transition-all duration-150",
+                isSelected 
+                    ? "bg-blue-900/30 text-blue-200 border-blue-500 border-l-4 font-bold" 
+                    : "bg-gray-900/50 border-gray-800 border-l-4 border-l-transparent"
+            )}>
               {line.oldLineNumber || ''}
             </div>
+            
             <div 
-                className="w-12 text-right pr-3 text-gray-600 select-none bg-gray-900/50 border-r border-gray-800 py-0.5 relative cursor-pointer hover:text-gray-400"
+                className={clsx(
+                    "w-12 text-right pr-3 select-none border-r py-0.5 relative cursor-pointer hover:text-gray-400 transition-all duration-150",
+                    isSelected 
+                        ? "bg-blue-900/30 text-blue-200 border-blue-500 font-bold" 
+                        : "bg-gray-900/50 border-gray-800 text-gray-600"
+                )}
                 onClick={() => line.newLineNumber && handleGutterClick(line.newLineNumber)}
                 onMouseEnter={() => line.newLineNumber && setHoveredLine(line.newLineNumber)}
                 onMouseLeave={() => setHoveredLine(null)}
             >
               {line.newLineNumber || ''}
-              {line.newLineNumber && hoveredLine === line.newLineNumber && !hasMarker && !hasLabel && (
+              
+              {/* Indicators */}
+              {line.newLineNumber && hoveredLine === line.newLineNumber && !hasMarker && !hasLabel && !isSelected && (
                   <div className="absolute left-1 top-1 text-gray-500 opacity-50"><MapPin size={8} /></div>
               )}
               {(hasMarker || hasLabel) && (
@@ -155,10 +172,11 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
               {isRemoved && '-'}
             </div>
 
-            <div className={clsx("flex-1 whitespace-pre py-0.5 pl-2 relative", 
+            <div className={clsx("flex-1 whitespace-pre py-0.5 pl-2 relative transition-colors duration-150", 
                 isAdded && "text-green-200",
                 isRemoved && "text-red-300 line-through opacity-60",
-                !isAdded && !isRemoved && "text-gray-300"
+                !isAdded && !isRemoved && "text-gray-300",
+                isSelected && "bg-blue-500/10"
             )}>
               {/* Word-level diff rendering */}
               {line.diffParts ? (

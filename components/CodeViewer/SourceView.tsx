@@ -12,7 +12,7 @@ interface SourceViewProps {
 
 export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => {
   const codeRef = useRef<HTMLElement>(null);
-  const { annotations, addAnnotation, removeAnnotation } = usePR();
+  const { annotations, addAnnotation, selectionState, setSelectionState } = usePR();
   const [hoveredLine, setHoveredLine] = useState<number | null>(null);
 
   useEffect(() => {
@@ -24,7 +24,7 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
   const fileAnnotations = annotations.filter(a => a.file === filePath);
   
   const getLanguage = (path: string) => {
-    if (path.endsWith('.ts') || path.endsWith('.tsx')) return 'javascript'; // Prism uses javascript for ts often in basics
+    if (path.endsWith('.ts') || path.endsWith('.tsx')) return 'javascript';
     if (path.endsWith('.js') || path.endsWith('.jsx')) return 'javascript';
     if (path.endsWith('.css')) return 'css';
     if (path.endsWith('.html')) return 'html';
@@ -36,10 +36,47 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
      addAnnotation(filePath, lineNum, 'marker');
   };
 
+  const handleMouseUp = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
+      
+      const range = selection.getRangeAt(0);
+      const startNode = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentElement : range.startContainer;
+      const endNode = range.endContainer.nodeType === Node.TEXT_NODE ? range.endContainer.parentElement : range.endContainer;
+
+      const findLineNumber = (node: Node | null): number | null => {
+        let curr = node as HTMLElement;
+        while (curr) {
+          if (curr.getAttribute && curr.getAttribute('data-line-number')) {
+               return parseInt(curr.getAttribute('data-line-number')!, 10);
+          }
+          curr = curr.parentElement as HTMLElement;
+        }
+        return null;
+      };
+
+      const startLine = findLineNumber(startNode);
+      const endLine = findLineNumber(endNode);
+
+      if (startLine !== null && endLine !== null) {
+          const actualStart = Math.min(startLine, endLine);
+          const actualEnd = Math.max(startLine, endLine);
+          const lines = content.split('\n');
+          const selectedText = lines.slice(actualStart - 1, actualEnd).join('\n');
+          
+          setSelectionState({
+              file: filePath,
+              startLine: actualStart,
+              endLine: actualEnd,
+              content: selectedText
+          });
+      }
+  };
+
   const lines = content.split('\n');
 
   return (
-    <div className="flex min-h-full font-mono text-sm bg-gray-950">
+    <div className="flex min-h-full font-mono text-sm bg-gray-950" onMouseUp={handleMouseUp}>
       {/* Gutter */}
       <div className="flex-shrink-0 w-12 bg-gray-900 border-r border-gray-800 text-gray-600 text-right select-none">
          {lines.map((_, i) => {
@@ -47,18 +84,27 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
              const lineAnnotations = fileAnnotations.filter(a => a.line === lineNum);
              const hasMarker = lineAnnotations.some(a => a.type === 'marker');
              const hasLabel = lineAnnotations.some(a => a.type === 'label');
+             
+             // VISUAL INDICATOR FOR SELECTION
+             const isSelected = selectionState && selectionState.file === filePath && 
+                                lineNum >= selectionState.startLine && lineNum <= selectionState.endLine;
 
              return (
                  <div 
                     key={i} 
-                    className="h-6 leading-6 pr-2 relative hover:bg-gray-800 cursor-pointer group"
+                    className={clsx(
+                        "h-6 leading-6 pr-2 relative hover:bg-gray-800 cursor-pointer group transition-all duration-150",
+                        isSelected 
+                            ? "bg-blue-900/30 text-blue-200 border-l-4 border-blue-500 font-bold" 
+                            : "border-l-4 border-transparent"
+                    )}
                     onMouseEnter={() => setHoveredLine(lineNum)}
                     onMouseLeave={() => setHoveredLine(null)}
                     onClick={() => handleLineClick(lineNum)}
                  >
                      {lineNum}
                      {/* Hover Add Icon */}
-                     {hoveredLine === lineNum && !hasMarker && !hasLabel && (
+                     {hoveredLine === lineNum && !hasMarker && !hasLabel && !isSelected && (
                          <div className="absolute left-1 top-1 text-gray-500 opacity-50">
                              <MapPin size={10} />
                          </div>
@@ -78,17 +124,19 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
       <div className="flex-1 overflow-x-auto">
         <pre className={`language-${getLanguage(filePath)} !bg-transparent !m-0 !p-0 !overflow-visible`}>
           <code ref={codeRef} className={`language-${getLanguage(filePath)} !bg-transparent !p-0 block`}>
-            {/* We render lines manually to align with gutter for annotations if needed, but Prism expects raw text. 
-                For simple aligned rendering, we can rely on standard line-height. 
-                Prism typically highlights the whole block. 
-                To support line decorations, we might need a different approach or overlay. 
-                Here we rely on line-height 1.5rem (h-6 = 24px) consistency. */}
             <div className="leading-6">
                 {lines.map((line, i) => {
                      const lineNum = i + 1;
                      const lineAnnotations = fileAnnotations.filter(a => a.line === lineNum);
+                     const isSelected = selectionState && selectionState.file === filePath && 
+                                lineNum >= selectionState.startLine && lineNum <= selectionState.endLine;
+
                      return (
-                         <div key={i} className="relative h-6 whitespace-pre">
+                         <div 
+                             key={i} 
+                             className={clsx("relative h-6 whitespace-pre transition-colors duration-150", isSelected && "bg-blue-500/10")} 
+                             data-line-number={lineNum}
+                         >
                              {line || '\n'}
                              {/* Annotation Overlays */}
                              {lineAnnotations.map(a => (

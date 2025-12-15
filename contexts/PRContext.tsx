@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation } from '../types';
+import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue } from '../types';
 
 interface PRContextType {
   prData: PRData | null;
@@ -22,6 +22,10 @@ interface PRContextType {
   addAnnotation: (file: string, line: number, type: 'marker' | 'label', text?: string) => void;
   removeAnnotation: (id: string) => void;
   updateAnnotation: (id: string, updates: Partial<Annotation>) => void;
+
+  // Linear Integration
+  linearIssue: LinearIssue | null;
+  setLinearIssue: (issue: LinearIssue | null) => void;
 }
 
 const PRContext = createContext<PRContextType | undefined>(undefined);
@@ -41,6 +45,7 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
   const [selectionState, setSelectionState] = useState<SelectionState | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [linearIssue, setLinearIssue] = useState<LinearIssue | null>(null);
 
   // Select first file on load or when prData changes
   useEffect(() => {
@@ -51,6 +56,9 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     } else {
         setSelectedFile(null);
     }
+    // Reset linear issue when loading a completely new PR if necessary, 
+    // though keeping it might be desired if user is just refreshing.
+    // For now, we keep it unless explicit clear.
   }, [prData]);
 
   const updateViewport = (state: Partial<ViewportState>) => {
@@ -114,7 +122,9 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       annotations,
       addAnnotation,
       removeAnnotation,
-      updateAnnotation
+      updateAnnotation,
+      linearIssue,
+      setLinearIssue
     }}>
       {children}
     </PRContext.Provider>

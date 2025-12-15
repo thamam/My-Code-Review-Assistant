@@ -8,20 +8,29 @@ interface ChatContextType {
   sendMessage: (text: string) => Promise<void>;
   addLocalMessage: (message: ChatMessage) => void;
   upsertMessage: (message: ChatMessage) => void;
+  clearMessages: () => void;
   isTyping: boolean;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
 export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { prData, selectedFile, viewportState, selectionState, walkthrough } = usePR();
+  const { prData, selectedFile, viewportState, selectionState, walkthrough, linearIssue } = usePR();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   
   // Ref to hold the active chat session
   const chatSessionRef = useRef<Chat | null>(null);
 
-  // Initialize or Re-initialize Chat Session when PR Data or Walkthrough changes
+  const clearMessages = () => {
+      setMessages([]);
+      // Force re-init of session to clear backend context if needed, though usually new session obj is enough
+      chatSessionRef.current = null;
+      // Re-trigger the effect to create new session
+      // We can hack this by depending on messages length 0, but better to rely on prData/linearIssue change
+  };
+
+  // Initialize or Re-initialize Chat Session when PR Data, Walkthrough, or Linear Issue changes
   useEffect(() => {
     if (!prData) return;
 
@@ -33,6 +42,16 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       systemInstruction += `You are reviewing a Pull Request titled: "${prData.title}" by author: ${prData.author}.\n`;
       systemInstruction += `PR Description: ${prData.description}\n\n`;
       
+      if (linearIssue) {
+          systemInstruction += `\n--- LINKED LINEAR ISSUE ---\n`;
+          systemInstruction += `Issue ID: ${linearIssue.identifier}\n`;
+          systemInstruction += `Title: ${linearIssue.title}\n`;
+          systemInstruction += `Status: ${linearIssue.state || 'Unknown'}\n`;
+          systemInstruction += `Description: ${linearIssue.description}\n`;
+          systemInstruction += `--- END LINEAR ISSUE ---\n\n`;
+          systemInstruction += `Use the context from the Linear issue to understand the BUSINESS LOGIC and INTENT behind the changes.\n`;
+      }
+
       systemInstruction += `The PR contains changes in the following files:\n`;
       prData.files.forEach(f => {
           systemInstruction += `- ${f.path} (${f.status}, +${f.additions}/-${f.deletions})\n`;
@@ -55,15 +74,17 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         },
       });
 
-      // Reset messages with a welcome message
-      setMessages([
-          {
-              id: 'welcome',
-              role: 'system',
-              content: `Welcome! I've analyzed the ${prData.files.length} changed files in this PR. Ask me anything about the code!`,
-              timestamp: Date.now()
-          }
-      ]);
+      // If messages are empty (fresh start), add welcome
+      if (messages.length === 0) {
+        setMessages([
+            {
+                id: 'welcome',
+                role: 'system',
+                content: `Welcome! I've analyzed the ${prData.files.length} changed files${linearIssue ? ` and the linked issue ${linearIssue.identifier}` : ''}. Ask me anything about the code!`,
+                timestamp: Date.now()
+            }
+        ]);
+      }
 
     } catch (error) {
       console.error("Failed to initialize Gemini AI:", error);
@@ -76,7 +97,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       ]);
     }
-  }, [prData, walkthrough]); // Re-run if PR or Walkthrough changes
+  }, [prData, walkthrough, linearIssue]);
 
   const addLocalMessage = (message: ChatMessage) => {
       setMessages(prev => [...prev, message]);
@@ -188,7 +209,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   return (
-    <ChatContext.Provider value={{ messages, sendMessage, addLocalMessage, upsertMessage, isTyping }}>
+    <ChatContext.Provider value={{ messages, sendMessage, addLocalMessage, upsertMessage, isTyping, clearMessages }}>
       {children}
     </ChatContext.Provider>
   );
