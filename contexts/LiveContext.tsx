@@ -11,6 +11,7 @@ interface LiveContextType {
   disconnect: () => void;
   error: string | null;
   volume: number; // 0.0 to 1.0
+  sendText: (text: string) => void;
 }
 
 const LiveContext = createContext<LiveContextType | undefined>(undefined);
@@ -56,41 +57,71 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const currentTurnInputIdRef = useRef<string | null>(null);
   const currentTurnOutputIdRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (!isActive || !selectionState || !activeSessionRef.current) return;
-    activeSessionRef.current.then(session => {
-        try {
-            // Check if send method exists before calling to avoid crashes
-            if (session && typeof session.send === 'function') {
-                session.send({
-                    clientContent: {
-                        turns: [{
-                            role: 'user',
-                            parts: [{
-                                text: `[SYSTEM CONTEXT UPDATE]: User highlighted code in ${selectionState.file}, lines ${selectionState.startLine}-${selectionState.endLine}. Content: \n${selectionState.content}`
-                            }]
-                        }],
-                        turnComplete: false 
-                    }
-                });
-            } else if (session && typeof (session as any).send === 'function') {
-                 // Fallback cast
-                 (session as any).send({
-                    clientContent: {
-                        turns: [{
-                            role: 'user',
-                            parts: [{
-                                text: `[SYSTEM CONTEXT UPDATE]: User highlighted code in ${selectionState.file}, lines ${selectionState.startLine}-${selectionState.endLine}. Content: \n${selectionState.content}`
-                            }]
-                        }],
-                        turnComplete: false 
-                    }
-                });
-            }
-        } catch (e) {
-            console.warn("Failed to send context update", e);
+  // --- Helper to Send Text (Method Discovery) ---
+  const sendTextToSession = async (text: string) => {
+      if (!activeSessionRef.current) return;
+      const session = await activeSessionRef.current;
+      
+      console.log("[Live] Attempting to send text:", text);
+
+      // Construct the standard client content payload
+      // This is the full structure expected by a generic 'send' method
+      const fullPayload = {
+        clientContent: {
+            turns: [{
+                role: 'user',
+                parts: [{ text: text }]
+            }],
+            turnComplete: true 
         }
-    });
+      };
+
+      try {
+          // Attempt 1: Standard 'send' (Unified)
+          if (typeof session.send === 'function') {
+              console.log("[Live] Using session.send");
+              session.send(fullPayload);
+              return;
+          }
+          
+          // Attempt 2: Specific 'sendClientContent'
+          // If this method exists, it likely expects the inner Content object, not the wrapper.
+          if (typeof (session as any).sendClientContent === 'function') {
+               console.log(`[Live] Using detected method: session.sendClientContent`);
+               (session as any).sendClientContent(fullPayload.clientContent);
+               return;
+          }
+
+          // Attempt 3: Check for other common method names in the prototype
+          const proto = Object.getPrototypeOf(session);
+          const methods = Object.getOwnPropertyNames(proto);
+          console.log("[Live] Session methods available:", methods);
+
+          // Heuristic search for a send-like method if above failed
+          const sendMethod = methods.find(m => m.startsWith('send') && !m.includes('Realtime') && !m.includes('Tool'));
+          
+          if (sendMethod && typeof (session as any)[sendMethod] === 'function') {
+               console.log(`[Live] Using detected method: session.${sendMethod} (Fallback)`);
+               // Try passing the inner content first as it's more likely for specific methods
+               try {
+                   (session as any)[sendMethod](fullPayload.clientContent);
+               } catch {
+                   // If that fails, maybe it wants the full payload?
+                   (session as any)[sendMethod](fullPayload);
+               }
+               return;
+          }
+
+          console.warn("[Live] Could not find a method to send text.");
+      } catch (e) {
+          console.error("[Live] Failed to send text:", e);
+      }
+  };
+
+  useEffect(() => {
+    if (!isActive || !selectionState) return;
+    const update = `[SYSTEM CONTEXT UPDATE]: User highlighted code in ${selectionState.file}, lines ${selectionState.startLine}-${selectionState.endLine}. Content: \n${selectionState.content}`;
+    sendTextToSession(update);
   }, [selectionState, isActive]);
 
   const disconnect = () => {
@@ -132,6 +163,10 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setError("No PR loaded.");
         return;
     }
+    if (!process.env.API_KEY) {
+        setError("Missing API Key");
+        return;
+    }
     if (isConnecting || isActive) return;
 
     try {
@@ -163,7 +198,8 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const filesList = prData.files.map(f => f.path).join(', ');
         systemInstruction += `Changed Files: ${filesList.slice(0, 500)}. `;
         systemInstruction += `If they ask "what is this", refer to the most recent highlighted code context. `;
-        
+        systemInstruction += `\nIMPORTANT: When the session starts, IMMEDIATELY say "Hi, I'm your code review assistant." DO NOT WAIT for user input.`;
+
         const sessionPromise = ai.live.connect({
             model: 'gemini-2.5-flash-native-audio-preview-09-2025',
             config: {
@@ -173,7 +209,7 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 speechConfig: {
                     voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }
                 },
-                systemInstruction: systemInstruction,
+                systemInstruction: { parts: [{ text: systemInstruction }] },
             },
             callbacks: {
                 onopen: () => {
@@ -182,29 +218,29 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     setIsConnecting(false);
                     nextStartTimeRef.current = outputContext.currentTime;
 
-                    // Trigger greeting safely
+                    // --- 1. Silent Wake-Up Burst ---
+                    // Delayed to prevent race conditions with session establishment
                     setTimeout(() => {
+                        console.log("[Live] Sending silent wake-up burst...");
+                        const silence = new Float32Array(3200); // ~0.2s at 16kHz
+                        const pcmBuffer = new Int16Array(silence.length);
+                        const base64Audio = arrayBufferToBase64(pcmBuffer.buffer);
                         sessionPromise.then(session => {
+                             session.sendRealtimeInput({
+                                media: { mimeType: 'audio/pcm;rate=16000', data: base64Audio }
+                            });
+                        }).catch(e => console.error("[Live] Failed wake-up burst", e));
+
+                        // --- 2. Explicit Text Greeting Trigger ---
+                        setTimeout(() => {
                             const isNewbie = USER_CONFIG.NEWBIE_MODE;
                             const prompt = isNewbie 
-                                ? `The user is listening. Say "Hi, I'm your code review assistant." exactly. Then briefly mention you can help with code summaries or finding bugs.`
-                                : `The user is listening. Say "Hi, I'm your code review assistant."`;
-                                
-                            try {
-                                const s = session as any;
-                                if (typeof s.send === 'function') {
-                                    s.send({
-                                        clientContent: {
-                                            turns: [{ role: 'user', parts: [{ text: prompt }] }],
-                                            turnComplete: true
-                                        }
-                                    });
-                                }
-                            } catch (e) {
-                                console.warn("Failed to trigger greeting", e);
-                            }
-                        });
-                    }, 500);
+                                ? `Say "Hi, I'm your code review assistant." exactly. Then briefly mention you can help.`
+                                : `Say "Hi, I'm your code review assistant."`;
+                            sendTextToSession(prompt);
+                        }, 500);
+
+                    }, 200);
                 },
                 onmessage: async (message: LiveServerMessage) => {
                     const audioData = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
@@ -317,7 +353,7 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   return (
-    <LiveContext.Provider value={{ isActive, isConnecting, connect, disconnect, error, volume }}>
+    <LiveContext.Provider value={{ isActive, isConnecting, connect, disconnect, error, volume, sendText: sendTextToSession }}>
       {children}
     </LiveContext.Provider>
   );

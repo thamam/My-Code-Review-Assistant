@@ -8,15 +8,26 @@ import { ChatPanel } from './components/ChatPanel/ChatPanel';
 import { WalkthroughPanel } from './components/Walkthrough/WalkthroughPanel';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { AnnotationList } from './components/Annotations/AnnotationList';
-import { GitPullRequest, Layout, MessageSquare, ArrowLeft, Mic, Loader2, BookMarked, FolderTree } from 'lucide-react';
+import { GitPullRequest, Layout, MessageSquare, ArrowLeft, Mic, Loader2, BookMarked, FolderTree, Play } from 'lucide-react';
 import clsx from 'clsx';
 
 const VoiceControls = () => {
-    const { isActive, isConnecting, connect, disconnect, error, volume } = useLive();
+    const { isActive, isConnecting, connect, disconnect, error, volume, sendText } = useLive();
     
     return (
         <div className="flex items-center gap-2">
             {error && <span className="text-xs text-red-400 hidden sm:inline">{error}</span>}
+            
+            {isActive && (
+                <button
+                    onClick={() => sendText("Hello? Are you there?")}
+                    className="px-2 py-1.5 text-xs font-medium bg-gray-800 border border-gray-700 text-purple-400 rounded hover:bg-gray-700 hover:text-purple-300 transition-colors flex items-center gap-1"
+                    title="Test Greeting (Force Model to Speak)"
+                >
+                    <Play size={12} fill="currentColor" /> Test
+                </button>
+            )}
+
             <button
                 onClick={isActive ? disconnect : connect}
                 disabled={isConnecting}
