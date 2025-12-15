@@ -6,6 +6,7 @@ import { usePR } from '../../contexts/PRContext';
 import { arePathsEquivalent } from '../../utils/fileUtils';
 import { MapPin, MessageSquare, Tag } from 'lucide-react';
 import Prism from 'prismjs';
+import { AnnotationInput } from './AnnotationInput';
 
 interface DiffViewProps {
   oldContent?: string;
@@ -14,9 +15,8 @@ interface DiffViewProps {
   onViewportChange: (file: string, start: number, end: number) => void;
 }
 
-// Helper to determine Prism language
 const getLanguage = (path: string) => {
-    if (path.endsWith('.ts') || path.endsWith('.tsx')) return 'javascript'; // Prism often uses 'javascript' for TS basics in lightweight setups, or 'typescript' if loaded
+    if (path.endsWith('.ts') || path.endsWith('.tsx')) return 'javascript'; 
     if (path.endsWith('.js') || path.endsWith('.jsx')) return 'javascript';
     if (path.endsWith('.css')) return 'css';
     if (path.endsWith('.html')) return 'html';
@@ -25,7 +25,6 @@ const getLanguage = (path: string) => {
     return 'clike';
 };
 
-// Helper to render Prism tokens to React nodes
 const renderToken = (token: string | Prism.Token, key: number): React.ReactNode => {
     if (typeof token === 'string') return token;
     
@@ -43,7 +42,6 @@ const renderToken = (token: string | Prism.Token, key: number): React.ReactNode 
 };
 
 const HighlightedText: React.FC<{ text: string, language: string }> = React.memo(({ text, language }) => {
-    // If text is extremely long, fallback to plain text to prevent freeze
     if (text.length > 500) return <>{text}</>;
 
     try {
@@ -67,6 +65,9 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
   const updateTimeout = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const { walkthrough, activeSectionId, selectionState, setSelectionState, annotations, addAnnotation, removeAnnotation } = usePR();
   const [hoveredLine, setHoveredLine] = useState<number | null>(null);
+  
+  // State for inline label creation
+  const [creatingLabelLine, setCreatingLabelLine] = useState<number | null>(null);
 
   const fileAnnotations = annotations.filter(a => a.file === filePath);
   const language = getLanguage(filePath);
@@ -139,10 +140,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
       return highlights.find(h => newLineNum >= h.lines[0] && newLineNum <= h.lines[1])?.note;
   };
 
-  const handleGutterClick = (e: React.MouseEvent, lineNum: number) => {
-      e.stopPropagation();
-      e.preventDefault();
-      // Toggle Marker
+  const toggleMarker = (lineNum: number) => {
       const existingMarker = fileAnnotations.find(a => a.line === lineNum && a.type === 'marker');
       if (existingMarker) {
           removeAnnotation(existingMarker.id);
@@ -151,17 +149,38 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
       }
   };
 
-  const handleGutterContextMenu = (e: React.MouseEvent, lineNum: number) => {
+  const startLabelCreation = (lineNum: number) => {
+      setCreatingLabelLine(lineNum);
+  };
+  
+  const handleSaveLabel = (text: string) => {
+      if (creatingLabelLine !== null) {
+          addAnnotation(filePath, creatingLabelLine, 'label', text);
+          setCreatingLabelLine(null);
+      }
+  };
+
+  const handleInteraction = (e: React.MouseEvent, lineNum: number) => {
+      e.stopPropagation();
+      
+      // Ctrl+Click or Cmd+Click -> Label
+      if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          startLabelCreation(lineNum);
+          return;
+      }
+
+      // Simple Click -> Marker
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) {
+          toggleMarker(lineNum);
+      }
+  };
+
+  const handleContextMenu = (e: React.MouseEvent, lineNum: number) => {
       e.preventDefault();
       e.stopPropagation();
-      // Add Label
-      // We use a small timeout to ensure no other events interfere
-      setTimeout(() => {
-          const note = prompt("Enter a label/note for line " + lineNum + ":");
-          if (note) {
-              addAnnotation(filePath, lineNum, 'label', note);
-          }
-      }, 10);
+      startLabelCreation(lineNum);
   };
 
   return (
@@ -180,7 +199,6 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
         const hasMarker = lineAnnotations.some(a => a.type === 'marker');
         const hasLabel = lineAnnotations.some(a => a.type === 'label');
         
-        // VISUAL INDICATOR FOR SELECTION
         const isSelected = line.newLineNumber && selectionState && selectionState.file === filePath && 
                            line.newLineNumber >= selectionState.startLine && line.newLineNumber <= selectionState.endLine;
 
@@ -220,15 +238,14 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
                         ? "bg-blue-900/30 text-blue-200 border-blue-500 font-bold" 
                         : "bg-gray-900/50 border-gray-800 text-gray-600"
                 )}
-                onClick={(e) => line.newLineNumber && handleGutterClick(e, line.newLineNumber)}
-                onContextMenu={(e) => line.newLineNumber && handleGutterContextMenu(e, line.newLineNumber)}
+                onClick={(e) => line.newLineNumber && handleInteraction(e, line.newLineNumber)}
+                onContextMenu={(e) => line.newLineNumber && handleContextMenu(e, line.newLineNumber)}
                 onMouseEnter={() => line.newLineNumber && setHoveredLine(line.newLineNumber)}
                 onMouseLeave={() => setHoveredLine(null)}
-                title="Left-click: Marker | Right-click: Label"
+                title="Left-Click: Marker | Right-Click / Ctrl+Click: Label"
             >
               {line.newLineNumber || ''}
               
-              {/* Indicators */}
               {line.newLineNumber && hoveredLine === line.newLineNumber && !hasMarker && !hasLabel && !isSelected && (
                   <div className="absolute left-1 top-1 text-gray-500 opacity-50 pointer-events-none"><MapPin size={8} /></div>
               )}
@@ -244,16 +261,33 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
               {isRemoved && '-'}
             </div>
 
-            <div className={clsx("flex-1 whitespace-pre py-0.5 pl-2 relative transition-colors duration-150", 
-                isAdded && "text-green-100", // Brighter text for readability on green bg
-                isRemoved && "text-red-200 line-through opacity-60",
-                !isAdded && !isRemoved && "text-gray-300",
-                isSelected && "bg-blue-500/10"
-            )}>
-              {/* Word-level diff rendering OR Syntax Highlighting */}
+            {/* Content Area - Now interactive for annotations too */}
+            <div 
+                className={clsx("flex-1 whitespace-pre py-0.5 pl-2 relative transition-colors duration-150 cursor-text", 
+                    isAdded && "text-green-100", 
+                    isRemoved && "text-red-200 line-through opacity-60",
+                    !isAdded && !isRemoved && "text-gray-300",
+                    isSelected && "bg-blue-500/10"
+                )}
+                onClick={(e) => line.newLineNumber && handleInteraction(e, line.newLineNumber)}
+                onContextMenu={(e) => line.newLineNumber && handleContextMenu(e, line.newLineNumber)}
+            >
+              {creatingLabelLine === line.newLineNumber && (
+                  <AnnotationInput 
+                    onSave={handleSaveLabel}
+                    onCancel={() => setCreatingLabelLine(null)}
+                  />
+              )}
+
               {line.diffParts ? (
                   <span>
-                      {line.diffParts.map((part, i) => (
+                      {line.diffParts
+                        .filter(part => {
+                            if (isRemoved) return !part.added;
+                            if (isAdded) return !part.removed;
+                            return true;
+                        })
+                        .map((part, i) => (
                           <span key={i} className={clsx(
                               part.added && isAdded && "bg-green-600/50 font-bold text-white",
                               part.removed && isRemoved && "bg-red-700/50 font-bold text-white decoration-2",
@@ -267,7 +301,6 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
                   <HighlightedText text={line.content} language={language} />
               )}
               
-              {/* Annotations */}
               <div className="absolute right-4 top-0 flex gap-2 pointer-events-none">
                  {lineAnnotations.map(a => (
                      <span key={a.id} className={clsx(

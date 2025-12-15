@@ -1,6 +1,12 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue } from '../types';
 
+interface FocusedLocation {
+  file: string;
+  line: number;
+  timestamp: number;
+}
+
 interface PRContextType {
   prData: PRData | null;
   setPRData: (data: PRData) => void;
@@ -17,6 +23,10 @@ interface PRContextType {
   isDiffMode: boolean;
   toggleDiffMode: () => void;
   
+  // Navigation
+  focusedLocation: FocusedLocation | null;
+  scrollToLine: (file: string, line: number) => void;
+
   // Annotations
   annotations: Annotation[];
   addAnnotation: (file: string, line: number, type: 'marker' | 'label', text?: string) => void;
@@ -46,6 +56,7 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [selectionState, setSelectionState] = useState<SelectionState | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [linearIssue, setLinearIssue] = useState<LinearIssue | null>(null);
+  const [focusedLocation, setFocusedLocation] = useState<FocusedLocation | null>(null);
 
   // Select first file on load or when prData changes
   useEffect(() => {
@@ -56,9 +67,6 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     } else {
         setSelectedFile(null);
     }
-    // Reset linear issue when loading a completely new PR if necessary, 
-    // though keeping it might be desired if user is just refreshing.
-    // For now, we keep it unless explicit clear.
   }, [prData]);
 
   const updateViewport = (state: Partial<ViewportState>) => {
@@ -69,6 +77,18 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     setSelectedFile(file);
     setViewportState({ file: file.path, startLine: 0, endLine: 0 });
     setSelectionState(null);
+  };
+
+  const scrollToLine = (file: string, line: number) => {
+      if (prData) {
+          const fileObj = prData.files.find(f => f.path === file);
+          if (fileObj) {
+              if (selectedFile?.path !== file) {
+                  selectFile(fileObj);
+              }
+              setFocusedLocation({ file, line, timestamp: Date.now() });
+          }
+      }
   };
 
   const loadWalkthrough = (data: Walkthrough) => {
@@ -92,7 +112,11 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
           description: type === 'label' ? '' : undefined,
           timestamp: Date.now()
       };
-      setAnnotations(prev => [...prev, newAnnotation]);
+      
+      setAnnotations(prev => {
+          const next = [...prev, newAnnotation];
+          return next;
+      });
   };
 
   const removeAnnotation = (id: string) => {
@@ -119,6 +143,8 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       setActiveSectionId,
       isDiffMode,
       toggleDiffMode,
+      focusedLocation,
+      scrollToLine,
       annotations,
       addAnnotation,
       removeAnnotation,

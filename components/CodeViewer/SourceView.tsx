@@ -4,6 +4,7 @@ import { usePR } from '../../contexts/PRContext';
 import { Annotation } from '../../types';
 import { MessageSquare, MapPin, Tag } from 'lucide-react';
 import clsx from 'clsx';
+import { AnnotationInput } from './AnnotationInput';
 
 // --- Syntax Highlighting Helpers ---
 
@@ -24,12 +25,10 @@ const renderToken = (token: string | Prism.Token, key: number): React.ReactNode 
 };
 
 const HighlightedText: React.FC<{ text: string, language: string }> = React.memo(({ text, language }) => {
-    // Optimization for very long lines
     if (text.length > 1000) return <>{text}</>;
 
     try {
         const grammar = Prism.languages[language] || Prism.languages.clike;
-        // Fallback for languages not loaded
         if (!grammar) return <>{text}</>;
         
         const tokens = Prism.tokenize(text, grammar);
@@ -39,7 +38,6 @@ const HighlightedText: React.FC<{ text: string, language: string }> = React.memo
             </>
         );
     } catch (e) {
-        console.warn("Tokenization failed", e);
         return <>{text}</>;
     }
 });
@@ -52,11 +50,13 @@ interface SourceViewProps {
 export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => {
   const { annotations, addAnnotation, removeAnnotation, selectionState, setSelectionState } = usePR();
   const [hoveredLine, setHoveredLine] = useState<number | null>(null);
+  const [creatingLabelLine, setCreatingLabelLine] = useState<number | null>(null);
 
   const fileAnnotations = annotations.filter(a => a.file === filePath);
+  const language = getLanguage(filePath);
   
-  const getLanguage = (path: string) => {
-    if (path.endsWith('.ts') || path.endsWith('.tsx')) return 'javascript'; // Prism often uses 'javascript' for TS basics in lightweight setups
+  function getLanguage(path: string) {
+    if (path.endsWith('.ts') || path.endsWith('.tsx')) return 'javascript'; 
     if (path.endsWith('.js') || path.endsWith('.jsx')) return 'javascript';
     if (path.endsWith('.py')) return 'python';
     if (path.endsWith('.css')) return 'css';
@@ -64,32 +64,49 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
     if (path.endsWith('.json')) return 'json';
     if (path.endsWith('.md')) return 'markdown';
     return 'clike';
+  }
+
+  const toggleMarker = (lineNum: number) => {
+      const existingMarker = fileAnnotations.find(a => a.line === lineNum && a.type === 'marker');
+      if (existingMarker) {
+          removeAnnotation(existingMarker.id);
+      } else {
+          addAnnotation(filePath, lineNum, 'marker');
+      }
   };
 
-  const language = getLanguage(filePath);
+  const startLabelCreation = (lineNum: number) => {
+      setCreatingLabelLine(lineNum);
+  };
+  
+  const handleSaveLabel = (text: string) => {
+      if (creatingLabelLine !== null) {
+          addAnnotation(filePath, creatingLabelLine, 'label', text);
+          setCreatingLabelLine(null);
+      }
+  };
 
-  const handleLineClick = (e: React.MouseEvent, lineNum: number) => {
+  const handleInteraction = (e: React.MouseEvent, lineNum: number) => {
      e.stopPropagation();
-     e.preventDefault();
-     // Toggle Marker
-     const existingMarker = fileAnnotations.find(a => a.line === lineNum && a.type === 'marker');
-     if (existingMarker) {
-         removeAnnotation(existingMarker.id);
-     } else {
-         addAnnotation(filePath, lineNum, 'marker');
+     
+     // Ctrl+Click or Cmd+Click -> Label
+     if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        startLabelCreation(lineNum);
+        return;
+     }
+
+     // If selecting text, we usually don't want to trigger marker
+     const selection = window.getSelection();
+     if (!selection || selection.isCollapsed) {
+         toggleMarker(lineNum);
      }
   };
 
-  const handleLineContextMenu = (e: React.MouseEvent, lineNum: number) => {
+  const handleContextMenu = (e: React.MouseEvent, lineNum: number) => {
       e.preventDefault();
       e.stopPropagation();
-      // Add Label
-      setTimeout(() => {
-          const note = prompt("Enter a label/note for line " + lineNum + ":");
-          if (note) {
-              addAnnotation(filePath, lineNum, 'label', note);
-          }
-      }, 10);
+      startLabelCreation(lineNum);
   };
 
   const handleMouseUp = useCallback(() => {
@@ -97,7 +114,6 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
       if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
       
       const range = selection.getRangeAt(0);
-      // Traverse up to find the line container
       const findLineNumber = (node: Node | null): number | null => {
         let curr = node as HTMLElement;
         while (curr) {
@@ -116,7 +132,6 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
           const actualStart = Math.min(startLine, endLine);
           const actualEnd = Math.max(startLine, endLine);
           const lines = content.split('\n');
-          // Adjust for 0-based index vs 1-based lines
           const selectedText = lines.slice(actualStart - 1, actualEnd).join('\n');
           
           if (selectedText) {
@@ -156,9 +171,9 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
                     )}
                     onMouseEnter={() => setHoveredLine(lineNum)}
                     onMouseLeave={() => setHoveredLine(null)}
-                    onClick={(e) => handleLineClick(e, lineNum)}
-                    onContextMenu={(e) => handleLineContextMenu(e, lineNum)}
-                    title="Left-click: Marker | Right-click: Label"
+                    onClick={(e) => handleInteraction(e, lineNum)}
+                    onContextMenu={(e) => handleContextMenu(e, lineNum)}
+                    title="Left-Click: Marker | Right-Click / Ctrl+Click: Label"
                  >
                      {lineNum}
                      {/* Hover Add Icon */}
@@ -180,7 +195,6 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
 
       {/* Code Area */}
       <div className="flex-1 overflow-x-auto pt-2">
-        {/* We use a specific class to ensure Prism styles apply to our spans, without Prism taking over the DOM */}
         <div className={`language-${language} !bg-transparent`}>
             {lines.map((line, i) => {
                  const lineNum = i + 1;
@@ -192,16 +206,24 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
                      <div 
                          key={i} 
                          className={clsx(
-                             "relative h-6 leading-6 whitespace-pre px-4 transition-colors duration-150 flex items-center", 
+                             "relative h-6 leading-6 whitespace-pre px-4 transition-colors duration-150 flex items-center cursor-text", 
                              isSelected && "bg-blue-500/10"
                          )} 
                          data-line-number={lineNum}
+                         onClick={(e) => handleInteraction(e, lineNum)}
+                         onContextMenu={(e) => handleContextMenu(e, lineNum)}
                      >
+                         {creatingLabelLine === lineNum && (
+                             <AnnotationInput 
+                                onSave={handleSaveLabel}
+                                onCancel={() => setCreatingLabelLine(null)}
+                             />
+                         )}
+
                          <span className="inline-block min-w-full">
                             <HighlightedText text={line || ' '} language={language} />
                          </span>
                          
-                         {/* Annotation Overlays */}
                          {lineAnnotations.length > 0 && (
                              <div className="absolute right-4 top-0 h-full flex items-center gap-2 pointer-events-none opacity-80">
                                  {lineAnnotations.map(a => (

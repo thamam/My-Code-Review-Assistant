@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { FileTreeNode } from '../../types';
 import { getFileColor, getStatusColorClass } from '../../utils/colorUtils';
 import { ChevronRight, ChevronDown, File, Folder, FileJson, FileCode, FileText } from 'lucide-react';
@@ -9,6 +9,8 @@ import { arePathsEquivalent } from '../../utils/fileUtils';
 interface FileNodeProps {
   node: FileTreeNode;
   depth?: number;
+  expandedPaths: Set<string>;
+  onToggle: (path: string) => void;
 }
 
 const FileIcon = ({ name, className }: { name: string; className?: string }) => {
@@ -18,11 +20,11 @@ const FileIcon = ({ name, className }: { name: string; className?: string }) => 
   return <File className={className} />;
 };
 
-export const FileNode: React.FC<FileNodeProps> = ({ node, depth = 0 }) => {
-  const [isOpen, setIsOpen] = useState(true);
+export const FileNode: React.FC<FileNodeProps> = ({ node, depth = 0, expandedPaths, onToggle }) => {
   const { selectedFile, selectFile, walkthrough, activeSectionId } = usePR();
 
   const isDirectory = node.type === 'directory';
+  const isOpen = expandedPaths.has(node.path);
   const isSelected = !isDirectory && selectedFile?.path === node.data?.path;
   
   // Walkthrough highlight logic
@@ -33,7 +35,7 @@ export const FileNode: React.FC<FileNodeProps> = ({ node, depth = 0 }) => {
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (isDirectory) {
-      setIsOpen(!isOpen);
+      onToggle(node.path);
     } else if (node.data) {
       selectFile(node.data);
     }
@@ -92,7 +94,13 @@ export const FileNode: React.FC<FileNodeProps> = ({ node, depth = 0 }) => {
       {isDirectory && isOpen && node.children && (
         <div role="group">
           {node.children.map(child => (
-            <FileNode key={child.path} node={child} depth={depth + 1} />
+            <FileNode 
+                key={child.path} 
+                node={child} 
+                depth={depth + 1} 
+                expandedPaths={expandedPaths}
+                onToggle={onToggle}
+            />
           ))}
         </div>
       )}

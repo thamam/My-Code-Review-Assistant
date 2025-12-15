@@ -257,8 +257,8 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 speechConfig: {
                     voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }
                 },
-                // Updated to explicit Content object structure
-                systemInstruction: { parts: [{ text: systemInstructionText }] }, 
+                // FIXED: System instruction should be a string, not an object
+                systemInstruction: systemInstructionText, 
             },
             callbacks: {
                 onopen: () => {

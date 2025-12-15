@@ -6,13 +6,14 @@ import { FileCode2 } from 'lucide-react';
 import { arePathsEquivalent } from '../../utils/fileUtils';
 
 export const CodeViewer: React.FC = () => {
-  const { selectedFile, updateViewport, isDiffMode, activeSectionId, walkthrough } = usePR();
+  const { selectedFile, updateViewport, isDiffMode, activeSectionId, walkthrough, focusedLocation } = usePR();
   const containerRef = useRef<HTMLDivElement>(null);
 
   const handleViewportChange = (file: string, start: number, end: number) => {
     updateViewport({ file, startLine: start, endLine: end });
   };
 
+  // Scroll logic for Walkthroughs
   useEffect(() => {
     if (!selectedFile || !activeSectionId || !walkthrough) return;
 
@@ -35,12 +36,35 @@ export const CodeViewer: React.FC = () => {
         }, 150);
         return () => clearTimeout(timer);
     } else {
-        // If no specific highlight but we are in the section's file, scroll to top to ensure context
         if (containerRef.current) {
             containerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
         }
     }
   }, [selectedFile, activeSectionId, walkthrough]);
+
+  // Scroll logic for explicit Jump To / Focus
+  useEffect(() => {
+      if (focusedLocation && selectedFile && focusedLocation.file === selectedFile.path) {
+          const timer = setTimeout(() => {
+              // Try finding DiffView marker first
+              const marker = document.querySelector(`[data-line-id="${selectedFile.path}:${focusedLocation.line}"]`);
+              if (marker) {
+                  marker.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  marker.parentElement?.classList.add('bg-blue-500/20', 'transition-colors', 'duration-500');
+                  setTimeout(() => marker.parentElement?.classList.remove('bg-blue-500/20'), 1000);
+              } else {
+                  // Fallback for SourceView using line number attribute
+                  const row = document.querySelector(`[data-line-number="${focusedLocation.line}"]`);
+                  if (row) {
+                      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      row.classList.add('bg-blue-500/20', 'transition-colors', 'duration-500');
+                      setTimeout(() => row.classList.remove('bg-blue-500/20'), 1000);
+                  }
+              }
+          }, 100);
+          return () => clearTimeout(timer);
+      }
+  }, [focusedLocation, selectedFile]);
 
   if (!selectedFile) {
     return (

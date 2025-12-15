@@ -3,7 +3,7 @@ import { usePR } from '../../contexts/PRContext';
 import { MapPin, Tag, Download, Trash2, Edit2, Info } from 'lucide-react';
 
 export const AnnotationList: React.FC = () => {
-  const { annotations, removeAnnotation, updateAnnotation, selectFile, prData } = usePR();
+  const { annotations, removeAnnotation, updateAnnotation, scrollToLine } = usePR();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
 
@@ -36,10 +36,7 @@ export const AnnotationList: React.FC = () => {
   };
 
   const jumpTo = (file: string, line: number) => {
-      if (prData) {
-          const fileObj = prData.files.find(f => f.path === file);
-          if (fileObj) selectFile(fileObj);
-      }
+      scrollToLine(file, line);
   };
 
   return (
@@ -54,8 +51,8 @@ export const AnnotationList: React.FC = () => {
        <div className="bg-blue-900/10 border-b border-blue-900/20 p-2 text-[10px] text-blue-300 flex items-start gap-2">
            <Info size={12} className="shrink-0 mt-0.5" />
            <p>
-               <strong>Left-click</strong> a line number to mark.<br/>
-               <strong>Right-click</strong> to add a label/note.
+               <strong>Left-click</strong> gutter/code to mark.<br/>
+               <strong>Right-click</strong> (or Ctrl+Click) to add a label.
            </p>
        </div>
 
