@@ -10,7 +10,9 @@ import { WelcomeScreen } from './components/WelcomeScreen';
 import { AnnotationList } from './components/Annotations/AnnotationList';
 import { LinearModal } from './components/LinearModal';
 import { LinearPanel } from './components/LinearPanel';
-import { GitPullRequest, Layout, MessageSquare, ArrowLeft, Mic, Loader2, BookMarked, FolderTree, Play, RotateCcw, Link, Pause, FileUp, Target } from 'lucide-react';
+import { DiagramPanel } from './components/Diagrams/DiagramPanel';
+import { DiagramViewer } from './components/Diagrams/DiagramViewer';
+import { GitPullRequest, Layout, MessageSquare, ArrowLeft, Mic, Loader2, BookMarked, FolderTree, Play, RotateCcw, Link, Pause, FileUp, Target, Workflow } from 'lucide-react';
 import clsx from 'clsx';
 import { Walkthrough, WalkthroughSection } from './types';
 
@@ -108,13 +110,13 @@ const VoiceControls = () => {
 };
 
 const MainLayout = () => {
-  const { prData, setPRData, walkthrough, loadWalkthrough, viewportState, isDiffMode, toggleDiffMode, linearIssue } = usePR();
+  const { prData, setPRData, walkthrough, loadWalkthrough, viewportState, isDiffMode, toggleDiffMode, linearIssue, activeDiagram, diagramViewMode } = usePR();
   const [showChat, setShowChat] = useState(true);
   const [showTree, setShowTree] = useState(true);
   const [showLinearModal, setShowLinearModal] = useState(false);
   
   // Left Sidebar Tab State
-  const [leftTab, setLeftTab] = useState<'files' | 'annotations' | 'issue'>('files');
+  const [leftTab, setLeftTab] = useState<'files' | 'annotations' | 'issue' | 'diagrams'>('files');
   
   // Resizable Panel States
   const [chatWidth, setChatWidth] = useState(350);
@@ -164,7 +166,6 @@ const MainLayout = () => {
     };
   }, [isResizingChat, isResizingTree, resize, stopResizing]);
 
-  // Logic duplicated from WelcomeScreen for robustness in this PoC without a dedicated util file refactor
   const handleWalkthroughUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -289,12 +290,15 @@ const MainLayout = () => {
            
            <div className="h-6 w-px bg-gray-700 mx-1" />
 
-           <button 
-             onClick={toggleDiffMode}
-             className="px-3 py-1.5 text-xs font-medium bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 transition-colors hidden sm:block"
-           >
-             {isDiffMode ? "Show Raw" : "Show Diff"}
-           </button>
+           {/* Diff Toggle - Only show if diagram is not actively covering everything OR if we are in split mode */}
+           {(!activeDiagram || diagramViewMode === 'split') && (
+             <button 
+               onClick={toggleDiffMode}
+               className="px-3 py-1.5 text-xs font-medium bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 transition-colors hidden sm:block"
+             >
+               {isDiffMode ? "Show Raw" : "Show Diff"}
+             </button>
+           )}
            
            <div className="h-6 w-px bg-gray-700 mx-1 hidden sm:block" />
            <button onClick={() => setShowTree(!showTree)} className={clsx("p-2 rounded hover:bg-gray-800", !showTree && "text-gray-500")}>
@@ -307,7 +311,7 @@ const MainLayout = () => {
       </header>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar: File Tree / Annotations / Linear */}
+        {/* Sidebar: File Tree / Annotations / Linear / Diagrams */}
         {showTree && (
             <div className="flex shrink-0 h-full relative flex-col bg-gray-900 border-r border-gray-800" style={{ width: fileTreeWidth }}>
                 <div className="flex border-b border-gray-800 bg-gray-900">
@@ -332,12 +336,20 @@ const MainLayout = () => {
                     >
                         <Target size={14} />
                     </button>
+                    <button 
+                        onClick={() => setLeftTab('diagrams')}
+                        className={clsx("flex-1 py-2 text-xs font-medium flex items-center justify-center gap-2 transition-colors", leftTab === 'diagrams' ? "text-blue-400 border-b-2 border-blue-400" : "text-gray-500 hover:text-gray-300")}
+                        title="Diagrams"
+                    >
+                        <Workflow size={14} />
+                    </button>
                 </div>
                 
                 <div className="w-full flex-1 overflow-hidden">
                     {leftTab === 'files' && <FileTree />}
                     {leftTab === 'annotations' && <AnnotationList />}
                     {leftTab === 'issue' && <LinearPanel onLinkClick={() => setShowLinearModal(true)} />}
+                    {leftTab === 'diagrams' && <DiagramPanel />}
                 </div>
 
                 <div 
@@ -352,18 +364,35 @@ const MainLayout = () => {
         {/* Center */}
         <div className="flex-1 flex flex-col min-w-0 bg-gray-950 border-r border-gray-800">
             {walkthrough && <WalkthroughPanel />}
-            <div className="flex-1 overflow-hidden relative">
-                <CodeViewer />
-                <div className="absolute bottom-4 right-8 bg-gray-900/90 border border-gray-700 rounded-full px-4 py-1.5 text-xs text-gray-400 shadow-xl backdrop-blur-sm pointer-events-none transition-opacity duration-500 z-20">
-                    {viewportState.file ? (
-                        <span>
-                            Viewing <span className="text-blue-400">{viewportState.file}</span> 
-                            {viewportState.startLine > 0 && ` : lines ${viewportState.startLine}-${viewportState.endLine}`}
-                        </span>
-                    ) : (
-                        "No file selected"
-                    )}
-                </div>
+            <div className="flex-1 flex overflow-hidden relative">
+                
+                {/* Code View - Hidden only if diagram is full screen */}
+                {(!activeDiagram || diagramViewMode === 'split') && (
+                    <div className={clsx("flex-1 flex flex-col overflow-hidden min-w-0 relative", activeDiagram && diagramViewMode === 'split' && "w-1/2")}>
+                         <CodeViewer />
+                         {/* Status Bar for Code */}
+                         <div className="absolute bottom-4 right-8 bg-gray-900/90 border border-gray-700 rounded-full px-4 py-1.5 text-xs text-gray-400 shadow-xl backdrop-blur-sm pointer-events-none transition-opacity duration-500 z-20">
+                            {viewportState.file ? (
+                                <span>
+                                    Viewing <span className="text-blue-400">{viewportState.file}</span> 
+                                    {viewportState.startLine > 0 && ` : lines ${viewportState.startLine}-${viewportState.endLine}`}
+                                </span>
+                            ) : (
+                                "No file selected"
+                            )}
+                         </div>
+                    </div>
+                )}
+
+                {/* Diagram View */}
+                {activeDiagram && (
+                    <div className={clsx(
+                        "flex flex-col min-w-0 bg-gray-950 transition-all duration-300 ease-in-out", 
+                        diagramViewMode === 'split' ? "w-1/2 border-l border-gray-800" : "w-full absolute inset-0 z-30"
+                    )}>
+                        <DiagramViewer />
+                    </div>
+                )}
             </div>
         </div>
 

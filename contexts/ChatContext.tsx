@@ -17,7 +17,7 @@ interface ChatContextType {
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
 export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { prData, selectedFile, viewportState, selectionState, walkthrough, linearIssue } = usePR();
+  const { prData, selectedFile, viewportState, selectionState, walkthrough, linearIssue, activeDiagram, diagrams, diagramViewMode } = usePR();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [currentModel, setModel] = useState('gemini-2.5-flash');
@@ -168,8 +168,25 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           contextAwareMessage += `If the user asks "what is this", they are referring to the code above.\n`;
           contextAwareMessage += `--- END SELECTION CONTEXT ---`;
       } 
+      
+      // Inject Diagram Context (High Priority if active)
+      if (activeDiagram) {
+        contextAwareMessage += `\n\n--- ACTIVE DIAGRAM CONTEXT ---\n`;
+        contextAwareMessage += `The user is currently viewing a sequence diagram titled: "${activeDiagram.title}" (View Mode: ${diagramViewMode})\n`;
+        contextAwareMessage += `Description: ${activeDiagram.description}\n`;
+        contextAwareMessage += `Mermaid Code:\n\`\`\`mermaid\n${activeDiagram.mermaidCode}\n\`\`\`\n`;
+        contextAwareMessage += `If the user asks about the flow or architecture, refer to this diagram.\n`;
+        contextAwareMessage += `--- END DIAGRAM CONTEXT ---`;
+      } else if (diagrams.length > 0) {
+         contextAwareMessage += `\n\n--- AVAILABLE DIAGRAMS (Not currently open) ---\n`;
+         diagrams.forEach(d => {
+             contextAwareMessage += `- ${d.title}\n`;
+         });
+         contextAwareMessage += `--- END AVAILABLE DIAGRAMS ---`;
+      }
+
       // Fallback to Viewport Context (Low Priority)
-      else if (selectedFile) {
+      if (selectedFile) {
         contextAwareMessage += `\n\n--- VIEWPORT CONTEXT ---\n`;
         contextAwareMessage += `The user is currently viewing file: ${selectedFile.path}\n`;
         if (viewportState.startLine > 0) {

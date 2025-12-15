@@ -1,6 +1,7 @@
 import React from 'react';
 import { usePR } from '../contexts/PRContext';
 import { Link, AlertCircle, ExternalLink } from 'lucide-react';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface LinearPanelProps {
   onLinkClick: () => void;
@@ -64,13 +65,11 @@ export const LinearPanel: React.FC<LinearPanelProps> = ({ onLinkClick }) => {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-        <div className="prose prose-invert prose-sm max-w-none">
-            <div className="whitespace-pre-wrap text-sm text-gray-300 leading-relaxed font-sans">
-                {linearIssue.description || (
-                    <span className="text-gray-500 italic">No description provided.</span>
-                )}
-            </div>
-        </div>
+         {linearIssue.description ? (
+             <MarkdownRenderer content={linearIssue.description} />
+         ) : (
+             <span className="text-gray-500 italic text-sm">No description provided.</span>
+         )}
       </div>
     </div>
   );

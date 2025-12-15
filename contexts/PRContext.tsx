@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue } from '../types';
+import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue, Diagram } from '../types';
 
 interface FocusedLocation {
   file: string;
@@ -36,6 +36,15 @@ interface PRContextType {
   // Linear Integration
   linearIssue: LinearIssue | null;
   setLinearIssue: (issue: LinearIssue | null) => void;
+
+  // Diagrams
+  diagrams: Diagram[];
+  activeDiagram: Diagram | null;
+  addDiagram: (diagram: Diagram) => void;
+  removeDiagram: (id: string) => void;
+  setActiveDiagram: (diagram: Diagram | null) => void;
+  diagramViewMode: 'full' | 'split';
+  setDiagramViewMode: (mode: 'full' | 'split') => void;
 }
 
 const PRContext = createContext<PRContextType | undefined>(undefined);
@@ -57,6 +66,10 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [linearIssue, setLinearIssue] = useState<LinearIssue | null>(null);
   const [focusedLocation, setFocusedLocation] = useState<FocusedLocation | null>(null);
+  
+  const [diagrams, setDiagrams] = useState<Diagram[]>([]);
+  const [activeDiagram, setActiveDiagram] = useState<Diagram | null>(null);
+  const [diagramViewMode, setDiagramViewMode] = useState<'full' | 'split'>('full');
 
   // Select first file on load or when prData changes
   useEffect(() => {
@@ -64,6 +77,9 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       if (!selectedFile || !prData.files.find(f => f.path === selectedFile.path)) {
         setSelectedFile(prData.files[0]);
       }
+      // Reset Diagrams on new PR
+      setDiagrams([]);
+      setActiveDiagram(null);
     } else {
         setSelectedFile(null);
     }
@@ -75,6 +91,12 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
   const selectFile = (file: FileChange) => {
     setSelectedFile(file);
+    // Do NOT automatically deselect diagram if in split mode, but for now we keep behavior simple:
+    // If they click a file, maybe they want to see it. 
+    // But if we have split view, we want to keep diagram open.
+    // Let's decide: selecting a file just updates the CodeViewer. 
+    // We only clear activeDiagram if explicitly closed.
+    // setActiveDiagram(null); <-- REMOVED this to allow file switching while diagram is open
     setViewportState({ file: file.path, startLine: 0, endLine: 0 });
     setSelectionState(null);
   };
@@ -127,6 +149,20 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       setAnnotations(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
   };
 
+  // Diagram Methods
+  const addDiagram = (diagram: Diagram) => {
+      setDiagrams(prev => [...prev, diagram]);
+  };
+
+  const removeDiagram = (id: string) => {
+      setDiagrams(prev => prev.filter(d => d.id !== id));
+      if (activeDiagram?.id === id) setActiveDiagram(null);
+  };
+
+  const handleSetActiveDiagram = (diagram: Diagram | null) => {
+      setActiveDiagram(diagram);
+  };
+
   return (
     <PRContext.Provider value={{
       prData,
@@ -150,7 +186,14 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       removeAnnotation,
       updateAnnotation,
       linearIssue,
-      setLinearIssue
+      setLinearIssue,
+      diagrams,
+      activeDiagram,
+      addDiagram,
+      removeDiagram,
+      setActiveDiagram: handleSetActiveDiagram,
+      diagramViewMode,
+      setDiagramViewMode
     }}>
       {children}
     </PRContext.Provider>

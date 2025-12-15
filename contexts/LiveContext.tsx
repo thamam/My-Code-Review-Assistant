@@ -36,7 +36,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 }
 
 export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { prData, walkthrough, selectionState, linearIssue, selectedFile } = usePR();
+  const { prData, walkthrough, selectionState, linearIssue, selectedFile, activeDiagram, diagramViewMode } = usePR();
   const { upsertMessage, messages } = useChat();
   const [isActive, setIsActive] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -58,8 +58,9 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const currentTurnOutputIdRef = useRef<string | null>(null);
   
   // Debounce refs
-  const selectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const fileTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const selectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const diagramTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- Helper to Send Text (Method Discovery) ---
   const sendTextToSession = async (text: string) => {
@@ -111,14 +112,16 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // 2. Monitor File Navigation Changes (Debounced)
   useEffect(() => {
+      // If diagram is FULL screen, we don't send file updates to avoid confusion, 
+      // unless user is explicitly selecting text (handled by selectionState above).
+      // But if SPLIT view, we DO send file updates.
       if (!isActive || !selectedFile) return;
+      if (activeDiagram && diagramViewMode === 'full') return;
       
       if (fileTimeoutRef.current) clearTimeout(fileTimeoutRef.current);
 
       fileTimeoutRef.current = setTimeout(() => {
           const content = selectedFile.newContent || selectedFile.oldContent || "";
-          // Injecting content is crucial to prevent the model from guessing/hallucinating file contents.
-          // 50k characters is roughly 1000 lines of code, covering most files entirely.
           const contentSnippet = content.slice(0, 50000); 
           
           let update = `[SYSTEM CONTEXT UPDATE]: User navigated to file: ${selectedFile.path}. File Status: ${selectedFile.status}.\n`;
@@ -130,10 +133,30 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
 
           sendTextToSession(update);
-      }, 1500); // 1.5 second debounce
+      }, 1500); 
 
       return () => { if (fileTimeoutRef.current) clearTimeout(fileTimeoutRef.current); };
-  }, [selectedFile?.path, isActive]);
+  }, [selectedFile?.path, isActive, activeDiagram, diagramViewMode]);
+
+  // 3. Monitor Active Diagram Changes (Debounced)
+  useEffect(() => {
+    if (!isActive || !activeDiagram) return;
+
+    if (diagramTimeoutRef.current) clearTimeout(diagramTimeoutRef.current);
+
+    diagramTimeoutRef.current = setTimeout(() => {
+        let update = `[SYSTEM CONTEXT UPDATE]: User is viewing a Sequence Diagram.\nTitle: ${activeDiagram.title}\nDescription: ${activeDiagram.description}\nMermaid Code:\n\`\`\`mermaid\n${activeDiagram.mermaidCode}\n\`\`\`\n`;
+        if (diagramViewMode === 'split') {
+            update += `NOTE: The user is viewing this diagram SPLIT SCREEN alongside the code. They can see both.`;
+        } else {
+            update += `NOTE: The user is viewing ONLY this diagram (Full Screen).`;
+        }
+        sendTextToSession(update);
+    }, 1000);
+
+    return () => { if (diagramTimeoutRef.current) clearTimeout(diagramTimeoutRef.current); };
+  }, [activeDiagram, isActive, diagramViewMode]);
+
 
   const disconnect = () => {
     // 1. Close Audio Contexts
@@ -180,6 +203,7 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Clear timeouts
     if (selectionTimeoutRef.current) clearTimeout(selectionTimeoutRef.current);
     if (fileTimeoutRef.current) clearTimeout(fileTimeoutRef.current);
+    if (diagramTimeoutRef.current) clearTimeout(diagramTimeoutRef.current);
 
     setIsActive(false);
     setIsConnecting(false);

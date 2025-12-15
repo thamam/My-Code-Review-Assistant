@@ -1,13 +1,21 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { usePR } from '../../contexts/PRContext';
 import { DiffView } from './DiffView';
 import { SourceView } from './SourceView';
-import { FileCode2 } from 'lucide-react';
+import { FileCode2, Eye, Code2 } from 'lucide-react';
 import { arePathsEquivalent } from '../../utils/fileUtils';
+import { MarkdownRenderer } from '../MarkdownRenderer';
 
 export const CodeViewer: React.FC = () => {
   const { selectedFile, updateViewport, isDiffMode, activeSectionId, walkthrough, focusedLocation } = usePR();
   const containerRef = useRef<HTMLDivElement>(null);
+  
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
+
+  // Reset preview mode when file changes
+  useEffect(() => {
+    setIsPreviewMode(false);
+  }, [selectedFile?.path]);
 
   const handleViewportChange = (file: string, start: number, end: number) => {
     updateViewport({ file, startLine: start, endLine: end });
@@ -76,7 +84,9 @@ export const CodeViewer: React.FC = () => {
   }
 
   // Use SourceView if the file is unchanged OR if the user explicitly toggled "Show Raw" (isDiffMode === false)
-  const useSourceView = selectedFile.status === 'unchanged' || !isDiffMode;
+  // OR if we are in Preview Mode
+  const isSourceOrPreview = selectedFile.status === 'unchanged' || !isDiffMode || isPreviewMode;
+  const isMarkdown = selectedFile.path.toLowerCase().endsWith('.md');
 
   return (
     <div className="h-full flex flex-col bg-gray-950 overflow-hidden">
@@ -87,25 +97,47 @@ export const CodeViewer: React.FC = () => {
              {selectedFile.status}
            </span>
         </div>
-        {!useSourceView && (
-             <div className="flex items-center gap-4 text-[10px] text-gray-500">
-                 <div className="flex items-center gap-1">
-                     <div className="w-2 h-2 bg-green-900/50 border border-green-700 rounded-sm"></div>
-                     <span>Added</span>
-                 </div>
-                 <div className="flex items-center gap-1">
-                     <div className="w-2 h-2 bg-red-900/50 border border-red-700 rounded-sm"></div>
-                     <span>Deleted</span>
-                 </div>
-             </div>
-        )}
+        
+        <div className="flex items-center gap-4">
+            {isMarkdown && (
+                <button
+                    onClick={() => setIsPreviewMode(!isPreviewMode)}
+                    className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded transition-colors ${
+                        isPreviewMode 
+                            ? "bg-purple-900/50 text-purple-300 border border-purple-700" 
+                            : "bg-gray-800 text-gray-400 hover:text-white border border-gray-700"
+                    }`}
+                    title={isPreviewMode ? "Show Code" : "Preview Markdown"}
+                >
+                    {isPreviewMode ? <Code2 size={14} /> : <Eye size={14} />}
+                    <span className="hidden sm:inline">{isPreviewMode ? "Source" : "Preview"}</span>
+                </button>
+            )}
+
+            {!isSourceOrPreview && (
+                <div className="flex items-center gap-4 text-[10px] text-gray-500">
+                    <div className="flex items-center gap-1">
+                        <div className="w-2 h-2 bg-green-900/50 border border-green-700 rounded-sm"></div>
+                        <span>Added</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                        <div className="w-2 h-2 bg-red-900/50 border border-red-700 rounded-sm"></div>
+                        <span>Deleted</span>
+                    </div>
+                </div>
+            )}
+        </div>
       </div>
       
       <div 
         ref={containerRef}
         className="flex-1 overflow-auto custom-scrollbar relative scroll-smooth"
       >
-        {useSourceView ? (
+        {isPreviewMode && isMarkdown ? (
+            <div className="p-8 max-w-4xl mx-auto">
+                <MarkdownRenderer content={selectedFile.newContent || selectedFile.oldContent || ''} />
+            </div>
+        ) : isSourceOrPreview ? (
             <SourceView 
                 key={selectedFile.path}
                 content={selectedFile.newContent || selectedFile.oldContent || ""}
