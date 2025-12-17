@@ -17,70 +17,59 @@ interface ChatContextType {
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
 export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { prData, selectedFile, viewportState, selectionState, walkthrough, linearIssue, activeDiagram, diagrams, diagramViewMode } = usePR();
+  const { prData, selectionState, linearIssue, activeDiagram } = usePR();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
-  const [currentModel, setModel] = useState('gemini-2.5-flash');
+  const [currentModel, setModel] = useState('gemini-3-pro-preview');
   const [sessionId, setSessionId] = useState(0);
   
-  // Ref to hold the active chat session
   const chatSessionRef = useRef<Chat | null>(null);
 
   const resetChat = () => {
       if (!prData) return;
       chatSessionRef.current = null;
-      // Increment sessionId to trigger effect for backend session recreation
       setSessionId(prev => prev + 1);
-      
-      // Immediately reset UI messages to Welcome state
-      // This avoids race conditions with useEffect relying on empty state
       setMessages([
           {
               id: 'welcome',
               role: 'system',
-              content: `Welcome! I've analyzed the ${prData.files.length} changed files${linearIssue ? ` and the linked issue ${linearIssue.identifier}` : ''}. Ask me anything about the code!`,
+              content: `Theia connected (Model: ${currentModel}). Analyzing ${prData.files.length} changed files in "${prData.title}". How can I assist with your review?`,
               timestamp: Date.now()
           }
       ]);
   };
 
-  // Initialize or Re-initialize Chat Session when PR Data, Walkthrough, Linear Issue, Model, or Session ID changes
   useEffect(() => {
     if (!prData) return;
 
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
-      // Build a robust system prompt with PR context
-      let systemInstruction = `You are an expert Senior Software Engineer acting as a code reviewer assistant.\n`;
-      systemInstruction += `You are reviewing a Pull Request titled: "${prData.title}" by author: ${prData.author}.\n`;
-      systemInstruction += `PR Description: ${prData.description}\n\n`;
+      let systemInstruction = `You are Theia, a world-class Staff Software Engineer and Architect. 
+
+CRITICAL: YOU HAVE DIRECT ACCESS TO LINEAR ISSUE DATA INJECTED BELOW. 
+NEVER TELL THE USER YOU CANNOT SEE LINEAR. 
+THE DATA IS PROVIDED IN THIS PROMPT BY THE SYSTEM. 
+
+Focus on:
+1. Architectural integrity and design patterns.
+2. Performance, security, and scalability.
+3. Cross-referencing changes against the Acceptance Criteria provided in the Linear Issue below.
+
+Reviewing PR: "${prData.title}" by ${prData.author}.
+PR Description: ${prData.description}\n\n`;
       
       if (linearIssue) {
-          systemInstruction += `\n--- LINKED LINEAR ISSUE ---\n`;
-          systemInstruction += `Issue ID: ${linearIssue.identifier}\n`;
+          systemInstruction += `\n--- LINKED LINEAR ISSUE (PRIMARY SOURCE OF TRUTH) ---\n`;
+          systemInstruction += `ID: ${linearIssue.identifier}\n`;
           systemInstruction += `Title: ${linearIssue.title}\n`;
-          systemInstruction += `Status: ${linearIssue.state || 'Unknown'}\n`;
-          systemInstruction += `Description: ${linearIssue.description}\n`;
+          systemInstruction += `Full Requirements/Criteria: ${linearIssue.description}\n`;
           systemInstruction += `--- END LINEAR ISSUE ---\n\n`;
-          systemInstruction += `Use the context from the Linear issue to understand the BUSINESS LOGIC and INTENT behind the changes.\n`;
+          systemInstruction += `IMPORTANT: The user expects you to know exactly what is in this issue. Use it to validate if the PR meets the requirements.`;
       }
 
-      systemInstruction += `The PR contains changes in the following files:\n`;
-      prData.files.forEach(f => {
-          systemInstruction += `- ${f.path} (${f.status}, +${f.additions}/-${f.deletions})\n`;
-      });
+      systemInstruction += `\nThe PR contains changes in ${prData.files.length} files. Be direct, technically precise, and maintain a professional peer-review tone.`;
 
-      if (walkthrough) {
-          systemInstruction += `\nA specific walkthrough titled "${walkthrough.title}" is currently loaded. It has ${walkthrough.sections.length} sections.\n`;
-          walkthrough.sections.forEach((s, i) => {
-              systemInstruction += `Section ${i+1}: ${s.title} (Files: ${s.files.join(', ')})\nDescription: ${s.description}\n`;
-          });
-      }
-
-      systemInstruction += `\nBe concise, helpful, and focus on code quality, potential bugs, and best practices.`;
-
-      // Create the chat session
       chatSessionRef.current = ai.chats.create({
         model: currentModel,
         config: {
@@ -88,31 +77,21 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         },
       });
 
-      // Only add welcome if messages are completely empty (Initial Load)
-      // resetChat handles its own welcome message setting to be synchronous with click
       if (messages.length === 0) {
         setMessages([
             {
                 id: 'welcome',
                 role: 'system',
-                content: `Welcome! I've analyzed the ${prData.files.length} changed files${linearIssue ? ` and the linked issue ${linearIssue.identifier}` : ''}. Ask me anything about the code!`,
+                content: `Theia connected. I've analyzed ${prData.files.length} changed files in "${prData.title}" and reviewed the linked Linear issue. Ready for review.`,
                 timestamp: Date.now()
             }
         ]);
       }
 
     } catch (error) {
-      console.error("Failed to initialize Gemini AI:", error);
-      setMessages([
-        {
-          id: 'error',
-          role: 'system',
-          content: 'Error: Could not connect to AI service. Please check your API configuration.',
-          timestamp: Date.now()
-        }
-      ]);
+      console.error("Failed to initialize Theia:", error);
     }
-  }, [prData, walkthrough, linearIssue, currentModel, sessionId]);
+  }, [prData, linearIssue, currentModel, sessionId]);
 
   const addLocalMessage = (message: ChatMessage) => {
       setMessages(prev => [...prev, message]);
@@ -134,69 +113,25 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!chatSessionRef.current) return;
 
     const userMessageId = Date.now().toString();
-    
-    // Determine the context to attach to the UI message (for visual reference)
-    const contextMeta = selectionState ? {
-        file: selectionState.file,
-        lineRange: [selectionState.startLine, selectionState.endLine] as [number, number]
-    } : (selectedFile ? {
-        file: selectedFile.path,
-        lineRange: [viewportState.startLine, viewportState.endLine] as [number, number]
-    } : undefined);
-
     const newUserMessage: ChatMessage = {
       id: userMessageId,
       role: 'user',
       content: text,
-      timestamp: Date.now(),
-      context: contextMeta
+      timestamp: Date.now()
     };
 
     setMessages(prev => [...prev, newUserMessage]);
     setIsTyping(true);
 
     try {
-      // Construct the message payload with "invisible" context about the current file view
       let contextAwareMessage = text;
       
-      // Inject Selection Context (High Priority)
       if (selectionState) {
-          contextAwareMessage += `\n\n--- USER SELECTION CONTEXT ---\n`;
-          contextAwareMessage += `The user has HIGHLIGHTED specific lines in file: ${selectionState.file}\n`;
-          contextAwareMessage += `Lines: ${selectionState.startLine} to ${selectionState.endLine}\n`;
-          contextAwareMessage += `Selected Code Content:\n\`\`\`\n${selectionState.content}\n\`\`\`\n`;
-          contextAwareMessage += `If the user asks "what is this", they are referring to the code above.\n`;
-          contextAwareMessage += `--- END SELECTION CONTEXT ---`;
+          contextAwareMessage += `\n\n--- CONTEXT: ${selectionState.file} (${selectionState.startLine}-${selectionState.endLine}) ---\n${selectionState.content}\n`;
       } 
       
-      // Inject Diagram Context (High Priority if active)
       if (activeDiagram) {
-        contextAwareMessage += `\n\n--- ACTIVE DIAGRAM CONTEXT ---\n`;
-        contextAwareMessage += `The user is currently viewing a sequence diagram titled: "${activeDiagram.title}" (View Mode: ${diagramViewMode})\n`;
-        contextAwareMessage += `Description: ${activeDiagram.description}\n`;
-        contextAwareMessage += `Mermaid Code:\n\`\`\`mermaid\n${activeDiagram.mermaidCode}\n\`\`\`\n`;
-        contextAwareMessage += `If the user asks about the flow or architecture, refer to this diagram.\n`;
-        contextAwareMessage += `--- END DIAGRAM CONTEXT ---`;
-      } else if (diagrams.length > 0) {
-         contextAwareMessage += `\n\n--- AVAILABLE DIAGRAMS (Not currently open) ---\n`;
-         diagrams.forEach(d => {
-             contextAwareMessage += `- ${d.title}\n`;
-         });
-         contextAwareMessage += `--- END AVAILABLE DIAGRAMS ---`;
-      }
-
-      // Fallback to Viewport Context (Low Priority)
-      if (selectedFile) {
-        contextAwareMessage += `\n\n--- VIEWPORT CONTEXT ---\n`;
-        contextAwareMessage += `The user is currently viewing file: ${selectedFile.path}\n`;
-        if (viewportState.startLine > 0) {
-            contextAwareMessage += `Visible lines: ${viewportState.startLine} to ${viewportState.endLine}\n`;
-        }
-        const contentSnippet = selectedFile.newContent || selectedFile.oldContent || "";
-        if (contentSnippet.length > 0) {
-            contextAwareMessage += `File Content Preview:\n\`\`\`${selectedFile.path.split('.').pop()}\n${contentSnippet.slice(0, 10000)}\n\`\`\`\n`;
-        }
-        contextAwareMessage += `--- END VIEWPORT CONTEXT ---`;
+        contextAwareMessage += `\n\n--- ACTIVE DIAGRAM: ${activeDiagram.title} ---`;
       }
 
       const responseStream = await chatSessionRef.current.sendMessageStream({ 
@@ -206,7 +141,6 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const aiMessageId = (Date.now() + 1).toString();
       let fullResponseText = "";
 
-      // Add placeholder for AI response
       setMessages(prev => [...prev, {
         id: aiMessageId,
         role: 'assistant',
@@ -215,26 +149,13 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }]);
 
       for await (const chunk of responseStream) {
-        const chunkText = chunk.text;
-        if (chunkText) {
-          fullResponseText += chunkText;
-          // Update the specific message in the state
-          setMessages(prev => prev.map(msg => 
-            msg.id === aiMessageId 
-              ? { ...msg, content: fullResponseText }
-              : msg
-          ));
+        if (chunk.text) {
+          fullResponseText += chunk.text;
+          setMessages(prev => prev.map(msg => msg.id === aiMessageId ? { ...msg, content: fullResponseText } : msg));
         }
       }
-
     } catch (error) {
-      console.error("Error sending message to Gemini:", error);
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        role: 'system',
-        content: "Sorry, I encountered an error processing your request.",
-        timestamp: Date.now()
-      }]);
+      console.error("Error sending message to Theia:", error);
     } finally {
       setIsTyping(false);
     }
@@ -249,8 +170,6 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
 export const useChat = () => {
   const context = useContext(ChatContext);
-  if (context === undefined) {
-    throw new Error('useChat must be used within a ChatProvider');
-  }
+  if (context === undefined) throw new Error('useChat must be used within a ChatProvider');
   return context;
 };

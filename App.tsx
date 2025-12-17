@@ -12,12 +12,12 @@ import { LinearModal } from './components/LinearModal';
 import { LinearPanel } from './components/LinearPanel';
 import { DiagramPanel } from './components/Diagrams/DiagramPanel';
 import { DiagramViewer } from './components/Diagrams/DiagramViewer';
-import { GitPullRequest, Layout, MessageSquare, ArrowLeft, Mic, Loader2, BookMarked, FolderTree, Play, RotateCcw, Link, Pause, FileUp, Target, Workflow } from 'lucide-react';
+import { Layout, MessageSquare, ArrowLeft, Mic, Loader2, BookMarked, FolderTree, RotateCcw, Link, Pause, FileUp, Target, Workflow, Eye } from 'lucide-react';
 import clsx from 'clsx';
-import { Walkthrough, WalkthroughSection } from './types';
+import { parseWalkthroughFile } from './services/walkthroughParser';
 
 const VoiceControls = () => {
-    const { isActive, isConnecting, connect, disconnect, error, volume, sendText } = useLive();
+    const { isActive, isConnecting, connect, disconnect, error, volume } = useLive();
     const { resetChat } = useChat();
     const [confirmReset, setConfirmReset] = useState(false);
 
@@ -40,7 +40,7 @@ const VoiceControls = () => {
     
     return (
         <div className="flex items-center gap-2">
-            {error && <span className="text-xs text-red-400 hidden sm:inline">{error}</span>}
+            {error && <div className="text-[10px] bg-red-900/50 border border-red-500/50 text-red-200 px-2 py-1 rounded animate-pulse">{error}</div>}
             
             <button
                 onClick={handleReset}
@@ -56,31 +56,20 @@ const VoiceControls = () => {
                 {confirmReset && <span className="text-[10px] font-bold">Confirm</span>}
             </button>
 
-            {isActive && (
-                <button
-                    onClick={() => sendText("Hello? Are you there?")}
-                    className="px-2 py-1.5 text-xs font-medium bg-gray-800 border border-gray-700 text-purple-400 rounded hover:bg-gray-700 hover:text-purple-300 transition-colors flex items-center gap-1"
-                    title="Test Greeting (Force Model to Speak)"
-                >
-                    <Play size={12} fill="currentColor" /> Test
-                </button>
-            )}
-
             <button
                 onClick={isActive ? disconnect : connect}
                 disabled={isConnecting}
                 className={clsx(
-                    "flex items-center gap-2 px-3 py-1.5 text-xs font-medium border rounded transition-all relative overflow-hidden",
+                    "flex items-center gap-2 px-3 py-1.5 text-xs font-medium border rounded transition-all relative overflow-hidden group/btn",
                     isActive 
-                        ? "bg-red-900/30 border-red-500/50 text-red-200 hover:bg-red-900/50" 
+                        ? "bg-amber-900/30 border-amber-500/50 text-amber-200 hover:bg-amber-900/50" 
                         : "bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white"
                 )}
-                title={isActive ? "Pause Context (Stop Voice)" : "Start Voice Chat"}
+                title={isActive ? "Stop Session" : "Voice Review"}
             >
-                {/* Volume Visualizer Background */}
                 {isActive && (
                     <div 
-                        className="absolute inset-0 bg-red-500/20 transition-transform duration-75 ease-out origin-left pointer-events-none"
+                        className="absolute inset-0 bg-amber-500/10 transition-transform duration-75 ease-out origin-left pointer-events-none"
                         style={{ transform: `scaleX(${0.1 + volume})` }}
                     />
                 )}
@@ -89,19 +78,17 @@ const VoiceControls = () => {
                     <Loader2 size={16} className="animate-spin" />
                 ) : isActive ? (
                     <>
-                        <div className="relative">
-                            <Pause size={16} className="text-red-400 relative z-10" />
-                        </div>
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                        </span>
-                        <span className="hidden sm:inline relative z-10 font-bold">Live</span>
+                        <div className={clsx(
+                            "w-2 h-2 rounded-full bg-amber-400 animate-ping absolute left-1 top-1",
+                            volume < 0.05 && "opacity-0"
+                        )} />
+                        <Pause size={16} className="text-amber-400 relative z-10" />
+                        <span className="hidden sm:inline relative z-10 font-bold uppercase tracking-widest text-[10px]">Theia Live</span>
                     </>
                 ) : (
                     <>
-                        <Mic size={16} />
-                        <span className="hidden sm:inline">Voice</span>
+                        <Mic size={16} className="group-hover/btn:scale-110 transition-transform" />
+                        <span className="hidden sm:inline">Voice Review</span>
                     </>
                 )}
             </button>
@@ -110,18 +97,13 @@ const VoiceControls = () => {
 };
 
 const MainLayout = () => {
-  const { prData, setPRData, walkthrough, loadWalkthrough, viewportState, isDiffMode, toggleDiffMode, linearIssue, activeDiagram, diagramViewMode } = usePR();
+  const { prData, setPRData, walkthrough, loadWalkthrough, isDiffMode, toggleDiffMode, linearIssue, activeDiagram, diagramViewMode } = usePR();
   const [showChat, setShowChat] = useState(true);
   const [showTree, setShowTree] = useState(true);
   const [showLinearModal, setShowLinearModal] = useState(false);
-  
-  // Left Sidebar Tab State
   const [leftTab, setLeftTab] = useState<'files' | 'annotations' | 'issue' | 'diagrams'>('files');
-  
-  // Resizable Panel States
   const [chatWidth, setChatWidth] = useState(350);
   const [fileTreeWidth, setFileTreeWidth] = useState(280);
-  
   const [isResizingChat, setIsResizingChat] = useState(false);
   const [isResizingTree, setIsResizingTree] = useState(false);
 
@@ -143,15 +125,11 @@ const MainLayout = () => {
   const resize = useCallback((e: MouseEvent) => {
     if (isResizingChat) {
         const newWidth = document.body.clientWidth - e.clientX;
-        if (newWidth > 250 && newWidth < document.body.clientWidth * 0.6) {
-            setChatWidth(newWidth);
-        }
+        if (newWidth > 250 && newWidth < document.body.clientWidth * 0.6) setChatWidth(newWidth);
     }
     if (isResizingTree) {
         const newWidth = e.clientX;
-        if (newWidth > 200 && newWidth < document.body.clientWidth * 0.4) {
-            setFileTreeWidth(newWidth);
-        }
+        if (newWidth > 200 && newWidth < document.body.clientWidth * 0.4) setFileTreeWidth(newWidth);
     }
   }, [isResizingChat, isResizingTree]);
 
@@ -166,72 +144,19 @@ const MainLayout = () => {
     };
   }, [isResizingChat, isResizingTree, resize, stopResizing]);
 
-  const handleWalkthroughUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleWalkthroughUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = (event) => {
-          const content = event.target?.result as string;
-          try {
-              if (file.name.endsWith('.json')) {
-                  loadWalkthrough(JSON.parse(content));
-              } else {
-                  // Basic Markdown Parse
-                   const lines = content.split('\n');
-                   let title = "Walkthrough";
-                   let author = "Anonymous";
-                   const sections: WalkthroughSection[] = [];
-                   let currentSection: any = null;
-
-                   for (let line of lines) {
-                       line = line.trim();
-                       if (!line) continue;
-                       if (line.startsWith('# ')) title = line.substring(2).trim();
-                       else if (line.toLowerCase().startsWith('author:')) author = line.substring(7).trim();
-                       else if (line.startsWith('## ')) {
-                           if (currentSection) sections.push(currentSection);
-                           currentSection = { id: `sec-${sections.length + 1}`, title: line.substring(3).trim(), files: [], description: '', highlights: [] };
-                       } else if (currentSection) {
-                           if (line.toLowerCase().startsWith('files:')) currentSection.files = line.substring(6).split(',').map((f:string) => f.trim());
-                           else if (line.startsWith('- ') && line.includes(':')) {
-                               const firstColon = line.indexOf(':');
-                               if (firstColon > -1) {
-                                   const file = line.substring(2, firstColon).trim();
-                                   const rest = line.substring(firstColon + 1).trim();
-                                   const secondColon = rest.indexOf(':');
-                                   if (secondColon > -1) {
-                                       const range = rest.substring(0, secondColon).trim();
-                                       const note = rest.substring(secondColon + 1).trim();
-                                       let start = 0, end = 0;
-                                       if (range.includes('-')) { const parts = range.split('-'); start = parseInt(parts[0]); end = parseInt(parts[1]); } 
-                                       else { start = parseInt(range); end = start; }
-                                       if (!isNaN(start)) {
-                                           currentSection.highlights.push({ file, lines: [start, end], note });
-                                           if (!currentSection.files.includes(file)) currentSection.files.push(file);
-                                       } else currentSection.description += line + '\n';
-                                   } else currentSection.description += line + '\n';
-                               } else currentSection.description += line + '\n';
-                           } else currentSection.description += line + '\n';
-                       }
-                   }
-                   if (currentSection) sections.push(currentSection);
-                   loadWalkthrough({ title, author, sections });
-              }
-          } catch (err) {
-              console.error("Failed to parse walkthrough", err);
-              alert("Invalid file format");
-          }
-      };
-      reader.readAsText(file);
-      // Reset input
+      try {
+          const parsed = await parseWalkthroughFile(file);
+          loadWalkthrough(parsed);
+      } catch (err: any) {
+          alert(err.message || "Invalid file format");
+      }
       e.target.value = '';
   };
 
-
-  if (!prData) {
-    return <WelcomeScreen />;
-  }
+  if (!prData) return <WelcomeScreen />;
 
   return (
     <div className={clsx("flex flex-col h-screen bg-gray-950 text-white font-sans", (isResizingChat || isResizingTree) && "cursor-col-resize select-none")}>
@@ -240,39 +165,27 @@ const MainLayout = () => {
           <button 
              onClick={() => setPRData(null as any)}
              className="text-gray-500 hover:text-white transition-colors shrink-0"
-             title="Back to Welcome Screen"
+             title="Exit Review"
           >
              <ArrowLeft size={20} />
           </button>
-          <GitPullRequest className="text-blue-500 shrink-0" />
+          <div className="flex items-center gap-2">
+            <Eye size={18} className="text-amber-400" />
+            <span className="font-bold text-sm tracking-tight hidden sm:inline text-amber-100 uppercase">Theia</span>
+          </div>
+          <div className="h-4 w-px bg-gray-700 mx-1 hidden sm:block" />
           <div className="overflow-hidden min-w-0">
             <h1 className="text-sm font-bold flex items-center gap-2 truncate">
               {prData.title}
-              <span className="text-xs font-normal text-gray-500 px-2 py-0.5 border border-gray-700 rounded-full">#{prData.id}</span>
-              {linearIssue && (
-                  <button 
-                    onClick={() => {
-                        setShowTree(true);
-                        setLeftTab('issue');
-                    }}
-                    className="flex items-center gap-1 text-[10px] bg-blue-900/30 text-blue-300 px-2 py-0.5 rounded-full border border-blue-800 hover:bg-blue-900/50"
-                  >
-                    <Link size={10} />
-                    {linearIssue.identifier}
-                  </button>
-              )}
+              <span className="text-xs font-normal text-gray-500">#{prData.id}</span>
             </h1>
-            <p className="text-xs text-gray-500 truncate">
-                by {prData.author} • {prData.headRef} ➝ {prData.baseRef}
-            </p>
           </div>
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
-           {/* Walkthrough Uploader */}
-           <label className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-gray-800 border border-gray-700 text-gray-400 rounded hover:text-white hover:bg-gray-700 cursor-pointer hidden md:flex">
+           <label className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-gray-800 border border-gray-700 text-gray-400 rounded hover:text-white hover:bg-gray-700 cursor-pointer hidden lg:flex">
                <FileUp size={14} />
-               <span className="hidden lg:inline">Load Walkthrough</span>
+               <span>Load Walkthrough</span>
                <input type="file" accept=".json, .md" className="hidden" onChange={handleWalkthroughUpload} />
            </label>
 
@@ -287,20 +200,15 @@ const MainLayout = () => {
            )}
 
            <VoiceControls />
-           
            <div className="h-6 w-px bg-gray-700 mx-1" />
-
-           {/* Diff Toggle - Only show if diagram is not actively covering everything OR if we are in split mode */}
-           {(!activeDiagram || diagramViewMode === 'split') && (
-             <button 
+           
+           <button 
                onClick={toggleDiffMode}
                className="px-3 py-1.5 text-xs font-medium bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 transition-colors hidden sm:block"
-             >
-               {isDiffMode ? "Show Raw" : "Show Diff"}
-             </button>
-           )}
+           >
+             {isDiffMode ? "Show Raw" : "Show Diff"}
+           </button>
            
-           <div className="h-6 w-px bg-gray-700 mx-1 hidden sm:block" />
            <button onClick={() => setShowTree(!showTree)} className={clsx("p-2 rounded hover:bg-gray-800", !showTree && "text-gray-500")}>
                <Layout size={18} />
            </button>
@@ -311,108 +219,47 @@ const MainLayout = () => {
       </header>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar: File Tree / Annotations / Linear / Diagrams */}
         {showTree && (
             <div className="flex shrink-0 h-full relative flex-col bg-gray-900 border-r border-gray-800" style={{ width: fileTreeWidth }}>
                 <div className="flex border-b border-gray-800 bg-gray-900">
-                    <button 
-                        onClick={() => setLeftTab('files')}
-                        className={clsx("flex-1 py-2 text-xs font-medium flex items-center justify-center gap-2 transition-colors", leftTab === 'files' ? "text-blue-400 border-b-2 border-blue-400" : "text-gray-500 hover:text-gray-300")}
-                        title="Files"
-                    >
-                        <FolderTree size={14} />
-                    </button>
-                    <button 
-                        onClick={() => setLeftTab('annotations')}
-                        className={clsx("flex-1 py-2 text-xs font-medium flex items-center justify-center gap-2 transition-colors", leftTab === 'annotations' ? "text-blue-400 border-b-2 border-blue-400" : "text-gray-500 hover:text-gray-300")}
-                        title="Annotations"
-                    >
-                        <BookMarked size={14} />
-                    </button>
-                    <button 
-                        onClick={() => setLeftTab('issue')}
-                        className={clsx("flex-1 py-2 text-xs font-medium flex items-center justify-center gap-2 transition-colors", leftTab === 'issue' ? "text-blue-400 border-b-2 border-blue-400" : "text-gray-500 hover:text-gray-300")}
-                        title="Linear Issue"
-                    >
-                        <Target size={14} />
-                    </button>
-                    <button 
-                        onClick={() => setLeftTab('diagrams')}
-                        className={clsx("flex-1 py-2 text-xs font-medium flex items-center justify-center gap-2 transition-colors", leftTab === 'diagrams' ? "text-blue-400 border-b-2 border-blue-400" : "text-gray-500 hover:text-gray-300")}
-                        title="Diagrams"
-                    >
-                        <Workflow size={14} />
-                    </button>
+                    <button onClick={() => setLeftTab('files')} className={clsx("flex-1 py-2 text-xs flex items-center justify-center transition-colors", leftTab === 'files' ? "text-amber-400 border-b-2 border-amber-400" : "text-gray-500 hover:text-gray-300")}><FolderTree size={14} /></button>
+                    <button onClick={() => setLeftTab('annotations')} className={clsx("flex-1 py-2 text-xs flex items-center justify-center transition-colors", leftTab === 'annotations' ? "text-amber-400 border-b-2 border-amber-400" : "text-gray-500 hover:text-gray-300")}><BookMarked size={14} /></button>
+                    <button onClick={() => setLeftTab('issue')} className={clsx("flex-1 py-2 text-xs flex items-center justify-center transition-colors", leftTab === 'issue' ? "text-amber-400 border-b-2 border-amber-400" : "text-gray-500 hover:text-gray-300")}><Target size={14} /></button>
+                    <button onClick={() => setLeftTab('diagrams')} className={clsx("flex-1 py-2 text-xs flex items-center justify-center transition-colors", leftTab === 'diagrams' ? "text-amber-400 border-b-2 border-amber-400" : "text-gray-500 hover:text-gray-300")}><Workflow size={14} /></button>
                 </div>
-                
                 <div className="w-full flex-1 overflow-hidden">
                     {leftTab === 'files' && <FileTree />}
                     {leftTab === 'annotations' && <AnnotationList />}
                     {leftTab === 'issue' && <LinearPanel onLinkClick={() => setShowLinearModal(true)} />}
                     {leftTab === 'diagrams' && <DiagramPanel />}
                 </div>
-
-                <div 
-                    onMouseDown={startResizingTree}
-                    className="absolute right-0 top-0 bottom-0 w-1 bg-gray-800 hover:bg-blue-500 cursor-col-resize z-30 transition-colors flex items-center justify-center group"
-                >
-                     <div className="h-8 w-1 bg-gray-600 rounded-full opacity-0 group-hover:opacity-100" />
-                </div>
+                <div onMouseDown={startResizingTree} className="absolute right-0 top-0 bottom-0 w-1 bg-gray-800 hover:bg-amber-500 cursor-col-resize z-30 transition-colors" />
             </div>
         )}
 
-        {/* Center */}
         <div className="flex-1 flex flex-col min-w-0 bg-gray-950 border-r border-gray-800">
             {walkthrough && <WalkthroughPanel />}
             <div className="flex-1 flex overflow-hidden relative">
-                
-                {/* Code View - Hidden only if diagram is full screen */}
                 {(!activeDiagram || diagramViewMode === 'split') && (
                     <div className={clsx("flex-1 flex flex-col overflow-hidden min-w-0 relative", activeDiagram && diagramViewMode === 'split' && "w-1/2")}>
                          <CodeViewer />
-                         {/* Status Bar for Code */}
-                         <div className="absolute bottom-4 right-8 bg-gray-900/90 border border-gray-700 rounded-full px-4 py-1.5 text-xs text-gray-400 shadow-xl backdrop-blur-sm pointer-events-none transition-opacity duration-500 z-20">
-                            {viewportState.file ? (
-                                <span>
-                                    Viewing <span className="text-blue-400">{viewportState.file}</span> 
-                                    {viewportState.startLine > 0 && ` : lines ${viewportState.startLine}-${viewportState.endLine}`}
-                                </span>
-                            ) : (
-                                "No file selected"
-                            )}
-                         </div>
                     </div>
                 )}
-
-                {/* Diagram View */}
                 {activeDiagram && (
-                    <div className={clsx(
-                        "flex flex-col min-w-0 bg-gray-950 transition-all duration-300 ease-in-out", 
-                        diagramViewMode === 'split' ? "w-1/2 border-l border-gray-800" : "w-full absolute inset-0 z-30"
-                    )}>
+                    <div className={clsx("flex flex-col min-w-0 bg-gray-950 transition-all duration-300", diagramViewMode === 'split' ? "w-1/2 border-l border-gray-800" : "w-full absolute inset-0 z-30")}>
                         <DiagramViewer />
                     </div>
                 )}
             </div>
         </div>
 
-        {/* Chat */}
         {showChat && (
              <div className="flex shrink-0 h-full relative" style={{ width: chatWidth }}>
-                <div 
-                    onMouseDown={startResizingChat}
-                    className="absolute left-0 top-0 bottom-0 w-1 bg-gray-800 hover:bg-blue-500 cursor-col-resize z-30 transition-colors flex items-center justify-center group"
-                >
-                     <div className="h-8 w-1 bg-gray-600 rounded-full opacity-0 group-hover:opacity-100" />
-                </div>
-                
-                <div className="w-full h-full overflow-hidden">
-                    <ChatPanel />
-                </div>
+                <div onMouseDown={startResizingChat} className="absolute left-0 top-0 bottom-0 w-1 bg-gray-800 hover:bg-amber-500 cursor-col-resize z-30 transition-colors" />
+                <div className="w-full h-full overflow-hidden"><ChatPanel /></div>
              </div>
         )}
       </div>
-
       <LinearModal isOpen={showLinearModal} onClose={() => setShowLinearModal(false)} />
     </div>
   );

@@ -3,9 +3,10 @@ import { Github, Loader2, PlayCircle, AlertCircle, HelpCircle, CheckSquare, Squa
 import { usePR } from '../contexts/PRContext';
 import { GitHubService } from '../services/github';
 import { SAMPLE_PR, SAMPLE_WALKTHROUGH } from '../mock/samplePR';
-import { PRData, Walkthrough, PRHistoryItem, WalkthroughSection } from '../types';
+import { PRData, Walkthrough, PRHistoryItem } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 import { USER_CONFIG } from '../userConfig';
+import { parseWalkthroughFile } from '../services/walkthroughParser';
 
 export const WelcomeScreen: React.FC = () => {
   const { setPRData, loadWalkthrough } = usePR();
@@ -150,85 +151,25 @@ export const WelcomeScreen: React.FC = () => {
       }
   };
 
-  // ... [Keep existing walkthrough parsing logic] ...
-  const parseMarkdownWalkthrough = (text: string): Walkthrough => {
-    const lines = text.split('\n');
-    let title = "Walkthrough";
-    let author = "Anonymous";
-    const sections: WalkthroughSection[] = [];
-    let currentSection: any = null;
-
-    for (let line of lines) {
-        line = line.trim();
-        if (!line) continue;
-        if (line.startsWith('# ')) {
-            title = line.substring(2).trim();
-        } else if (line.toLowerCase().startsWith('author:')) {
-            author = line.substring(7).trim();
-        } else if (line.startsWith('## ')) {
-            if (currentSection) sections.push(currentSection);
-            currentSection = {
-                id: `sec-${sections.length + 1}`,
-                title: line.substring(3).trim(),
-                files: [], description: '', highlights: []
-            };
-        } else if (currentSection) {
-            if (line.toLowerCase().startsWith('files:')) {
-                currentSection.files = line.substring(6).split(',').map((f: string) => f.trim());
-            } else if (line.startsWith('- ') && line.includes(':')) {
-                // Simplified parsing logic for brevity in this update, same as before
-                const firstColon = line.indexOf(':');
-                if (firstColon > -1) {
-                    const file = line.substring(2, firstColon).trim();
-                    const rest = line.substring(firstColon + 1).trim();
-                    const secondColon = rest.indexOf(':');
-                    if (secondColon > -1) {
-                        const range = rest.substring(0, secondColon).trim();
-                        const note = rest.substring(secondColon + 1).trim();
-                        let start = 0, end = 0;
-                        if (range.includes('-')) {
-                             const parts = range.split('-');
-                             start = parseInt(parts[0]);
-                             end = parseInt(parts[1]);
-                        } else { start = parseInt(range); end = start; }
-                        if (!isNaN(start)) {
-                            currentSection.highlights.push({ file, lines: [start, end], note });
-                            if (!currentSection.files.includes(file)) currentSection.files.push(file);
-                        } else currentSection.description += line + '\n';
-                    } else currentSection.description += line + '\n';
-                } else currentSection.description += line + '\n';
-            } else currentSection.description += line + '\n';
-        }
-    }
-    if (currentSection) sections.push(currentSection);
-    return { title, author, sections };
-  };
-
-  const handleWalkthroughUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleWalkthroughUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
+
       setWalkthroughFileName(file.name);
-      const reader = new FileReader();
-      reader.onload = (event) => {
-          const content = event.target?.result as string;
-          try {
-              if (file.name.endsWith('.json')) {
-                  const json = JSON.parse(content);
-                  setWalkthroughFile(json as Walkthrough);
-                  setError(null);
-              } else {
-                  const parsed = parseMarkdownWalkthrough(content);
-                  if (parsed.sections.length === 0) throw new Error("No sections found in Markdown.");
-                  setWalkthroughFile(parsed);
-                  setError(null);
-              }
-          } catch (err) {
-              console.error(err);
-              setError("Invalid file format.");
-              setWalkthroughFile(null);
-          }
-      };
-      reader.readAsText(file);
+      setWalkthroughFile(null); // Reset previous valid file while loading
+      setError(null);
+
+      try {
+          const parsed = await parseWalkthroughFile(file);
+          setWalkthroughFile(parsed);
+      } catch (err: any) {
+          console.error(err);
+          // Show specific parser error or generic message
+          setError(err.message || "Failed to parse walkthrough file.");
+          setWalkthroughFileName(''); // Clear filename on error to indicate failure
+          // Reset file input value so user can retry same file if they fixed it
+          e.target.value = '';
+      }
   };
 
   const processDataLoad = (data: PRData) => {

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
 import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue, Diagram } from '../types';
 
 interface FocusedLocation {
@@ -71,13 +71,47 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [activeDiagram, setActiveDiagram] = useState<Diagram | null>(null);
   const [diagramViewMode, setDiagramViewMode] = useState<'full' | 'split'>('full');
 
+  // Persistence Logic: Improved Hydration and Auto-save
+  const hydratedPrId = useRef<string | null>(null);
+
+  // Load annotations when PR changes
+  useEffect(() => {
+    if (prData?.id) {
+      const storageKey = `vcr_annotations_${prData.id}`;
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          setAnnotations(parsed);
+        } catch (e) {
+          console.error("Failed to parse saved annotations", e);
+          setAnnotations([]);
+        }
+      } else {
+        setAnnotations([]);
+      }
+      // Mark as hydrated for this PR ID
+      hydratedPrId.current = prData.id;
+    } else {
+      setAnnotations([]);
+      hydratedPrId.current = null;
+    }
+  }, [prData?.id]);
+
+  // Save annotations whenever they change, ONLY after hydration
+  useEffect(() => {
+    if (prData?.id && hydratedPrId.current === prData.id) {
+      const storageKey = `vcr_annotations_${prData.id}`;
+      localStorage.setItem(storageKey, JSON.stringify(annotations));
+    }
+  }, [annotations, prData?.id]);
+
   // Select first file on load or when prData changes
   useEffect(() => {
     if (prData && prData.files.length > 0) {
       if (!selectedFile || !prData.files.find(f => f.path === selectedFile.path)) {
         setSelectedFile(prData.files[0]);
       }
-      // Reset Diagrams on new PR
       setDiagrams([]);
       setActiveDiagram(null);
     } else {
@@ -91,12 +125,6 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
   const selectFile = (file: FileChange) => {
     setSelectedFile(file);
-    // Do NOT automatically deselect diagram if in split mode, but for now we keep behavior simple:
-    // If they click a file, maybe they want to see it. 
-    // But if we have split view, we want to keep diagram open.
-    // Let's decide: selecting a file just updates the CodeViewer. 
-    // We only clear activeDiagram if explicitly closed.
-    // setActiveDiagram(null); <-- REMOVED this to allow file switching while diagram is open
     setViewportState({ file: file.path, startLine: 0, endLine: 0 });
     setSelectionState(null);
   };
@@ -122,7 +150,6 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // Annotation Methods
   const addAnnotation = (file: string, line: number, type: 'marker' | 'label', text?: string) => {
       const id = `${type}_${Date.now()}`;
-      // Auto-name markers if no text provided
       const defaultTitle = type === 'marker' ? `marker_${annotations.filter(a => a.type === 'marker').length + 1}` : 'New Label';
       
       const newAnnotation: Annotation = {
@@ -130,15 +157,12 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
           file,
           line,
           type,
-          title: type === 'marker' ? (text || defaultTitle) : (text || defaultTitle),
+          title: text || defaultTitle,
           description: type === 'label' ? '' : undefined,
           timestamp: Date.now()
       };
       
-      setAnnotations(prev => {
-          const next = [...prev, newAnnotation];
-          return next;
-      });
+      setAnnotations(prev => [...prev, newAnnotation]);
   };
 
   const removeAnnotation = (id: string) => {

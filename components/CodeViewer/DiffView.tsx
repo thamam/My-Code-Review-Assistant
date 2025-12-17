@@ -170,7 +170,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
           return;
       }
 
-      // Simple Click -> Marker
+      // Simple Click -> Marker (Check selection to avoid marker on selection)
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed) {
           toggleMarker(lineNum);
@@ -221,19 +221,24 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
               />
             )}
 
-            {/* Line Numbers with Gutter Actions */}
-            <div className={clsx(
-                "w-12 text-right pr-3 text-gray-600 select-none border-r py-0.5 relative transition-all duration-150",
-                isSelected 
-                    ? "bg-blue-900/30 text-blue-200 border-blue-500 border-l-4 font-bold" 
-                    : "bg-gray-900/50 border-gray-800 border-l-4 border-l-transparent"
-            )}>
+            {/* Old Line Number (Interaction allowed here too if it maps to newline) */}
+            <div 
+              className={clsx(
+                  "w-12 text-right pr-3 text-gray-600 select-none border-r py-0.5 relative transition-all duration-150 cursor-pointer hover:bg-gray-800/50",
+                  isSelected 
+                      ? "bg-blue-900/30 text-blue-200 border-blue-500 border-l-4 font-bold" 
+                      : "bg-gray-900/50 border-gray-800 border-l-4 border-l-transparent"
+              )}
+              onClick={(e) => line.newLineNumber && handleInteraction(e, line.newLineNumber)}
+              onContextMenu={(e) => line.newLineNumber && handleContextMenu(e, line.newLineNumber)}
+            >
               {line.oldLineNumber || ''}
             </div>
             
+            {/* New Line Number (Interaction allowed here) */}
             <div 
                 className={clsx(
-                    "w-12 text-right pr-3 select-none border-r py-0.5 relative cursor-pointer hover:text-gray-400 transition-all duration-150 z-20",
+                    "w-12 text-right pr-3 select-none border-r py-0.5 relative cursor-pointer hover:text-gray-400 hover:bg-gray-800/50 transition-all duration-150 z-20",
                     isSelected 
                         ? "bg-blue-900/30 text-blue-200 border-blue-500 font-bold" 
                         : "bg-gray-900/50 border-gray-800 text-gray-600"
@@ -261,7 +266,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
               {isRemoved && '-'}
             </div>
 
-            {/* Content Area - Now interactive for annotations too */}
+            {/* Content Area - Interaction REMOVED here, only for text selection */}
             <div 
                 className={clsx("flex-1 whitespace-pre py-0.5 pl-2 relative transition-colors duration-150 cursor-text", 
                     isAdded && "text-green-100", 
@@ -269,8 +274,6 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
                     !isAdded && !isRemoved && "text-gray-300",
                     isSelected && "bg-blue-500/10"
                 )}
-                onClick={(e) => line.newLineNumber && handleInteraction(e, line.newLineNumber)}
-                onContextMenu={(e) => line.newLineNumber && handleContextMenu(e, line.newLineNumber)}
             >
               {creatingLabelLine === line.newLineNumber && (
                   <AnnotationInput 

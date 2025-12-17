@@ -25,8 +25,8 @@ export const ChatPanel: React.FC = () => {
 
   // Dynamic suggestion based on context
   const suggestion = viewportState.file 
-    ? `Explain changes in lines ${viewportState.startLine}-${viewportState.endLine}`
-    : "Summarize this PR";
+    ? `Analyze architectural implications of lines ${viewportState.startLine}-${viewportState.endLine}`
+    : "Provide a staff-level summary of these changes";
 
   const isPro = currentModel.includes('pro');
 
@@ -35,7 +35,7 @@ export const ChatPanel: React.FC = () => {
       <div className="p-3 border-b border-gray-800 flex items-center justify-between shrink-0">
          <div className="flex items-center gap-2">
             {isPro ? <BrainCircuit size={16} className="text-pink-400" /> : <Zap size={16} className="text-yellow-400" />}
-            <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Assistant</h2>
+            <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Theia AI</h2>
          </div>
          
          <select 
@@ -43,8 +43,8 @@ export const ChatPanel: React.FC = () => {
             onChange={(e) => setModel(e.target.value)}
             className="bg-gray-800 text-[10px] text-gray-300 border border-gray-700 rounded px-2 py-1 outline-none focus:border-blue-500 cursor-pointer hover:bg-gray-750"
          >
-            <option value="gemini-2.5-flash">Flash 2.5 (Fast)</option>
-            <option value="gemini-3-pro-preview">Pro 3 (Smart)</option>
+            <option value="gemini-3-pro-preview">Pro 3 (Expert Reasoning)</option>
+            <option value="gemini-3-flash-preview">Flash 3 (Fast Response)</option>
          </select>
       </div>
 
@@ -74,7 +74,7 @@ export const ChatPanel: React.FC = () => {
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about the code..."
+            placeholder="Ask for a professional review..."
             className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg pl-3 pr-10 py-2 text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 placeholder-gray-500"
           />
           <button 

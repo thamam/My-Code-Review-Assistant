@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import mermaid from 'mermaid';
 import { ZoomIn, ZoomOut, RotateCcw, AlertTriangle, Move, ArrowLeftRight, MousePointer2 } from 'lucide-react';
+import { usePR } from '../../contexts/PRContext';
 import clsx from 'clsx';
 
 interface MermaidRendererProps {
@@ -17,6 +18,7 @@ interface Transform {
 export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code, id }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const { scrollToLine } = usePR();
   
   const [svgContent, setSvgContent] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +49,6 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code, id }) =>
       const svgEl = contentRef.current.querySelector('svg');
       if (!svgEl) return;
       
-      // 1. Determine Natural Size from ViewBox
       let naturalWidth = 0;
       let naturalHeight = 0;
 
@@ -55,37 +56,28 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code, id }) =>
           naturalWidth = svgEl.viewBox.baseVal.width;
           naturalHeight = svgEl.viewBox.baseVal.height;
       } else {
-          // Fallback if no viewBox (unlikely with mermaid)
           const bbox = svgEl.getBoundingClientRect();
           naturalWidth = bbox.width || 1000;
           naturalHeight = bbox.height || 1000;
       }
 
-      // 2. CRITICAL: Force wrapper to match natural size so scale() operates on true 1:1 pixels
       contentRef.current.style.width = `${naturalWidth}px`;
       contentRef.current.style.height = `${naturalHeight}px`;
 
-      // 3. Ensure SVG fills the wrapper without constraints
       svgEl.style.width = '100%';
       svgEl.style.height = '100%';
       svgEl.style.maxWidth = 'none';
-      svgEl.removeAttribute('height'); // Remove fixed height attributes
+      svgEl.removeAttribute('height');
 
-      // 4. Calculate Scale
       const containerWidth = containerRef.current.clientWidth;
       const containerHeight = containerRef.current.clientHeight;
 
-      if (containerWidth === 0) return; // Layout not ready
+      if (containerWidth === 0) return;
 
       const padding = 40;
       const availableWidth = Math.max(0, containerWidth - padding);
-      
-      // If the diagram is wider than container, shrink it. 
-      // If container is wider, you might want to limit scale to 1 (optional), but "Fit Width" usually implies filling width.
-      // Let's allow upscale up to 1.5x to ensure readability on wide screens for small diagrams.
       const scale = availableWidth / naturalWidth;
       
-      // Center vertically based on the new scale
       const scaledHeight = naturalHeight * scale;
       const yOffset = Math.max(0, (containerHeight - scaledHeight) / 2);
       
@@ -95,7 +87,6 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code, id }) =>
           k: scale
       });
       
-      // Reset manual flag because we just auto-fitted
       setIsManuallyZoomed(false);
   }, []);
 
@@ -111,8 +102,8 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code, id }) =>
         
         if (isMounted) {
             setSvgContent(svg);
-            setTransform({ x: 0, y: 0, k: 1 }); // Reset transform temporarily
-            setIsManuallyZoomed(false); // Reset manual state
+            setTransform({ x: 0, y: 0, k: 1 });
+            setIsManuallyZoomed(false);
         }
       } catch (err: any) {
         console.error("[Mermaid] Render Error:", err);
@@ -129,17 +120,14 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code, id }) =>
     };
   }, [code, id]);
 
-  // Post-Render Cleanup & Initial Fit
   useEffect(() => {
      if (svgContent) {
-         // Use RAF to ensure DOM update is painted
          requestAnimationFrame(() => {
              handleFitWidth();
          });
      }
   }, [svgContent, handleFitWidth]);
 
-  // Resize Observer to handle Split View animations or Window Resizes
   useEffect(() => {
       if (!containerRef.current) return;
       
@@ -154,29 +142,65 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code, id }) =>
   }, [handleFitWidth, isManuallyZoomed]);
 
 
-  // --- Actions ---
+  // --- Code Navigation Logic ---
+
+  const handleSvgClick = (e: React.MouseEvent) => {
+      // Check for Cmd (Mac) or Ctrl (Windows/Linux)
+      if (!(e.metaKey || e.ctrlKey)) return;
+
+      // Use unknown cast to avoid potential overlapping type errors between EventTarget and SVGElement
+      const target = e.target as unknown as SVGElement;
+      let textNode: SVGTextElement | null = null;
+
+      // Find the nearest text element
+      if (target.tagName === 'text') {
+          // Use unknown cast to avoid overlapping type error
+          textNode = target as unknown as SVGTextElement;
+      } else if (target.parentElement?.tagName === 'text') {
+          // Use unknown cast to avoid overlapping type error from HTMLElement to SVGTextElement
+          textNode = target.parentElement as unknown as SVGTextElement;
+      }
+
+      if (textNode) {
+          const content = textNode.textContent || '';
+          // Regex to find (filename:line)
+          const match = content.match(/\(([^:]+):(\d+)\)/);
+          
+          if (match) {
+              const file = match[1];
+              const line = parseInt(match[2], 10);
+              if (file && !isNaN(line)) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  scrollToLine(file, line);
+              }
+          }
+      }
+  };
+
+  // --- UI Actions ---
 
   const handleZoom = (delta: number) => {
       setIsManuallyZoomed(true);
       setTransform(prev => ({
           ...prev,
-          k: Math.max(0.1, prev.k + delta) // Allow zooming out to 0.1x
+          k: Math.max(0.1, prev.k + delta)
       }));
   };
 
   const handleManualFit = () => {
       handleFitWidth();
-      // handleFitWidth sets isManuallyZoomed to false internally
   };
 
   const handleReset = () => {
-      setIsManuallyZoomed(true); // User explicitly requested 1:1, stop auto-fitting
+      setIsManuallyZoomed(true);
       setTransform({ x: 0, y: 0, k: 1 });
   };
 
-  // --- Mouse Interactions (Pan) ---
-
   const handleMouseDown = (e: React.MouseEvent) => {
+      // Don't start drag if holding meta/ctrl (user is likely trying to click a link)
+      if (e.metaKey || e.ctrlKey) return;
+      
       e.preventDefault();
       setIsDragging(true);
       setIsManuallyZoomed(true);
@@ -202,8 +226,6 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code, id }) =>
       setIsDragging(false);
       lastMouseRef.current = null;
   };
-
-  // --- Keyboard Interactions (Joystick) ---
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
       const PAN_STEP = 50;
@@ -242,8 +264,8 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code, id }) =>
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onClick={handleSvgClick}
     >
-      {/* Background Grid Pattern */}
       <div 
         className="absolute inset-0 pointer-events-none opacity-10 transition-opacity duration-300" 
         style={{ 
@@ -253,7 +275,6 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code, id }) =>
         }} 
       />
 
-      {/* Toolbar */}
       <div 
         className="absolute top-4 right-4 z-10 flex flex-col gap-2 transition-opacity duration-200 opacity-0 group-hover:opacity-100 focus-within:opacity-100"
         onMouseDown={e => e.stopPropagation()} 
@@ -279,11 +300,10 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code, id }) =>
           </div>
           
           <div className="bg-gray-800/80 px-2 py-1 rounded text-[10px] text-gray-500 text-center backdrop-blur-sm border border-gray-700/50 select-none">
-             Drag to Pan • Arrow Keys
+             Cmd+Click text to view code • Drag to Pan
           </div>
       </div>
 
-      {/* Canvas Area */}
       <div className={clsx(
           "flex-1 w-full h-full cursor-grab active:cursor-grabbing",
           isDragging && "cursor-grabbing"
@@ -310,7 +330,6 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code, id }) =>
                 ref={contentRef}
                 className="origin-top-left will-change-transform"
                 style={{ 
-                    // Use standard CSS transform instead of transition for smoother drag performance
                     transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`
                 }}
                 dangerouslySetInnerHTML={{ __html: svgContent }} 

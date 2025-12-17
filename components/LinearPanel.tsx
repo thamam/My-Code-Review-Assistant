@@ -1,7 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { usePR } from '../contexts/PRContext';
-import { Link, AlertCircle, ExternalLink } from 'lucide-react';
+import { useChat } from '../contexts/ChatContext';
+import { useLive } from '../contexts/LiveContext';
+import { Link, AlertCircle, ExternalLink, RefreshCw, Check } from 'lucide-react';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import clsx from 'clsx';
 
 interface LinearPanelProps {
   onLinkClick: () => void;
@@ -9,6 +12,34 @@ interface LinearPanelProps {
 
 export const LinearPanel: React.FC<LinearPanelProps> = ({ onLinkClick }) => {
   const { linearIssue } = usePR();
+  const { sendMessage: sendChatMessage } = useChat();
+  const { sendText: sendLiveMessage, isActive: isLiveActive } = useLive();
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [synced, setSynced] = useState(false);
+
+  const handleSync = async () => {
+      if (!linearIssue) return;
+      setIsSyncing(true);
+      
+      const syncText = `[CONTEXT UPDATE] Here are the requirements from Linear Issue ${linearIssue.identifier} (${linearIssue.title}):\n\n${linearIssue.description}\n\nPlease acknowledge you have these requirements and refer to them for the review.`;
+      
+      try {
+          // Push to chat
+          await sendChatMessage(syncText);
+          
+          // Push to live session if active
+          if (isLiveActive) {
+              sendLiveMessage(syncText);
+          }
+          
+          setSynced(true);
+          setTimeout(() => setSynced(false), 3000);
+      } catch (e) {
+          console.error("Sync failed", e);
+      } finally {
+          setIsSyncing(false);
+      }
+  };
 
   if (!linearIssue) {
     return (
@@ -43,15 +74,28 @@ export const LinearPanel: React.FC<LinearPanelProps> = ({ onLinkClick }) => {
             <h2 className="text-sm font-bold text-gray-100 leading-snug">
                 {linearIssue.title}
             </h2>
-            <a 
-                href={linearIssue.url} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-gray-500 hover:text-blue-400 transition-colors shrink-0"
-                title="Open in Linear"
-            >
-                <ExternalLink size={14} />
-            </a>
+            <div className="flex items-center gap-1">
+                <button 
+                    onClick={handleSync}
+                    disabled={isSyncing}
+                    className={clsx(
+                        "p-1.5 rounded transition-all",
+                        synced ? "text-green-400 bg-green-900/20" : "text-gray-500 hover:text-white hover:bg-gray-800"
+                    )}
+                    title="Force sync issue context with AI Agent"
+                >
+                    {synced ? <Check size={14} /> : <RefreshCw size={14} className={isSyncing ? "animate-spin" : ""} />}
+                </button>
+                <a 
+                    href={linearIssue.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="p-1.5 text-gray-500 hover:text-blue-400 transition-colors shrink-0"
+                    title="Open in Linear"
+                >
+                    <ExternalLink size={14} />
+                </a>
+            </div>
         </div>
         
         <div className="flex items-center gap-2 mt-2">

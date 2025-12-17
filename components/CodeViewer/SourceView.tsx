@@ -96,7 +96,6 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
         return;
      }
 
-     // If selecting text, we usually don't want to trigger marker
      const selection = window.getSelection();
      if (!selection || selection.isCollapsed) {
          toggleMarker(lineNum);
@@ -149,7 +148,7 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
 
   return (
     <div className="flex min-h-full font-mono text-sm bg-gray-950" onMouseUp={handleMouseUp}>
-      {/* Gutter */}
+      {/* Gutter - ONLY Interaction Zone */}
       <div className="flex-shrink-0 w-12 bg-gray-900 border-r border-gray-800 text-gray-600 text-right select-none pt-2">
          {lines.map((_, i) => {
              const lineNum = i + 1;
@@ -176,13 +175,11 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
                     title="Left-Click: Marker | Right-Click / Ctrl+Click: Label"
                  >
                      {lineNum}
-                     {/* Hover Add Icon */}
                      {hoveredLine === lineNum && !hasMarker && !hasLabel && !isSelected && (
                          <div className="absolute left-1 top-1 text-gray-500 opacity-50 pointer-events-none">
                              <MapPin size={10} />
                          </div>
                      )}
-                     {/* Annotation Indicators */}
                      {(hasMarker || hasLabel) && (
                          <div className="absolute left-1 top-1 text-blue-400 pointer-events-none">
                              {hasLabel ? <MessageSquare size={10} className="text-yellow-400" /> : <MapPin size={10} />}
@@ -193,7 +190,7 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
          })}
       </div>
 
-      {/* Code Area */}
+      {/* Code Area - Only for text selection */}
       <div className="flex-1 overflow-x-auto pt-2">
         <div className={`language-${language} !bg-transparent`}>
             {lines.map((line, i) => {
@@ -210,8 +207,6 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
                              isSelected && "bg-blue-500/10"
                          )} 
                          data-line-number={lineNum}
-                         onClick={(e) => handleInteraction(e, lineNum)}
-                         onContextMenu={(e) => handleContextMenu(e, lineNum)}
                      >
                          {creatingLabelLine === lineNum && (
                              <AnnotationInput 
