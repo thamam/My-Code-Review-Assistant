@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { usePR } from '../../contexts/PRContext';
 import { Map, ChevronDown, ChevronUp, Expand, Minimize2 } from 'lucide-react';
@@ -5,22 +6,27 @@ import clsx from 'clsx';
 import { arePathsEquivalent } from '../../utils/fileUtils';
 
 export const WalkthroughPanel: React.FC = () => {
-  const { walkthrough, activeSectionId, setActiveSectionId, selectFile, prData } = usePR();
+  const { walkthrough, activeSectionId, setActiveSectionId, navigateToCode, prData } = usePR();
   const [isExpanded, setIsExpanded] = useState(false);
 
   if (!walkthrough) return null;
 
-  const handleSectionClick = (sectionId: string) => {
+  const handleSectionClick = async (sectionId: string) => {
     setActiveSectionId(sectionId);
     const section = walkthrough.sections.find(s => s.id === sectionId);
-    if (section && section.files.length > 0 && prData) {
-        // Find the full file object to select it using fuzzy matching
-        const fileToSelect = prData.files.find(f => 
-            arePathsEquivalent(f.path, section.files[0])
-        );
-        if (fileToSelect) {
-            selectFile(fileToSelect);
-        }
+    if (section && section.highlights && section.highlights.length > 0) {
+        const highlight = section.highlights[0];
+        await navigateToCode({
+            filepath: highlight.file,
+            line: highlight.lines[0],
+            source: 'walkthrough'
+        });
+    } else if (section && section.files.length > 0) {
+        await navigateToCode({
+            filepath: section.files[0],
+            line: 1,
+            source: 'walkthrough'
+        });
     }
   };
 

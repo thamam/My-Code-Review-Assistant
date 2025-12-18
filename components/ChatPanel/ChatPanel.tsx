@@ -1,11 +1,13 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { useChat } from '../../contexts/ChatContext';
 import { ChatMessage } from './ChatMessage';
-import { Send, Sparkles, BrainCircuit, Zap } from 'lucide-react';
+import { Send, Sparkles, BrainCircuit, Zap, Globe } from 'lucide-react';
 import { usePR } from '../../contexts/PRContext';
+import { LanguagePreference } from '../../contexts/ChatContext';
 
 export const ChatPanel: React.FC = () => {
-  const { messages, sendMessage, isTyping, currentModel, setModel } = useChat();
+  const { messages, sendMessage, isTyping, currentModel, setModel, language, setLanguage } = useChat();
   const { viewportState } = usePR();
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -23,7 +25,6 @@ export const ChatPanel: React.FC = () => {
     setInput('');
   };
 
-  // Dynamic suggestion based on context
   const suggestion = viewportState.file 
     ? `Analyze architectural implications of lines ${viewportState.startLine}-${viewportState.endLine}`
     : "Provide a staff-level summary of these changes";
@@ -38,14 +39,28 @@ export const ChatPanel: React.FC = () => {
             <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Theia AI</h2>
          </div>
          
-         <select 
-            value={currentModel}
-            onChange={(e) => setModel(e.target.value)}
-            className="bg-gray-800 text-[10px] text-gray-300 border border-gray-700 rounded px-2 py-1 outline-none focus:border-blue-500 cursor-pointer hover:bg-gray-750"
-         >
-            <option value="gemini-3-pro-preview">Pro 3 (Expert Reasoning)</option>
-            <option value="gemini-3-flash-preview">Flash 3 (Fast Response)</option>
-         </select>
+         <div className="flex items-center gap-2">
+             <div className="flex items-center gap-1 bg-gray-800 border border-gray-700 rounded px-2 py-1">
+                 <Globe size={10} className="text-gray-500" />
+                 <select 
+                    value={language}
+                    onChange={(e) => setLanguage(e.target.value as LanguagePreference)}
+                    className="bg-transparent text-[10px] text-gray-300 outline-none cursor-pointer"
+                 >
+                    <option value="Auto">Auto</option>
+                    <option value="English">English</option>
+                    <option value="Hebrew">עברית</option>
+                 </select>
+             </div>
+             <select 
+                value={currentModel}
+                onChange={(e) => setModel(e.target.value)}
+                className="bg-gray-800 text-[10px] text-gray-300 border border-gray-700 rounded px-2 py-1 outline-none focus:border-blue-500 cursor-pointer hover:bg-gray-750"
+             >
+                <option value="gemini-3-pro-preview">Pro 3 (Expert Reasoning)</option>
+                <option value="gemini-3-flash-preview">Flash 3 (Fast Response)</option>
+             </select>
+         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 custom-scrollbar" ref={scrollRef}>

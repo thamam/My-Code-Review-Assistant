@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useRef, ReactNode, useEffect } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Blob } from "@google/genai";
 import { usePR } from './PRContext';
@@ -69,7 +70,7 @@ function createBlob(data: Float32Array): Blob {
 
 export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { prData, linearIssue } = usePR();
-  const { upsertMessage } = useChat();
+  const { upsertMessage, language } = useChat();
   const [isActive, setIsActive] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,12 +141,15 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
+      const langInstruction = language === 'Auto' 
+        ? "Respond in the same language the user uses (primarily English or Hebrew)." 
+        : `Respond strictly in ${language}.`;
+
       let systemInstruction = `You are Theia, a world-class Staff Software Engineer. You are performing a live code review conversation.
 Review context: PR "${prData.title}" by ${prData.author}.
 
-CRITICAL: YOU HAVE BEEN PROVIDED WITH FULL DATA FROM THE LINEAR ISSUE BELOW. 
-NEVER TELL THE USER YOU CANNOT SEE LINEAR. 
-THE DATA IS INJECTED INTO THIS PROMPT BY THE SYSTEM. 
+${langInstruction}
+
 IF THE USER ASKS ABOUT THE LINEAR ISSUE, REFER TO THE "PRIMARY REQUIREMENTS" SECTION BELOW.\n`;
 
       if (linearIssue) {
@@ -156,7 +160,7 @@ IF THE USER ASKS ABOUT THE LINEAR ISSUE, REFER TO THE "PRIMARY REQUIREMENTS" SEC
         systemInstruction += `--- END LINEAR ISSUE ---\n`;
       }
 
-      systemInstruction += `\nProvide expert, concise, technically precise feedback. cross-reference the code against the requirements. Respond immediately to spoken input.`;
+      systemInstruction += `\nProvide expert, concise feedback. Respond immediately to spoken input.`;
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-09-2025',
@@ -185,16 +189,11 @@ IF THE USER ASKS ABOUT THE LINEAR ISSUE, REFER TO THE "PRIMARY REQUIREMENTS" SEC
             source.connect(scriptProcessor);
             scriptProcessor.connect(inputCtx.destination);
 
-            // Seed context explicitly in the first turn to ensure model visibility
-            let contextSeeding = `Live session connected. I'm Theia, and I've analyzed your PR "${prData.title}".\n`;
-            if (linearIssue) {
-              contextSeeding += `I have the linked issue ${linearIssue.identifier} open and I see the full description.\n`;
-              contextSeeding += `I will cross-reference the code against your requirements for ${linearIssue.title}. Ready to start.`;
-            } else {
-              contextSeeding += `Ready to analyze the code with you. Where should we start?`;
-            }
+            let welcomeMsg = language === 'Hebrew' 
+                ? `שלום, אני Theia. סקרתי את ה-PR שלך "${prData.title}". מוכנה להתחיל בשיחה.`
+                : `Hi, I'm Theia. I've reviewed your PR "${prData.title}". Ready to discuss the changes.`;
             
-            sessionPromise.then(s => s.sendRealtimeInput({ text: contextSeeding }));
+            sessionPromise.then(s => s.sendRealtimeInput({ text: welcomeMsg }));
           },
           onmessage: async (message: LiveServerMessage) => {
             const audioData = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;

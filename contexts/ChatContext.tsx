@@ -1,7 +1,10 @@
+
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
 import { GoogleGenAI, Chat } from "@google/genai";
 import { ChatMessage } from '../types';
 import { usePR } from './PRContext';
+
+export type LanguagePreference = 'English' | 'Hebrew' | 'Auto';
 
 interface ChatContextType {
   messages: ChatMessage[];
@@ -12,6 +15,8 @@ interface ChatContextType {
   isTyping: boolean;
   currentModel: string;
   setModel: (model: string) => void;
+  language: LanguagePreference;
+  setLanguage: (lang: LanguagePreference) => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -21,19 +26,33 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [currentModel, setModel] = useState('gemini-3-pro-preview');
+  const [language, setLanguage] = useState<LanguagePreference>(() => {
+    try {
+      return (localStorage.getItem('theia_lang') as LanguagePreference) || 'Auto';
+    } catch { return 'Auto'; }
+  });
   const [sessionId, setSessionId] = useState(0);
   
   const chatSessionRef = useRef<Chat | null>(null);
+
+  useEffect(() => {
+    try { localStorage.setItem('theia_lang', language); } catch {}
+  }, [language]);
 
   const resetChat = () => {
       if (!prData) return;
       chatSessionRef.current = null;
       setSessionId(prev => prev + 1);
+      
+      const welcomeMsg = language === 'Hebrew' 
+        ? `Theia מחוברת. מנתחת את השינויים ב-"${prData.title}". איך אוכל לעזור היום?`
+        : `Theia connected. Analyzing changes in "${prData.title}". How can I help you today?`;
+      
       setMessages([
           {
               id: 'welcome',
               role: 'system',
-              content: `Theia connected (Model: ${currentModel}). Analyzing ${prData.files.length} changed files in "${prData.title}". How can I assist with your review?`,
+              content: welcomeMsg,
               timestamp: Date.now()
           }
       ]);
@@ -45,30 +64,30 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
-      let systemInstruction = `You are Theia, a world-class Staff Software Engineer and Architect. 
+      const langInstruction = language === 'Auto' 
+        ? "Respond in the same language the user uses (primarily English or Hebrew)." 
+        : `Respond strictly in ${language}.`;
 
-CRITICAL: YOU HAVE DIRECT ACCESS TO LINEAR ISSUE DATA INJECTED BELOW. 
-NEVER TELL THE USER YOU CANNOT SEE LINEAR. 
-THE DATA IS PROVIDED IN THIS PROMPT BY THE SYSTEM. 
+      // Build a complete project manifest for the prompt
+      const manifest = prData.files.map(f => `- ${f.path} (${f.status})`).join('\n');
 
-Focus on:
-1. Architectural integrity and design patterns.
-2. Performance, security, and scalability.
-3. Cross-referencing changes against the Acceptance Criteria provided in the Linear Issue below.
+      let systemInstruction = `You are Theia, a world-class Staff Software Engineer. 
+${langInstruction}
 
-Reviewing PR: "${prData.title}" by ${prData.author}.
-PR Description: ${prData.description}\n\n`;
+You have access to the full PR context and linked Linear issues. 
+Be concise, architecturally minded, and professional.
+
+PR: "${prData.title}"
+Author: ${prData.author}
+Description: ${prData.description}
+
+## PROJECT MANIFEST (All changed files)
+${manifest}
+\n`;
       
       if (linearIssue) {
-          systemInstruction += `\n--- LINKED LINEAR ISSUE (PRIMARY SOURCE OF TRUTH) ---\n`;
-          systemInstruction += `ID: ${linearIssue.identifier}\n`;
-          systemInstruction += `Title: ${linearIssue.title}\n`;
-          systemInstruction += `Full Requirements/Criteria: ${linearIssue.description}\n`;
-          systemInstruction += `--- END LINEAR ISSUE ---\n\n`;
-          systemInstruction += `IMPORTANT: The user expects you to know exactly what is in this issue. Use it to validate if the PR meets the requirements.`;
+          systemInstruction += `\n--- LINKED LINEAR ISSUE ---\nID: ${linearIssue.identifier}\nTitle: ${linearIssue.title}\nRequirements: ${linearIssue.description}\n`;
       }
-
-      systemInstruction += `\nThe PR contains changes in ${prData.files.length} files. Be direct, technically precise, and maintain a professional peer-review tone.`;
 
       chatSessionRef.current = ai.chats.create({
         model: currentModel,
@@ -78,20 +97,13 @@ PR Description: ${prData.description}\n\n`;
       });
 
       if (messages.length === 0) {
-        setMessages([
-            {
-                id: 'welcome',
-                role: 'system',
-                content: `Theia connected. I've analyzed ${prData.files.length} changed files in "${prData.title}" and reviewed the linked Linear issue. Ready for review.`,
-                timestamp: Date.now()
-            }
-        ]);
+        resetChat();
       }
 
     } catch (error) {
       console.error("Failed to initialize Theia:", error);
     }
-  }, [prData, linearIssue, currentModel, sessionId]);
+  }, [prData, linearIssue, currentModel, sessionId, language]);
 
   const addLocalMessage = (message: ChatMessage) => {
       setMessages(prev => [...prev, message]);
@@ -124,29 +136,19 @@ PR Description: ${prData.description}\n\n`;
     setIsTyping(true);
 
     try {
-      let contextAwareMessage = text;
-      
+      let contextMsg = text;
       if (selectionState) {
-          contextAwareMessage += `\n\n--- CONTEXT: ${selectionState.file} (${selectionState.startLine}-${selectionState.endLine}) ---\n${selectionState.content}\n`;
-      } 
-      
+          contextMsg += `\n\nContext (${selectionState.file} L${selectionState.startLine}-${selectionState.endLine}):\n${selectionState.content}`;
+      }
       if (activeDiagram) {
-        contextAwareMessage += `\n\n--- ACTIVE DIAGRAM: ${activeDiagram.title} ---`;
+          contextMsg += `\n\nReviewing Diagram: ${activeDiagram.title}\nDescription: ${activeDiagram.description}`;
       }
 
-      const responseStream = await chatSessionRef.current.sendMessageStream({ 
-        message: contextAwareMessage 
-      });
-
+      const responseStream = await chatSessionRef.current.sendMessageStream({ message: contextMsg });
       const aiMessageId = (Date.now() + 1).toString();
       let fullResponseText = "";
 
-      setMessages(prev => [...prev, {
-        id: aiMessageId,
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now()
-      }]);
+      setMessages(prev => [...prev, { id: aiMessageId, role: 'assistant', content: '', timestamp: Date.now() }]);
 
       for await (const chunk of responseStream) {
         if (chunk.text) {
@@ -155,14 +157,14 @@ PR Description: ${prData.description}\n\n`;
         }
       }
     } catch (error) {
-      console.error("Error sending message to Theia:", error);
+      console.error("Error sending message:", error);
     } finally {
       setIsTyping(false);
     }
   };
 
   return (
-    <ChatContext.Provider value={{ messages, sendMessage, addLocalMessage, upsertMessage, isTyping, resetChat, currentModel, setModel }}>
+    <ChatContext.Provider value={{ messages, sendMessage, addLocalMessage, upsertMessage, isTyping, resetChat, currentModel, setModel, language, setLanguage }}>
       {children}
     </ChatContext.Provider>
   );

@@ -1,5 +1,5 @@
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { PRData, Diagram, CodeReference } from '../types';
 import { resolveFilePath } from '../utils/fileUtils';
 
@@ -20,7 +20,6 @@ export class DiagramAgent {
     const cleanedCode = rawCode.replace(refPattern, (match, description, filepath, lineStr) => {
       const line = parseInt(lineStr, 10);
       const refId = `ref-${Math.random().toString(36).substr(2, 9)}`;
-      
       const resolution = resolveFilePath(filepath.trim(), prFiles);
       
       references.push({
@@ -40,28 +39,41 @@ export class DiagramAgent {
 
   async proposeDiagrams(prData: PRData): Promise<Diagram[]> {
     const prFilePaths = prData.files.map(f => f.path);
+    
+    // Provide a complete manifest so the agent knows every file exists
+    const manifest = prData.files.map(f => `- ${f.path} (${f.status})`).join('\n');
+    
+    // Sample content for core logic files
     const fileContext = prData.files
       .filter(f => f.status !== 'deleted' && (f.path.endsWith('.ts') || f.path.endsWith('.tsx') || f.path.endsWith('.py') || f.path.endsWith('.js')))
-      .map(f => `File: ${f.path}\nContent:\n${(f.newContent || '').slice(0, 3000)}`)
+      .slice(0, 15) // Ensure we don't exceed token limits but get enough context
+      .map(f => `File: ${f.path}\nContent:\n${(f.newContent || '').slice(0, 2000)}`)
       .join('\n\n');
 
     const prompt = `
-      You are Theia, specialized Software Architecture Agent.
-      Analyze these Pull Request changes and generate Mermaid.js Sequence Diagrams.
+      You are Theia, a world-class Software Architect. Analyze this PR and generate 2 high-value Mermaid.js Sequence Diagrams.
+      
+      PR: ${prData.title}
+      Description: ${prData.description}
 
-      PR Title: ${prData.title}
-      PR Description: ${prData.description}
+      ## PROJECT MANIFEST (All changed files)
+      ${manifest}
 
-      CODE CONTEXT:
+      ## KEY FILE CONTENTS
       ${fileContext}
 
-      ## Code Reference Format (CRITICAL)
-      Every message, activation, or note in the diagram MUST use this format:
-      {description}§{filepath}:{line}
+      ## FORMAT RULES (CRITICAL)
+      1. Every message label MUST use this format: {description}§{filepath}:{line}
+         Example: "Initialize pipeline§src/main.py:42"
+      2. Use valid sequenceDiagram syntax.
+      3. Assign specific, descriptive titles. NO "Untitled" or generic names.
+      4. Ensure you reference the correct paths from the MANIFEST above.
 
-      Where:
-      - § is the literal section sign character (Unicode U+00A7)
-      - Return ONLY a JSON array. 
+      ## Output Schema
+      Return a JSON array of objects. Each object MUST have:
+      - title: Meaningful, specific name.
+      - description: One-sentence summary.
+      - mermaidCode: Valid sequenceDiagram code using the § format for messages.
     `;
 
     try {
@@ -69,7 +81,19 @@ export class DiagramAgent {
         model: 'gemini-3-flash-preview',
         contents: prompt,
         config: {
-          responseMimeType: "application/json"
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                description: { type: Type.STRING },
+                mermaidCode: { type: Type.STRING }
+              },
+              required: ["title", "description", "mermaidCode"]
+            }
+          }
         }
       });
 
@@ -83,8 +107,8 @@ export class DiagramAgent {
         const { cleanedCode, references } = this.parseMermaidReferences(d.mermaidCode || "", prFilePaths);
         return {
             id: `auto-diagram-${Date.now()}-${idx}`,
-            title: d.title || "Untitled Diagram",
-            description: d.description || "No description provided",
+            title: d.title || `Flow Analysis ${idx + 1}`,
+            description: d.description || "Architectural flow analysis.",
             mermaidCode: cleanedCode,
             references,
             timestamp: Date.now(),
@@ -99,8 +123,11 @@ export class DiagramAgent {
 
   async generateCustomDiagram(prData: PRData, userPrompt: string): Promise<Diagram> {
     const prFilePaths = prData.files.map(f => f.path);
-    const prompt = `Generate a Mermaid.js Sequence Diagram for: "${userPrompt}". 
-    Use format: {description}§{filepath}:{line}. Return JSON.`;
+    const manifest = prData.files.map(f => `- ${f.path}`).join('\n');
+    const prompt = `Generate a Mermaid sequence diagram for: "${userPrompt}". 
+    MANIFEST: ${manifest}
+    CRITICAL: Use the format "{description}§{filepath}:{line}" for ALL message labels. 
+    Return JSON with keys 'title', 'description', and 'mermaidCode'.`;
 
     try {
       const response = await this.ai.models.generateContent({
@@ -110,22 +137,22 @@ export class DiagramAgent {
       });
       
       const text = response.text;
-      if (!text) throw new Error("No response from AI");
+      if (!text) throw new Error("No response");
       
       const data = JSON.parse(text);
       const { cleanedCode, references } = this.parseMermaidReferences(data.mermaidCode || "", prFilePaths);
       
       return {
           id: `custom-diagram-${Date.now()}`,
-          title: data.title || "Custom Diagram",
-          description: data.description || "User-defined flow",
+          title: data.title || "Custom Flow",
+          description: data.description || userPrompt,
           mermaidCode: cleanedCode,
           references,
           timestamp: Date.now(),
           isAutoGenerated: false
       };
     } catch (e) {
-      console.error("Custom Diagram Generation Failed", e);
+      console.error("Custom Diagram Failed", e);
       throw e;
     }
   }

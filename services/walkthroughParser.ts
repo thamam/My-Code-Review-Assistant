@@ -1,3 +1,4 @@
+
 import { Walkthrough, WalkthroughSection } from '../types';
 
 export class WalkthroughParserError extends Error {
@@ -7,7 +8,7 @@ export class WalkthroughParserError extends Error {
   }
 }
 
-const parseMarkdownWalkthrough = (text: string): Walkthrough => {
+export const parseMarkdownWalkthrough = (text: string): Walkthrough => {
   const lines = text.split('\n');
   let title = "Walkthrough";
   let author = "Anonymous";
@@ -55,7 +56,6 @@ const parseMarkdownWalkthrough = (text: string): Walkthrough => {
             
             if (!isNaN(start)) {
               currentSection.highlights.push({ file, lines: [start, end], note });
-              // Auto-add file to section list if not present
               if (!currentSection.files.includes(file)) currentSection.files.push(file);
             } else {
               currentSection.description += line + '\n';
@@ -75,47 +75,41 @@ const parseMarkdownWalkthrough = (text: string): Walkthrough => {
   if (currentSection) sections.push(currentSection);
   
   if (sections.length === 0) {
-      throw new WalkthroughParserError("No valid sections found in Markdown. Use '## Section Title' to define sections.");
+      throw new WalkthroughParserError("No valid sections found. Use '## Section Title' to define sections.");
   }
 
   return { title, author, sections };
 };
 
-export const parseWalkthroughFile = (file: File): Promise<Walkthrough> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      try {
-        if (file.name.endsWith('.json')) {
-          try {
+export const parseWalkthroughFromText = (content: string, fileName: string): Walkthrough => {
+    if (fileName.endsWith('.json')) {
+        try {
             const json = JSON.parse(content);
-            // Basic Schema Validation
             if (!json.sections || !Array.isArray(json.sections)) {
                 throw new WalkthroughParserError("Invalid JSON structure: Missing 'sections' array.");
             }
-            if (json.sections.some((s: any) => !s.title || !s.id)) {
-                 throw new WalkthroughParserError("Invalid JSON structure: Sections must have 'id' and 'title'.");
-            }
-            resolve(json as Walkthrough);
-          } catch (e) {
+            return json as Walkthrough;
+        } catch (e) {
             if (e instanceof WalkthroughParserError) throw e;
             throw new WalkthroughParserError("Invalid JSON syntax.");
-          }
-        } else {
-          // Default to Markdown parsing
-          resolve(parseMarkdownWalkthrough(content));
         }
+    } else {
+        return parseMarkdownWalkthrough(content);
+    }
+};
+
+export const parseWalkthroughFile = (file: File): Promise<Walkthrough> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      try {
+        resolve(parseWalkthroughFromText(content, file.name));
       } catch (err) {
         reject(err);
       }
     };
-
-    reader.onerror = () => {
-      reject(new WalkthroughParserError("Failed to read file content."));
-    };
-
+    reader.onerror = () => reject(new WalkthroughParserError("Failed to read file."));
     reader.readAsText(file);
   });
 };

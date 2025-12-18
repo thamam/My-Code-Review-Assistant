@@ -71,17 +71,31 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const isCodeViewerReadyRef = useRef(false);
   useEffect(() => { isCodeViewerReadyRef.current = isCodeViewerReady; }, [isCodeViewerReady]);
 
+  // Load persisted data
   useEffect(() => {
     if (prData?.id) {
-      const saved = localStorage.getItem(`vcr_annotations_${prData.id}`);
-      if (saved) setAnnotations(JSON.parse(saved));
+      const savedAnns = localStorage.getItem(`vcr_annotations_${prData.id}`);
+      if (savedAnns) setAnnotations(JSON.parse(savedAnns));
       else setAnnotations([]);
+
+      const savedDiagrams = localStorage.getItem(`vcr_diagrams_${prData.id}`);
+      if (savedDiagrams) setDiagrams(JSON.parse(savedDiagrams));
+      else setDiagrams([]);
     }
   }, [prData?.id]);
 
+  // Save persisted data
   useEffect(() => {
-    if (prData?.id) localStorage.setItem(`vcr_annotations_${prData.id}`, JSON.stringify(annotations));
+    if (prData?.id) {
+      localStorage.setItem(`vcr_annotations_${prData.id}`, JSON.stringify(annotations));
+    }
   }, [annotations, prData?.id]);
+
+  useEffect(() => {
+    if (prData?.id && diagrams.length > 0) {
+      localStorage.setItem(`vcr_diagrams_${prData.id}`, JSON.stringify(diagrams));
+    }
+  }, [diagrams, prData?.id]);
 
   useEffect(() => {
     if (prData && prData.files.length > 0 && !selectedFile) setSelectedFile(prData.files[0]);
@@ -95,24 +109,38 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
   const navigateToCode = async (target: NavigationTarget): Promise<boolean> => {
     if (!prData) return false;
+    
+    // Resolve path using fuzzy logic to bridge gap between diagram refs and actual files
     const resolution = resolveFilePath(target.filepath, prData.files.map(f => f.path));
-    if (!resolution.resolved) return false;
+    if (!resolution.resolved) {
+      console.warn(`[PRContext] Navigation failed: Could not resolve ${target.filepath}`);
+      return false;
+    }
 
     const fileToSelect = prData.files.find(f => f.path === resolution.resolved);
     if (!fileToSelect) return false;
 
+    // Check if we need to switch file
     if (selectedFile?.path !== fileToSelect.path) {
         setIsCodeViewerReady(false);
         selectFile(fileToSelect);
+        
+        // Wait for viewer readiness (with a safety timeout)
         let attempts = 0;
-        while (!isCodeViewerReadyRef.current && attempts < 20) {
+        while (!isCodeViewerReadyRef.current && attempts < 30) {
             await new Promise(r => setTimeout(r, 100));
             attempts++;
         }
     }
 
+    // Set focused location for the CodeViewer to catch
     setFocusedLocation({ file: fileToSelect.path, line: target.line, timestamp: Date.now() });
-    if (leftTab !== 'files') setLeftTab('files');
+    
+    // Switch to file tab if we are in another tab (like diagrams or issue)
+    if (leftTab !== 'files' && target.source !== 'tree') {
+        setLeftTab('files');
+    }
+    
     return true;
   };
 
