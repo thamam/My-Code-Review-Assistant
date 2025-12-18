@@ -1,10 +1,11 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import Prism from 'prismjs';
 import { usePR } from '../../contexts/PRContext';
 import { Annotation } from '../../types';
 import { MessageSquare, MapPin, Tag } from 'lucide-react';
 import clsx from 'clsx';
 import { AnnotationInput } from './AnnotationInput';
+import { arePathsEquivalent } from '../../utils/fileUtils';
 
 // --- Syntax Highlighting Helpers ---
 
@@ -48,9 +49,10 @@ interface SourceViewProps {
 }
 
 export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => {
-  const { annotations, addAnnotation, removeAnnotation, selectionState, setSelectionState } = usePR();
+  const { annotations, addAnnotation, removeAnnotation, selectionState, setSelectionState, focusedLocation } = usePR();
   const [hoveredLine, setHoveredLine] = useState<number | null>(null);
   const [creatingLabelLine, setCreatingLabelLine] = useState<number | null>(null);
+  const [flashLine, setFlashLine] = useState<number | null>(null);
 
   const fileAnnotations = annotations.filter(a => a.file === filePath);
   const language = getLanguage(filePath);
@@ -65,6 +67,15 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
     if (path.endsWith('.md')) return 'markdown';
     return 'clike';
   }
+
+  // Handle flash highlight for navigation
+  useEffect(() => {
+    if (focusedLocation && arePathsEquivalent(focusedLocation.file, filePath)) {
+        setFlashLine(focusedLocation.line);
+        const timer = setTimeout(() => setFlashLine(null), 1500);
+        return () => clearTimeout(timer);
+    }
+  }, [focusedLocation, filePath]);
 
   const toggleMarker = (lineNum: number) => {
       const existingMarker = fileAnnotations.find(a => a.line === lineNum && a.type === 'marker');
@@ -144,17 +155,18 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
       }
   }, [content, filePath, setSelectionState]);
 
-  const lines = content.split('\n');
+  const linesList = content.split('\n');
 
   return (
     <div className="flex min-h-full font-mono text-sm bg-gray-950" onMouseUp={handleMouseUp}>
       {/* Gutter - ONLY Interaction Zone */}
       <div className="flex-shrink-0 w-12 bg-gray-900 border-r border-gray-800 text-gray-600 text-right select-none pt-2">
-         {lines.map((_, i) => {
+         {linesList.map((_, i) => {
              const lineNum = i + 1;
              const lineAnnotations = fileAnnotations.filter(a => a.line === lineNum);
              const hasMarker = lineAnnotations.some(a => a.type === 'marker');
              const hasLabel = lineAnnotations.some(a => a.type === 'label');
+             const isFlashing = flashLine !== null && lineNum === flashLine;
              
              const isSelected = selectionState && selectionState.file === filePath && 
                                 lineNum >= selectionState.startLine && lineNum <= selectionState.endLine;
@@ -163,10 +175,11 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
                  <div 
                     key={i} 
                     className={clsx(
-                        "h-6 leading-6 pr-2 relative hover:bg-gray-800 cursor-pointer group transition-all duration-150 z-20",
+                        "h-6 leading-6 pr-2 relative hover:bg-gray-800 cursor-pointer group transition-all duration-200 z-20",
                         isSelected 
                             ? "bg-blue-900/30 text-blue-200 border-l-4 border-blue-500 font-bold" 
-                            : "border-l-4 border-transparent"
+                            : "border-l-4 border-transparent",
+                        isFlashing && "bg-blue-600/30 text-blue-100 border-l-4 border-blue-400 font-bold"
                     )}
                     onMouseEnter={() => setHoveredLine(lineNum)}
                     onMouseLeave={() => setHoveredLine(null)}
@@ -193,18 +206,20 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
       {/* Code Area - Only for text selection */}
       <div className="flex-1 overflow-x-auto pt-2">
         <div className={`language-${language} !bg-transparent`}>
-            {lines.map((line, i) => {
+            {linesList.map((line, i) => {
                  const lineNum = i + 1;
                  const lineAnnotations = fileAnnotations.filter(a => a.line === lineNum);
                  const isSelected = selectionState && selectionState.file === filePath && 
                             lineNum >= selectionState.startLine && lineNum <= selectionState.endLine;
+                 const isFlashing = flashLine !== null && lineNum === flashLine;
 
                  return (
                      <div 
                          key={i} 
                          className={clsx(
-                             "relative h-6 leading-6 whitespace-pre px-4 transition-colors duration-150 flex items-center cursor-text", 
-                             isSelected && "bg-blue-500/10"
+                             "relative h-6 leading-6 whitespace-pre px-4 transition-colors duration-200 flex items-center cursor-text", 
+                             isSelected && "bg-blue-500/10",
+                             isFlashing && "bg-blue-500/20 shadow-[inset_2px_0_0_0_#60a5fa]"
                          )} 
                          data-line-number={lineNum}
                      >

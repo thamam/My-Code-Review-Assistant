@@ -1,5 +1,7 @@
+
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
-import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue, Diagram } from '../types';
+import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue, Diagram, NavigationTarget } from '../types';
+import { arePathsEquivalent, resolveFilePath } from '../utils/fileUtils';
 
 interface FocusedLocation {
   file: string;
@@ -22,22 +24,19 @@ interface PRContextType {
   setActiveSectionId: (id: string | null) => void;
   isDiffMode: boolean;
   toggleDiffMode: () => void;
-  
-  // Navigation
   focusedLocation: FocusedLocation | null;
   scrollToLine: (file: string, line: number) => void;
-
-  // Annotations
+  navigateToCode: (target: NavigationTarget) => Promise<boolean>;
+  setLeftTab: (tab: 'files' | 'annotations' | 'issue' | 'diagrams') => void;
+  leftTab: 'files' | 'annotations' | 'issue' | 'diagrams';
+  isCodeViewerReady: boolean;
+  setIsCodeViewerReady: (ready: boolean) => void;
   annotations: Annotation[];
   addAnnotation: (file: string, line: number, type: 'marker' | 'label', text?: string) => void;
   removeAnnotation: (id: string) => void;
   updateAnnotation: (id: string, updates: Partial<Annotation>) => void;
-
-  // Linear Integration
   linearIssue: LinearIssue | null;
   setLinearIssue: (issue: LinearIssue | null) => void;
-
-  // Diagrams
   diagrams: Diagram[];
   activeDiagram: Diagram | null;
   addDiagram: (diagram: Diagram) => void;
@@ -45,6 +44,8 @@ interface PRContextType {
   setActiveDiagram: (diagram: Diagram | null) => void;
   diagramViewMode: 'full' | 'split';
   setDiagramViewMode: (mode: 'full' | 'split') => void;
+  diagramSplitPercent: number;
+  setDiagramSplitPercent: (val: number) => void;
 }
 
 const PRContext = createContext<PRContextType | undefined>(undefined);
@@ -55,73 +56,36 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [walkthrough, setWalkthrough] = useState<Walkthrough | null>(null);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const [isDiffMode, setIsDiffMode] = useState(true);
-  
-  const [viewportState, setViewportState] = useState<ViewportState>({
-    file: null,
-    startLine: 0,
-    endLine: 0
-  });
-
+  const [leftTab, setLeftTab] = useState<'files' | 'annotations' | 'issue' | 'diagrams'>('files');
+  const [isCodeViewerReady, setIsCodeViewerReady] = useState(false);
+  const [viewportState, setViewportState] = useState<ViewportState>({ file: null, startLine: 0, endLine: 0 });
   const [selectionState, setSelectionState] = useState<SelectionState | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [linearIssue, setLinearIssue] = useState<LinearIssue | null>(null);
   const [focusedLocation, setFocusedLocation] = useState<FocusedLocation | null>(null);
-  
   const [diagrams, setDiagrams] = useState<Diagram[]>([]);
   const [activeDiagram, setActiveDiagram] = useState<Diagram | null>(null);
-  const [diagramViewMode, setDiagramViewMode] = useState<'full' | 'split'>('full');
+  const [diagramViewMode, setDiagramViewMode] = useState<'full' | 'split'>('split');
+  const [diagramSplitPercent, setDiagramSplitPercent] = useState(50);
 
-  // Persistence Logic: Improved Hydration and Auto-save
-  const hydratedPrId = useRef<string | null>(null);
+  const isCodeViewerReadyRef = useRef(false);
+  useEffect(() => { isCodeViewerReadyRef.current = isCodeViewerReady; }, [isCodeViewerReady]);
 
-  // Load annotations when PR changes
   useEffect(() => {
     if (prData?.id) {
-      const storageKey = `vcr_annotations_${prData.id}`;
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          setAnnotations(parsed);
-        } catch (e) {
-          console.error("Failed to parse saved annotations", e);
-          setAnnotations([]);
-        }
-      } else {
-        setAnnotations([]);
-      }
-      // Mark as hydrated for this PR ID
-      hydratedPrId.current = prData.id;
-    } else {
-      setAnnotations([]);
-      hydratedPrId.current = null;
+      const saved = localStorage.getItem(`vcr_annotations_${prData.id}`);
+      if (saved) setAnnotations(JSON.parse(saved));
+      else setAnnotations([]);
     }
   }, [prData?.id]);
 
-  // Save annotations whenever they change, ONLY after hydration
   useEffect(() => {
-    if (prData?.id && hydratedPrId.current === prData.id) {
-      const storageKey = `vcr_annotations_${prData.id}`;
-      localStorage.setItem(storageKey, JSON.stringify(annotations));
-    }
+    if (prData?.id) localStorage.setItem(`vcr_annotations_${prData.id}`, JSON.stringify(annotations));
   }, [annotations, prData?.id]);
 
-  // Select first file on load or when prData changes
   useEffect(() => {
-    if (prData && prData.files.length > 0) {
-      if (!selectedFile || !prData.files.find(f => f.path === selectedFile.path)) {
-        setSelectedFile(prData.files[0]);
-      }
-      setDiagrams([]);
-      setActiveDiagram(null);
-    } else {
-        setSelectedFile(null);
-    }
+    if (prData && prData.files.length > 0 && !selectedFile) setSelectedFile(prData.files[0]);
   }, [prData]);
-
-  const updateViewport = (state: Partial<ViewportState>) => {
-    setViewportState(prev => ({ ...prev, ...state }));
-  };
 
   const selectFile = (file: FileChange) => {
     setSelectedFile(file);
@@ -129,95 +93,50 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     setSelectionState(null);
   };
 
-  const scrollToLine = (file: string, line: number) => {
-      if (prData) {
-          const fileObj = prData.files.find(f => f.path === file);
-          if (fileObj) {
-              if (selectedFile?.path !== file) {
-                  selectFile(fileObj);
-              }
-              setFocusedLocation({ file, line, timestamp: Date.now() });
-          }
-      }
+  const navigateToCode = async (target: NavigationTarget): Promise<boolean> => {
+    if (!prData) return false;
+    const resolution = resolveFilePath(target.filepath, prData.files.map(f => f.path));
+    if (!resolution.resolved) return false;
+
+    const fileToSelect = prData.files.find(f => f.path === resolution.resolved);
+    if (!fileToSelect) return false;
+
+    if (selectedFile?.path !== fileToSelect.path) {
+        setIsCodeViewerReady(false);
+        selectFile(fileToSelect);
+        let attempts = 0;
+        while (!isCodeViewerReadyRef.current && attempts < 20) {
+            await new Promise(r => setTimeout(r, 100));
+            attempts++;
+        }
+    }
+
+    setFocusedLocation({ file: fileToSelect.path, line: target.line, timestamp: Date.now() });
+    if (leftTab !== 'files') setLeftTab('files');
+    return true;
   };
 
-  const loadWalkthrough = (data: Walkthrough) => {
-    setWalkthrough(data);
+  const scrollToLine = (file: string, line: number) => {
+    navigateToCode({ filepath: file, line, source: 'annotation' });
   };
 
   const toggleDiffMode = () => setIsDiffMode(prev => !prev);
-
-  // Annotation Methods
   const addAnnotation = (file: string, line: number, type: 'marker' | 'label', text?: string) => {
-      const id = `${type}_${Date.now()}`;
-      const defaultTitle = type === 'marker' ? `marker_${annotations.filter(a => a.type === 'marker').length + 1}` : 'New Label';
-      
-      const newAnnotation: Annotation = {
-          id,
-          file,
-          line,
-          type,
-          title: text || defaultTitle,
-          description: type === 'label' ? '' : undefined,
-          timestamp: Date.now()
-      };
-      
-      setAnnotations(prev => [...prev, newAnnotation]);
-  };
-
-  const removeAnnotation = (id: string) => {
-      setAnnotations(prev => prev.filter(a => a.id !== id));
-  };
-
-  const updateAnnotation = (id: string, updates: Partial<Annotation>) => {
-      setAnnotations(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
-  };
-
-  // Diagram Methods
-  const addDiagram = (diagram: Diagram) => {
-      setDiagrams(prev => [...prev, diagram]);
-  };
-
-  const removeDiagram = (id: string) => {
-      setDiagrams(prev => prev.filter(d => d.id !== id));
-      if (activeDiagram?.id === id) setActiveDiagram(null);
-  };
-
-  const handleSetActiveDiagram = (diagram: Diagram | null) => {
-      setActiveDiagram(diagram);
+    const id = `${type}_${Date.now()}`;
+    const title = text || (type === 'marker' ? `marker_${annotations.length + 1}` : 'New Label');
+    setAnnotations(prev => [...prev, { id, file, line, type, title, timestamp: Date.now() }]);
   };
 
   return (
     <PRContext.Provider value={{
-      prData,
-      setPRData: setPrData,
-      selectedFile,
-      selectFile,
-      viewportState,
-      updateViewport,
-      selectionState,
-      setSelectionState,
-      walkthrough,
-      loadWalkthrough,
-      activeSectionId,
-      setActiveSectionId,
-      isDiffMode,
-      toggleDiffMode,
-      focusedLocation,
-      scrollToLine,
-      annotations,
-      addAnnotation,
-      removeAnnotation,
-      updateAnnotation,
-      linearIssue,
-      setLinearIssue,
-      diagrams,
-      activeDiagram,
-      addDiagram,
-      removeDiagram,
-      setActiveDiagram: handleSetActiveDiagram,
-      diagramViewMode,
-      setDiagramViewMode
+      prData, setPRData: setPrData, selectedFile, selectFile, viewportState, updateViewport: (s) => setViewportState(v => ({...v, ...s})),
+      selectionState, setSelectionState, walkthrough, loadWalkthrough: setWalkthrough, activeSectionId, setActiveSectionId,
+      isDiffMode, toggleDiffMode, focusedLocation, scrollToLine, navigateToCode, leftTab, setLeftTab, isCodeViewerReady, setIsCodeViewerReady,
+      annotations, addAnnotation, removeAnnotation: (id) => setAnnotations(a => a.filter(x => x.id !== id)),
+      updateAnnotation: (id, u) => setAnnotations(a => a.map(x => x.id === id ? {...x, ...u} : x)),
+      linearIssue, setLinearIssue, diagrams, activeDiagram, addDiagram: (d) => setDiagrams(p => [...p, d]),
+      removeDiagram: (id) => { setDiagrams(p => p.filter(d => d.id !== id)); if(activeDiagram?.id === id) setActiveDiagram(null); },
+      setActiveDiagram, diagramViewMode, setDiagramViewMode, diagramSplitPercent, setDiagramSplitPercent
     }}>
       {children}
     </PRContext.Provider>
@@ -226,8 +145,6 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
 export const usePR = () => {
   const context = useContext(PRContext);
-  if (context === undefined) {
-    throw new Error('usePR must be used within a PRProvider');
-  }
+  if (!context) throw new Error('usePR must be used within a PRProvider');
   return context;
 };

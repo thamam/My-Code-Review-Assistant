@@ -1,3 +1,4 @@
+
 import { FileChange, FileTreeNode } from '../types';
 
 export function normalizePath(path: string): string {
@@ -10,15 +11,38 @@ export function arePathsEquivalent(path1: string, path2: string): boolean {
     
     if (p1 === p2) return true;
     
-    // Check if one is a suffix of the other (handling absolute vs relative)
-    // We require a path separator or start of string to avoid partial filename matches
-    // e.g. "main.py" should match "src/main.py" but "app.ts" shouldn't match "mapp.ts"
-    
     const endsWith = (full: string, suffix: string) => {
         return full.endsWith(suffix) && (full.length === suffix.length || full[full.length - suffix.length - 1] === '/');
     };
 
     return endsWith(p1, p2) || endsWith(p2, p1);
+}
+
+export function resolveFilePath(
+  referencePath: string, 
+  prFiles: string[]
+): { resolved: string | null; confidence: 'exact' | 'fuzzy' | 'none' } {
+  const normalizedRef = normalizePath(referencePath);
+  
+  // 1. Exact match
+  if (prFiles.includes(normalizedRef)) {
+    return { resolved: normalizedRef, confidence: 'exact' };
+  }
+  
+  // 2. Basename match (single result)
+  const basename = normalizedRef.split('/').pop();
+  const basenameMatches = prFiles.filter(f => f.endsWith(`/${basename}`) || f === basename);
+  if (basenameMatches.length === 1) {
+    return { resolved: basenameMatches[0], confidence: 'fuzzy' };
+  }
+  
+  // 3. Suffix match
+  const suffixMatches = prFiles.filter(f => f.endsWith(normalizedRef));
+  if (suffixMatches.length === 1) {
+    return { resolved: suffixMatches[0], confidence: 'fuzzy' };
+  }
+  
+  return { resolved: null, confidence: 'none' };
 }
 
 export function buildFileTree(files: FileChange[]): FileTreeNode[] {
@@ -51,7 +75,6 @@ export function buildFileTree(files: FileChange[]): FileTreeNode[] {
     });
   });
 
-  // Sort: Directories first, then files
   const sortNodes = (nodes: FileTreeNode[]) => {
     nodes.sort((a, b) => {
       if (a.type === b.type) {

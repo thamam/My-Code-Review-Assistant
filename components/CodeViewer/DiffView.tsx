@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback, useState } from 'react';
+import React, { useMemo, useCallback, useState, useEffect } from 'react';
 import { computeDiff, DiffLine } from '../../utils/diffUtils';
 import clsx from 'clsx';
 import { LineMarker } from './LineMarker';
@@ -63,14 +63,24 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
   const diffLines = useMemo(() => computeDiff(oldContent, newContent), [oldContent, newContent]);
   const visibleLines = React.useRef(new Set<number>());
   const updateTimeout = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const { walkthrough, activeSectionId, selectionState, setSelectionState, annotations, addAnnotation, removeAnnotation } = usePR();
+  const { walkthrough, activeSectionId, selectionState, setSelectionState, annotations, addAnnotation, removeAnnotation, focusedLocation } = usePR();
   const [hoveredLine, setHoveredLine] = useState<number | null>(null);
+  const [flashLine, setFlashLine] = useState<number | null>(null);
   
   // State for inline label creation
   const [creatingLabelLine, setCreatingLabelLine] = useState<number | null>(null);
 
   const fileAnnotations = annotations.filter(a => a.file === filePath);
   const language = getLanguage(filePath);
+
+  // Handle flash highlight for navigation
+  useEffect(() => {
+    if (focusedLocation && arePathsEquivalent(focusedLocation.file, filePath)) {
+        setFlashLine(focusedLocation.line);
+        const timer = setTimeout(() => setFlashLine(null), 1500);
+        return () => clearTimeout(timer);
+    }
+  }, [focusedLocation, filePath]);
 
   const handleLineVisibility = (lineNumber: number, isVisible: boolean) => {
     if (isVisible) visibleLines.current.add(lineNumber);
@@ -192,6 +202,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
         const isAdded = line.type === 'add';
         const isRemoved = line.type === 'remove';
         const isHighlighted = isLineHighlighted(line.newLineNumber);
+        const isFlashing = flashLine !== null && line.newLineNumber === flashLine;
         const note = getHighlightNote(line.newLineNumber);
         const showNote = note && line.newLineNumber && highlights.find(h => h.lines[0] === line.newLineNumber);
         
@@ -206,10 +217,11 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
           <div 
             key={`${filePath}-${idx}`} 
             className={clsx(
-              "flex relative group hover:bg-white/5",
+              "flex relative group hover:bg-white/5 transition-colors duration-200",
               isAdded && "bg-green-900/20",
               isRemoved && "bg-red-900/20",
-              isHighlighted && "bg-purple-900/30 ring-1 ring-purple-500/50 z-10"
+              isHighlighted && "bg-purple-900/30 ring-1 ring-purple-500/50 z-10",
+              isFlashing && "bg-blue-600/30 ring-1 ring-blue-500/50 z-20"
             )}
             data-line-number={line.newLineNumber}
           >
@@ -221,7 +233,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
               />
             )}
 
-            {/* Old Line Number (Interaction allowed here too if it maps to newline) */}
+            {/* Old Line Number */}
             <div 
               className={clsx(
                   "w-12 text-right pr-3 text-gray-600 select-none border-r py-0.5 relative transition-all duration-150 cursor-pointer hover:bg-gray-800/50",
@@ -235,7 +247,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
               {line.oldLineNumber || ''}
             </div>
             
-            {/* New Line Number (Interaction allowed here) */}
+            {/* New Line Number */}
             <div 
                 className={clsx(
                     "w-12 text-right pr-3 select-none border-r py-0.5 relative cursor-pointer hover:text-gray-400 hover:bg-gray-800/50 transition-all duration-150 z-20",
@@ -266,7 +278,6 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
               {isRemoved && '-'}
             </div>
 
-            {/* Content Area - Interaction REMOVED here, only for text selection */}
             <div 
                 className={clsx("flex-1 whitespace-pre py-0.5 pl-2 relative transition-colors duration-150 cursor-text", 
                     isAdded && "text-green-100", 

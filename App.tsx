@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { PRProvider, usePR } from './contexts/PRContext';
 import { ChatProvider, useChat } from './contexts/ChatContext';
 import { LiveProvider, useLive } from './contexts/LiveContext';
@@ -97,15 +97,18 @@ const VoiceControls = () => {
 };
 
 const MainLayout = () => {
-  const { prData, setPRData, walkthrough, loadWalkthrough, isDiffMode, toggleDiffMode, linearIssue, activeDiagram, diagramViewMode } = usePR();
+  const { prData, setPRData, walkthrough, loadWalkthrough, isDiffMode, toggleDiffMode, linearIssue, activeDiagram, diagramViewMode, diagramSplitPercent, setDiagramSplitPercent, leftTab, setLeftTab } = usePR();
   const [showChat, setShowChat] = useState(true);
   const [showTree, setShowTree] = useState(true);
   const [showLinearModal, setShowLinearModal] = useState(false);
-  const [leftTab, setLeftTab] = useState<'files' | 'annotations' | 'issue' | 'diagrams'>('files');
   const [chatWidth, setChatWidth] = useState(350);
   const [fileTreeWidth, setFileTreeWidth] = useState(280);
+  
   const [isResizingChat, setIsResizingChat] = useState(false);
   const [isResizingTree, setIsResizingTree] = useState(false);
+  const [isResizingDiagramSplit, setIsResizingDiagramSplit] = useState(false);
+  
+  const splitRef = useRef<HTMLDivElement>(null);
 
   const startResizingChat = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -117,24 +120,34 @@ const MainLayout = () => {
     setIsResizingTree(true);
   }, []);
 
+  const startResizingDiagram = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingDiagramSplit(true);
+  }, []);
+
   const stopResizing = useCallback(() => {
     setIsResizingChat(false);
     setIsResizingTree(false);
+    setIsResizingDiagramSplit(false);
   }, []);
 
   const resize = useCallback((e: MouseEvent) => {
     if (isResizingChat) {
         const newWidth = document.body.clientWidth - e.clientX;
         if (newWidth > 250 && newWidth < document.body.clientWidth * 0.6) setChatWidth(newWidth);
-    }
-    if (isResizingTree) {
+    } else if (isResizingTree) {
         const newWidth = e.clientX;
         if (newWidth > 200 && newWidth < document.body.clientWidth * 0.4) setFileTreeWidth(newWidth);
+    } else if (isResizingDiagramSplit && splitRef.current) {
+        const rect = splitRef.current.getBoundingClientRect();
+        const offsetX = e.clientX - rect.left;
+        const percent = (offsetX / rect.width) * 100;
+        if (percent > 10 && percent < 90) setDiagramSplitPercent(percent);
     }
-  }, [isResizingChat, isResizingTree]);
+  }, [isResizingChat, isResizingTree, isResizingDiagramSplit, setDiagramSplitPercent]);
 
   useEffect(() => {
-    if (isResizingChat || isResizingTree) {
+    if (isResizingChat || isResizingTree || isResizingDiagramSplit) {
         window.addEventListener('mousemove', resize);
         window.addEventListener('mouseup', stopResizing);
     }
@@ -142,7 +155,7 @@ const MainLayout = () => {
         window.removeEventListener('mousemove', resize);
         window.removeEventListener('mouseup', stopResizing);
     };
-  }, [isResizingChat, isResizingTree, resize, stopResizing]);
+  }, [isResizingChat, isResizingTree, isResizingDiagramSplit, resize, stopResizing]);
 
   const handleWalkthroughUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -158,10 +171,12 @@ const MainLayout = () => {
 
   if (!prData) return <WelcomeScreen />;
 
+  const isSplitMode = activeDiagram && diagramViewMode === 'split';
+
   return (
-    <div className={clsx("flex flex-col h-screen bg-gray-950 text-white font-sans", (isResizingChat || isResizingTree) && "cursor-col-resize select-none")}>
+    <div className={clsx("flex flex-col h-screen bg-gray-950 text-white font-sans", (isResizingChat || isResizingTree || isResizingDiagramSplit) && "cursor-col-resize select-none")}>
       <header className="h-14 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-4 shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-3 min-0 overflow-hidden">
           <button 
              onClick={() => setPRData(null as any)}
              className="text-gray-500 hover:text-white transition-colors shrink-0"
@@ -169,11 +184,11 @@ const MainLayout = () => {
           >
              <ArrowLeft size={20} />
           </button>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <Eye size={18} className="text-amber-400" />
             <span className="font-bold text-sm tracking-tight hidden sm:inline text-amber-100 uppercase">Theia</span>
           </div>
-          <div className="h-4 w-px bg-gray-700 mx-1 hidden sm:block" />
+          <div className="h-4 w-px bg-gray-700 mx-1 hidden sm:block shrink-0" />
           <div className="overflow-hidden min-w-0">
             <h1 className="text-sm font-bold flex items-center gap-2 truncate">
               {prData.title}
@@ -222,10 +237,10 @@ const MainLayout = () => {
         {showTree && (
             <div className="flex shrink-0 h-full relative flex-col bg-gray-900 border-r border-gray-800" style={{ width: fileTreeWidth }}>
                 <div className="flex border-b border-gray-800 bg-gray-900">
-                    <button onClick={() => setLeftTab('files')} className={clsx("flex-1 py-2 text-xs flex items-center justify-center transition-colors", leftTab === 'files' ? "text-amber-400 border-b-2 border-amber-400" : "text-gray-500 hover:text-gray-300")}><FolderTree size={14} /></button>
-                    <button onClick={() => setLeftTab('annotations')} className={clsx("flex-1 py-2 text-xs flex items-center justify-center transition-colors", leftTab === 'annotations' ? "text-amber-400 border-b-2 border-amber-400" : "text-gray-500 hover:text-gray-300")}><BookMarked size={14} /></button>
-                    <button onClick={() => setLeftTab('issue')} className={clsx("flex-1 py-2 text-xs flex items-center justify-center transition-colors", leftTab === 'issue' ? "text-amber-400 border-b-2 border-amber-400" : "text-gray-500 hover:text-gray-300")}><Target size={14} /></button>
-                    <button onClick={() => setLeftTab('diagrams')} className={clsx("flex-1 py-2 text-xs flex items-center justify-center transition-colors", leftTab === 'diagrams' ? "text-amber-400 border-b-2 border-amber-400" : "text-gray-500 hover:text-gray-300")}><Workflow size={14} /></button>
+                    <button onClick={() => setLeftTab('files')} className={clsx("flex-1 py-2 text-xs flex items-center justify-center transition-colors", leftTab === 'files' ? "text-amber-400 border-b-2 border-amber-400" : "text-gray-500 hover:text-gray-300")} title="Files"><FolderTree size={14} /></button>
+                    <button onClick={() => setLeftTab('annotations')} className={clsx("flex-1 py-2 text-xs flex items-center justify-center transition-colors", leftTab === 'annotations' ? "text-amber-400 border-b-2 border-amber-400" : "text-gray-500 hover:text-gray-300")} title="Annotations"><BookMarked size={14} /></button>
+                    <button onClick={() => setLeftTab('issue')} className={clsx("flex-1 py-2 text-xs flex items-center justify-center transition-colors", leftTab === 'issue' ? "text-amber-400 border-b-2 border-amber-400" : "text-gray-500 hover:text-gray-300")} title="Issue"><Target size={14} /></button>
+                    <button onClick={() => setLeftTab('diagrams')} className={clsx("flex-1 py-2 text-xs flex items-center justify-center transition-colors", leftTab === 'diagrams' ? "text-amber-400 border-b-2 border-amber-400" : "text-gray-500 hover:text-gray-300")} title="Diagrams"><Workflow size={14} /></button>
                 </div>
                 <div className="w-full flex-1 overflow-hidden">
                     {leftTab === 'files' && <FileTree />}
@@ -239,14 +254,32 @@ const MainLayout = () => {
 
         <div className="flex-1 flex flex-col min-w-0 bg-gray-950 border-r border-gray-800">
             {walkthrough && <WalkthroughPanel />}
-            <div className="flex-1 flex overflow-hidden relative">
+            <div ref={splitRef} className="flex-1 flex overflow-hidden relative">
                 {(!activeDiagram || diagramViewMode === 'split') && (
-                    <div className={clsx("flex-1 flex flex-col overflow-hidden min-w-0 relative", activeDiagram && diagramViewMode === 'split' && "w-1/2")}>
+                    <div 
+                        className={clsx("flex flex-col overflow-hidden min-w-0 relative")} 
+                        style={isSplitMode ? { width: `${diagramSplitPercent}%` } : { flex: 1 }}
+                    >
                          <CodeViewer />
                     </div>
                 )}
+                
+                {isSplitMode && (
+                    <div 
+                        onMouseDown={startResizingDiagram} 
+                        className="w-1 bg-gray-800 hover:bg-amber-500 cursor-col-resize z-40 transition-colors relative"
+                    >
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-8 bg-gray-800 border border-gray-700 rounded flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100">
+                            <div className="w-0.5 h-4 bg-gray-600 rounded-full" />
+                        </div>
+                    </div>
+                )}
+
                 {activeDiagram && (
-                    <div className={clsx("flex flex-col min-w-0 bg-gray-950 transition-all duration-300", diagramViewMode === 'split' ? "w-1/2 border-l border-gray-800" : "w-full absolute inset-0 z-30")}>
+                    <div 
+                        className={clsx("flex flex-col min-w-0 bg-gray-950 transition-all duration-300", diagramViewMode === 'split' ? "border-l border-gray-800" : "w-full absolute inset-0 z-30")}
+                        style={isSplitMode ? { width: `${100 - diagramSplitPercent}%` } : {}}
+                    >
                         <DiagramViewer />
                     </div>
                 )}

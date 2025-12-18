@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { usePR } from '../../contexts/PRContext';
 import { MermaidRenderer } from './MermaidRenderer';
@@ -37,7 +38,11 @@ export const DiagramViewer: React.FC = () => {
             </div>
         </div>
         <div className="flex-1 overflow-hidden relative">
-            <MermaidRenderer code={activeDiagram.mermaidCode} id={activeDiagram.id} />
+            <MermaidRenderer 
+                code={activeDiagram.mermaidCode} 
+                id={activeDiagram.id} 
+                references={activeDiagram.references}
+            />
         </div>
     </div>
   );
