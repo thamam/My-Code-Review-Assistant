@@ -5,6 +5,7 @@ import { Annotation } from '../../types';
 import { MessageSquare, MapPin, Tag } from 'lucide-react';
 import clsx from 'clsx';
 import { AnnotationInput } from './AnnotationInput';
+import { SelectionToolbar } from './SelectionToolbar';
 import { arePathsEquivalent } from '../../utils/fileUtils';
 
 // --- Syntax Highlighting Helpers ---
@@ -286,6 +287,7 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
                     })}
                 </div>
             </div>
+            <SelectionToolbar />
         </div>
     );
 };
