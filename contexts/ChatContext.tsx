@@ -147,26 +147,33 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       const manifest = prData.files.map(f => `- ${f.path} (${f.status})`).join('\n');
 
-      // UPDATED: System Instruction now references the dynamic user context
-      let systemInstruction = `You are Theia, a world-class Staff Software Engineer. 
+      // PHASE 5: Senior Staff Engineer persona with grounding constraints
+      let systemInstruction = `You are Theia, a **Senior Staff Software Engineer** conducting code reviews.
 ${langInstruction}
 
-You have access to the full PR context and linked Linear issues. 
-You can control the UI using tools to navigate code, switch tabs, or change views.
-Be concise, architecturally minded, and professional.
+## CRITICAL BEHAVIORAL CONSTRAINTS
+1. **DO NOT ask the user to explain code.** You explain it yourself.
+2. **DO NOT use Socratic questioning** (no "What do you think?", "Can you explain?").
+3. **ONLY reference code explicitly visible in the 'Active File Content' section below.** Do not assume methods, variables, or imports exist unless you can see them.
+4. **If no file content is provided, inform the user** that you need them to open a file to review it.
+5. **Be direct, specific, and actionable** in your feedback.
 
-CRITICAL: You have access to the user's current UI context. 
-Always check this context before answering generic questions like "what am I looking at?".
+## Your Capabilities
+- You can control the UI using tools to navigate code, switch tabs, or change views.
+- You have access to the full PR context and linked Linear issues.
+
+## Current Context
 - Current Tab: ${userContextRef.current.activeTab}
 - Open File: ${userContextRef.current.activeFile || 'None'}
 
+## PR Information
 PR: "${prData.title}"
 Author: ${prData.author}
 Description: ${prData.description}
 
 ## PROJECT MANIFEST (All changed files)
 ${manifest}
-\n`;
+`;
 
       if (linearIssue) {
         systemInstruction += `\n--- LINKED LINEAR ISSUE ---\nID: ${linearIssue.identifier}\nTitle: ${linearIssue.title}\nRequirements: ${linearIssue.description}\n`;
@@ -251,14 +258,35 @@ ${manifest}
 
     try {
       let contextMsg = text;
-      // Append current context context to the message invisibly to the user
+
+      // PHASE 5: Look up actual file content for grounding
+      let activeFileContent = '';
+      const activeFilePath = userContextRef.current.activeFile;
+      if (activeFilePath && prData) {
+        const fileData = prData.files.find(f => f.path === activeFilePath);
+        if (fileData && fileData.newContent) {
+          // Determine file extension for syntax highlighting hint
+          const ext = activeFilePath.split('.').pop() || 'text';
+          activeFileContent = `\n\n## Active File Content\n\`\`\`${ext}\n${fileData.newContent}\n\`\`\``;
+        }
+      }
+
+      // Append current context to the message invisibly to the user
       const contextSuffix = `
 [SYSTEM CONTEXT INJECTION]
 Current Tab: ${userContextRef.current.activeTab}
 Active File: ${userContextRef.current.activeFile || 'None'}
 Active Selection: ${userContextRef.current.activeSelection || 'None'}
-Active Diagram: ${userContextRef.current.activeDiagram || 'None'}
+Active Diagram: ${userContextRef.current.activeDiagram || 'None'}${activeFileContent}
 `;
+
+      // VERIFICATION: Log the context payload for debugging
+      console.log('[Theia] Context Payload:', {
+        activeFile: userContextRef.current.activeFile,
+        hasFileContent: !!activeFileContent,
+        contentLength: activeFileContent.length,
+        contextSuffixPreview: contextSuffix.substring(0, 500) + (contextSuffix.length > 500 ? '...' : '')
+      });
 
       // We send the context to the model, but we don't display it in the UI (the UI shows 'text')
       // Using 'parts' array format as required by the types, but wrapping the text content
