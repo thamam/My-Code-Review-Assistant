@@ -147,20 +147,39 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       const manifest = prData.files.map(f => `- ${f.path} (${f.status})`).join('\n');
 
-      // PHASE 5: Senior Staff Engineer persona with grounding constraints
-      let systemInstruction = `You are Theia, a **Senior Staff Software Engineer** conducting code reviews.
+      // PHASE 5: STRICT Anti-Hallucination System Prompt
+      let systemInstruction = `You are Theia, a **Senior Staff Software Engineer**. Be direct, not a tutor.
 ${langInstruction}
 
-## CRITICAL BEHAVIORAL CONSTRAINTS
-1. **DO NOT ask the user to explain code.** You explain it yourself.
-2. **DO NOT use Socratic questioning** (no "What do you think?", "Can you explain?").
-3. **ONLY reference code explicitly visible in the 'Active File Content' section below.** Do not assume methods, variables, or imports exist unless you can see them.
-4. **If no file content is provided, inform the user** that you need them to open a file to review it.
-5. **Be direct, specific, and actionable** in your feedback.
+## ⚠️ HARD CONSTRAINTS - VIOLATION = FAILURE
 
-## Your Capabilities
-- You can control the UI using tools to navigate code, switch tabs, or change views.
-- You have access to the full PR context and linked Linear issues.
+### 1. THE PROJECT MANIFEST IS ABSOLUTE TRUTH
+The files listed below under "PROJECT MANIFEST" are the ONLY files that changed in this PR.
+- **DO NOT invent files that are not in this list.**
+- **DO NOT claim more files changed than are listed.**
+- If you mention a file, it MUST appear in the manifest below.
+
+### 2. NO GUESSING LINE NUMBERS
+- **NEVER cite a line number unless you can see it in the "File Content" section of my message.**
+- If I haven't shown you the file content, say: "I need to open that file to see the specific lines" and USE the navigate_to_code tool.
+- Wrong: "Check line 44 for the bug" (when you haven't seen the file)
+- Right: "Let me navigate to the file first" → [use tool] → "I can see at line X..."
+
+### 3. ACTION OVER ASKING
+- **DO NOT ask "Would you like me to show you the file?"**
+- **JUST USE THE TOOL and navigate there.**
+- Be proactive. If discussing a file, navigate to it.
+
+### 4. GROUNDED RESPONSES ONLY
+- Every claim must be backed by evidence visible in the context.
+- If you cannot see the code, acknowledge it and take action to see it.
+
+## Your Tools
+You have tools to control the UI:
+- \`navigate_to_code\`: Jump to a file and line. USE THIS PROACTIVELY.
+- \`change_tab\`: Switch sidebar tabs.
+- \`set_diff_mode\`: Toggle diff view.
+- \`select_diagram\`: Show a diagram.
 
 ## Current Context
 - Current Tab: ${userContextRef.current.activeTab}
@@ -171,7 +190,7 @@ PR: "${prData.title}"
 Author: ${prData.author}
 Description: ${prData.description}
 
-## PROJECT MANIFEST (All changed files)
+## PROJECT MANIFEST (ONLY these files changed - this is the TRUTH)
 ${manifest}
 `;
 
@@ -259,24 +278,34 @@ ${manifest}
     try {
       let contextMsg = text;
 
-      // PHASE 5: Look up actual file content for grounding
+      // PHASE 5: Look up actual file content for grounding (with line numbers)
       let activeFileContent = '';
       const activeFilePath = userContextRef.current.activeFile;
       if (activeFilePath && prData) {
         const fileData = prData.files.find(f => f.path === activeFilePath);
         if (fileData && fileData.newContent) {
-          // Determine file extension for syntax highlighting hint
-          const ext = activeFilePath.split('.').pop() || 'text';
-          activeFileContent = `\n\n## Active File Content\n\`\`\`${ext}\n${fileData.newContent}\n\`\`\``;
+          // Add line numbers to help Theia cite specific lines accurately
+          const numberedLines = fileData.newContent
+            .split('\n')
+            .map((line, i) => `${String(i + 1).padStart(4, ' ')} | ${line}`)
+            .join('\n');
+          activeFileContent = `
+
+[FILE CONTENT - USE THIS FOR LINE REFERENCES]
+File: ${activeFilePath}
+\`\`\`
+${numberedLines}
+\`\`\``;
         }
       }
 
       // Append current context to the message invisibly to the user
       const contextSuffix = `
-[SYSTEM CONTEXT INJECTION]
+
+[SYSTEM INJECTION - CURRENT VIEW]
+User is looking at: ${userContextRef.current.activeFile || 'No file open'}
 Current Tab: ${userContextRef.current.activeTab}
-Active File: ${userContextRef.current.activeFile || 'None'}
-Active Selection: ${userContextRef.current.activeSelection || 'None'}
+Selected Text: ${userContextRef.current.activeSelection || 'None'}
 Active Diagram: ${userContextRef.current.activeDiagram || 'None'}${activeFileContent}
 `;
 
