@@ -47,6 +47,7 @@ interface PRContextType {
   setDiagramViewMode: (mode: 'full' | 'split') => void;
   diagramSplitPercent: number;
   setDiagramSplitPercent: (val: number) => void;
+  setDiagrams: (diagrams: Diagram[]) => void;
 }
 
 const PRContext = createContext<PRContextType | undefined>(undefined);
@@ -154,7 +155,8 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       updateAnnotation: (id, u) => setAnnotations(a => a.map(x => x.id === id ? { ...x, ...u } : x)),
       linearIssue, setLinearIssue, diagrams, activeDiagram, addDiagram: (d) => setDiagrams(p => [...p, d]),
       removeDiagram: (id) => { setDiagrams(p => p.filter(d => d.id !== id)); if (activeDiagram?.id === id) setActiveDiagram(null); },
-      setActiveDiagram, diagramViewMode, setDiagramViewMode, diagramSplitPercent, setDiagramSplitPercent
+      setActiveDiagram, diagramViewMode, setDiagramViewMode, diagramSplitPercent, setDiagramSplitPercent,
+      setDiagrams // Expose setter for full control (e.g. clearing)
     }}>
       {children}
     </PRContext.Provider>

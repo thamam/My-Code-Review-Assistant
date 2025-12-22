@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { usePR } from '../../contexts/PRContext';
 import { DiagramAgent } from '../../services/diagramAgent';
-import { Play, Plus, Trash2, Download, Workflow, MessageSquarePlus, Loader2 } from 'lucide-react';
+import { Play, Plus, Trash2, Download, Workflow, MessageSquarePlus, Loader2, RotateCcw } from 'lucide-react';
 import clsx from 'clsx';
 
 export const DiagramPanel: React.FC = () => {
-    const { prData, diagrams, addDiagram, removeDiagram, activeDiagram, setActiveDiagram } = usePR();
+    const { prData, diagrams, addDiagram, removeDiagram, activeDiagram, setActiveDiagram, setDiagrams } = usePR();
     const [isGenerating, setIsGenerating] = useState(false);
     const [customPrompt, setCustomPrompt] = useState('');
     const [showPromptInput, setShowPromptInput] = useState(false);
@@ -42,6 +42,15 @@ export const DiagramPanel: React.FC = () => {
         }
     };
 
+    const handleRefresh = async () => {
+        if (!prData) return;
+        // In a real app we might ask confirmation, but for "Refresh" it's often implicit "Reload".
+        // We clear existing diagrams before regenerating.
+        setDiagrams([]);
+        setActiveDiagram(null);
+        await handleAutoGenerate();
+    };
+
     const handleExport = (diagram: any) => {
         const blob = new Blob([diagram.mermaidCode], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
@@ -56,6 +65,14 @@ export const DiagramPanel: React.FC = () => {
             <div className="p-3 border-b border-gray-800 bg-gray-900">
                 <div className="flex justify-between items-center mb-3">
                     <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Sequence Diagrams</h2>
+                    <button
+                        onClick={handleRefresh}
+                        disabled={isGenerating}
+                        className="text-gray-500 hover:text-white transition-colors"
+                        title="Refresh Diagrams"
+                    >
+                        <RotateCcw size={14} className={clsx(isGenerating && "animate-spin")} />
+                    </button>
                 </div>
 
                 <div className="flex gap-2">

@@ -158,7 +158,10 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
         }
 
         // 2. Fallback: Single Click (Collapsed) via Event Delegation
-        // Find the clicked line element
+        // FIXED: We disabled single-click row selection in the Code Area to allow native text selection.
+        // Row selection is now restricted to the Gutter (handled by its own onClick) or Drag Selection.
+
+        /* 
         const target = e.target as HTMLElement;
         const lineEl = target.closest('[data-line-number]');
 
@@ -174,6 +177,7 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath }) => 
                 content: lineContent
             });
         }
+        */
     }, [content, filePath, setSelectionState]);
 
     const linesList = content.split('\n');

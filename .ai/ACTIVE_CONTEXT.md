@@ -1,26 +1,25 @@
 # Active Context State
 
 ## 1. Current Focus
-**Phase 2: State-Driven Diagram Navigation** (COMPLETED)
+**Phase 3: UI Stability & Interaction Polish** (COMPLETED)
 - **Status:** Done & Verified.
 - **Key Changes:**
-  - `MermaidRenderer`: Implemented `enhanceClickableAreas` (index-based SVG overlay) to fix "hard to click" lines.
-  - `PRContext`: Updated `MapsToCode` with race-condition locking (`isNavigating`) and `waitForFileLoad`.
-  - `types`: Updated `CodeReference` and `NavigationTarget`.
-- **Verification:** `tests/diagram-navigation.spec.ts` passes.
+  - `DiagramPanel`: Fixed "Refresh" button by clearing state before re-fetching.
+  - `SourceView`: Fixed "Row Click" bug by restricting `onClick` to the gutter element (`.line-number`).
+  - **Verification:** `tests/ui-stability.spec.ts` passes.
 
 ## 2. Active Branch
-* **Current:** `feature/state-driven-diagram-navigation`
+* **Current:** `feature/ui-stability-polish`
 * **Target:** `dev`
 
 ## 3. Architecture Constraints (DO NOT BREAK)
 * **Strict Git Flow:** Never push to main. Always PR to dev.
-* **Navigation:** Always use `MapsToCode` (Context) instead of DOM globals.
 * **Testing:** All features must have Playwright tests.
+* **Configuration:** `playwright.config.ts` must always be `headless: true`.
 
 ## 4. Next Actions (Backlog)
-* [ ] Merge `feature/state-driven-diagram-navigation` to `dev`.
-* [ ] **Phase 3:** UI Stability & Interaction Polish.
-  - Fix "Refresh Diagram" button (currently broken).
-  - Fix "Row Click" bug (Annotations should only trigger on Gutter click, not whole row).
-  - *Ref:* `Bugs 2cc7521e4f658047ad84c00b1b6a7996.md`
+* [ ] Merge `feature/ui-stability-polish` to `dev`.
+* [ ] **Phase 4:** Two-Way Linear Traceability.
+  - *Goal:* Click a Requirement in Linear Panel -> Navigate to relevant Code.
+  - *Ref:* `backlog.md` (Item 7).
+  - *Dependencies:* Uses `ChatContext.updateUserContext` and `PRContext.navigateToCode`.
