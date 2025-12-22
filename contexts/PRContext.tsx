@@ -23,6 +23,7 @@ interface PRContextType {
   activeSectionId: string | null;
   setActiveSectionId: (id: string | null) => void;
   isDiffMode: boolean;
+  setIsDiffMode: (value: boolean) => void;
   toggleDiffMode: () => void;
   focusedLocation: FocusedLocation | null;
   scrollToLine: (file: string, line: number) => void;
@@ -159,7 +160,7 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     <PRContext.Provider value={{
       prData, setPRData: setPrData, selectedFile, selectFile, viewportState, updateViewport: (s) => setViewportState(v => ({...v, ...s})),
       selectionState, setSelectionState, walkthrough, loadWalkthrough: setWalkthrough, activeSectionId, setActiveSectionId,
-      isDiffMode, toggleDiffMode, focusedLocation, scrollToLine, navigateToCode, leftTab, setLeftTab, isCodeViewerReady, setIsCodeViewerReady,
+      isDiffMode, setIsDiffMode, toggleDiffMode, focusedLocation, scrollToLine, navigateToCode, leftTab, setLeftTab, isCodeViewerReady, setIsCodeViewerReady,
       annotations, addAnnotation, removeAnnotation: (id) => setAnnotations(a => a.filter(x => x.id !== id)),
       updateAnnotation: (id, u) => setAnnotations(a => a.map(x => x.id === id ? {...x, ...u} : x)),
       linearIssue, setLinearIssue, diagrams, activeDiagram, addDiagram: (d) => setDiagrams(p => [...p, d]),

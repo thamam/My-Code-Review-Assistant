@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useRef, ReactNode, useEffect } from 'react';
-import { GoogleGenAI, LiveServerMessage, Modality, Blob } from "@google/genai";
+import { GoogleGenAI, LiveServerMessage, Modality, Blob, FunctionDeclaration, Type } from "@google/genai";
 import { usePR } from './PRContext';
 import { useChat } from './ChatContext';
 
@@ -16,8 +16,56 @@ interface LiveContextType {
 
 const LiveContext = createContext<LiveContextType | undefined>(undefined);
 
-// --- Mandatory Encoding/Decoding Functions ---
+// Tool Definitions
+const uiTools: FunctionDeclaration[] = [
+  {
+    name: "navigate_to_code",
+    description: "Navigate to a specific file and line number. Use this when I ask to see a file.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        filepath: { type: Type.STRING, description: "Relative path of the file" },
+        line: { type: Type.NUMBER, description: "Line number to scroll to (default 1)" }
+      },
+      required: ["filepath"]
+    }
+  },
+  {
+    name: "change_tab",
+    description: "Switch the application sidebar tab.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        tab_name: { type: Type.STRING, enum: ["files", "annotations", "issue", "diagrams"] }
+      },
+      required: ["tab_name"]
+    }
+  },
+  {
+    name: "set_diff_mode",
+    description: "Toggle between Diff View (true) and Source View (false).",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        enable: { type: Type.BOOLEAN }
+      },
+      required: ["enable"]
+    }
+  },
+  {
+    name: "select_diagram",
+    description: "Open and display a sequence diagram by searching its title.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        diagram_title: { type: Type.STRING }
+      },
+      required: ["diagram_title"]
+    }
+  }
+];
 
+// --- Mandatory Encoding/Decoding Functions ---
 function encode(bytes: Uint8Array) {
   let binary = '';
   const len = bytes.byteLength;
@@ -69,7 +117,7 @@ function createBlob(data: Float32Array): Blob {
 }
 
 export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { prData, linearIssue } = usePR();
+  const { prData, linearIssue, navigateToCode, setLeftTab, setIsDiffMode, diagrams, setActiveDiagram } = usePR();
   const { upsertMessage, language } = useChat();
   const [isActive, setIsActive] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -87,6 +135,36 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const outputTranscript = useRef('');
   const currentInputId = useRef<string | null>(null);
   const currentOutputId = useRef<string | null>(null);
+
+  const executeTool = async (name: string, args: any) => {
+    console.debug(`[Theia Live] Tool Call: ${name}`, args);
+    try {
+      if (name === 'navigate_to_code') {
+        await navigateToCode({ filepath: args.filepath, line: args.line || 1, source: 'search' });
+        return { result: 'ok' };
+      }
+      if (name === 'change_tab') {
+        setLeftTab(args.tab_name);
+        return { result: 'ok' };
+      }
+      if (name === 'set_diff_mode') {
+        setIsDiffMode(args.enable);
+        return { result: 'ok' };
+      }
+      if (name === 'select_diagram') {
+        const d = diagrams.find(dia => dia.title.toLowerCase().includes(args.diagram_title.toLowerCase()));
+        if (d) {
+          setActiveDiagram(d);
+          setLeftTab('diagrams');
+          return { result: 'ok' };
+        }
+        return { result: 'not found' };
+      }
+      return { error: 'unknown tool' };
+    } catch (e: any) {
+      return { error: e.message };
+    }
+  };
 
   const disconnect = () => {
     console.debug('[Theia] Disconnecting session');
@@ -147,17 +225,14 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       let systemInstruction = `You are Theia, a world-class Staff Software Engineer. You are performing a live code review conversation.
 Review context: PR "${prData.title}" by ${prData.author}.
+You can control the UI. Navigate to files when I ask.
 
 ${langInstruction}
 
 IF THE USER ASKS ABOUT THE LINEAR ISSUE, REFER TO THE "PRIMARY REQUIREMENTS" SECTION BELOW.\n`;
 
       if (linearIssue) {
-        systemInstruction += `\n--- LINKED LINEAR ISSUE (PRIMARY SOURCE OF TRUTH) ---\n`;
-        systemInstruction += `ID: ${linearIssue.identifier}\n`;
-        systemInstruction += `Title: ${linearIssue.title}\n`;
-        systemInstruction += `Full Requirements/Criteria: ${linearIssue.description}\n`;
-        systemInstruction += `--- END LINEAR ISSUE ---\n`;
+        systemInstruction += `\n--- LINKED LINEAR ISSUE ---\nID: ${linearIssue.identifier}\nTitle: ${linearIssue.title}\nRequirements: ${linearIssue.description}\n`;
       }
 
       systemInstruction += `\nProvide expert, concise feedback. Respond immediately to spoken input.`;
@@ -196,6 +271,22 @@ IF THE USER ASKS ABOUT THE LINEAR ISSUE, REFER TO THE "PRIMARY REQUIREMENTS" SEC
             sessionPromise.then(s => s.sendRealtimeInput({ text: welcomeMsg }));
           },
           onmessage: async (message: LiveServerMessage) => {
+            // Handle Tool Calls
+            if (message.toolCall) {
+                for (const fc of message.toolCall.functionCalls) {
+                    const result = await executeTool(fc.name, fc.args);
+                    sessionPromise.then(session => {
+                        session.sendToolResponse({
+                            functionResponses: [{
+                                id: fc.id,
+                                name: fc.name,
+                                response: result
+                            }]
+                        });
+                    });
+                }
+            }
+
             const audioData = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (audioData) {
               const audioBuffer = await decodeAudioData(decode(audioData), outputCtx, 24000, 1);
@@ -259,6 +350,7 @@ IF THE USER ASKS ABOUT THE LINEAR ISSUE, REFER TO THE "PRIMARY REQUIREMENTS" SEC
           responseModalities: [Modality.AUDIO],
           inputAudioTranscription: {},
           outputAudioTranscription: {},
+          tools: [{ functionDeclarations: uiTools }],
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } }
           },
