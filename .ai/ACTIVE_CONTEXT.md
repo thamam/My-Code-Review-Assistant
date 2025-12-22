@@ -1,25 +1,24 @@
 # Active Context State
 
 ## 1. Current Focus
-**Phase 3: UI Stability & Interaction Polish** (COMPLETED)
+**HOTFIX: Restore Voice Conversation Mode** (COMPLETED)
 - **Status:** Done & Verified.
-- **Key Changes:**
-  - `DiagramPanel`: Fixed "Refresh" button by clearing state before re-fetching.
-  - `SourceView`: Fixed "Row Click" bug by restricting `onClick` to the gutter element (`.line-number`).
-  - **Verification:** `tests/ui-stability.spec.ts` passes.
+- **Model:** Switched to `gemini-2.0-flash-exp` (Stable).
+- **Fixes:**
+  - Fixed stale closure in `onclose`.
+  - Added connection warmup delay (1s).
+  - Improved error separation (Auth vs. Mic).
 
 ## 2. Active Branch
-* **Current:** `feature/ui-stability-polish`
+* **Current:** `fix/voice-mode-connection`
 * **Target:** `dev`
 
-## 3. Architecture Constraints (DO NOT BREAK)
-* **Strict Git Flow:** Never push to main. Always PR to dev.
-* **Testing:** All features must have Playwright tests.
-* **Configuration:** `playwright.config.ts` must always be `headless: true`.
+## 3. Architecture Constraints
+* **Configuration:** `playwright.config.ts` must be `headless: true`.
+* **Agent Persona:** (Upcoming Phase 5) Stop "Teacher Mode". Be a "Staff Engineer".
 
 ## 4. Next Actions (Backlog)
-* [ ] Merge `feature/ui-stability-polish` to `dev`.
-* [ ] **Phase 4:** Two-Way Linear Traceability.
-  - *Goal:* Click a Requirement in Linear Panel -> Navigate to relevant Code.
-  - *Ref:* `backlog.md` (Item 7).
-  - *Dependencies:* Uses `ChatContext.updateUserContext` and `PRContext.navigateToCode`.
+* [ ] Merge `fix/voice-mode-connection` to `dev`.
+* [ ] **Phase 5: Agent Intelligence & Anti-Hallucination.**
+  - *Goal:* Fix "Blindness" (Inject active file content) + Fix "Persona" (Stop Socratic questioning).
+  - *Ref:* `ChatContext.tsx`

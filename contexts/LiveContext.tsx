@@ -124,6 +124,10 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [error, setError] = useState<string | null>(null);
   const [volume, setVolume] = useState(0);
 
+  // Refs to track state for callbacks (avoids stale closure issue)
+  const isActiveRef = useRef(false);
+  const isConnectingRef = useRef(false);
+
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const inputAudioContextRef = useRef<AudioContext | null>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);
@@ -191,7 +195,9 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     setIsActive(false);
+    isActiveRef.current = false;
     setIsConnecting(false);
+    isConnectingRef.current = false;
     setVolume(0);
     inputTranscript.current = '';
     outputTranscript.current = '';
@@ -203,10 +209,20 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!prData || !import.meta.env.VITE_GEMINI_API_KEY || isConnecting || isActive) return;
 
     try {
+      console.log('[Theia Live] Connection Status: Initiating...');
       setIsConnecting(true);
+      isConnectingRef.current = true;
       setError(null);
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        console.log('[Theia Live] Connection Status: Microphone access granted.');
+      } catch (micError) {
+        console.error('[Theia Live] Microphone error:', micError);
+        throw new Error("Microphone access is required. Please check your permissions.");
+      }
+
       streamRef.current = stream;
 
       const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
@@ -237,38 +253,46 @@ IF THE USER ASKS ABOUT THE LINEAR ISSUE, REFER TO THE "PRIMARY REQUIREMENTS" SEC
 
       systemInstruction += `\nProvide expert, concise feedback. Respond immediately to spoken input.`;
 
+      console.log('[Theia Live] Connection Status: Connecting to Gemini API (model: gemini-2.0-flash-exp)...');
+
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.0-flash-exp',
         callbacks: {
           onopen: () => {
-            console.debug('[Theia] Session opened');
+            console.log('[Theia Live] Connection Status: Session Opened.');
             setIsActive(true);
+            isActiveRef.current = true;
             setIsConnecting(false);
+            isConnectingRef.current = false;
             nextStartTimeRef.current = outputCtx.currentTime;
 
-            const source = inputCtx.createMediaStreamSource(stream);
-            const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
+            // Delay audio streaming start to allow WebSocket to fully stabilize
+            setTimeout(() => {
+              console.log('[Theia Live] Starting audio capture...');
+              const source = inputCtx.createMediaStreamSource(stream);
+              const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
 
-            scriptProcessor.onaudioprocess = (event) => {
-              const inputData = event.inputBuffer.getChannelData(0);
-              let sum = 0;
-              for (let i = 0; i < inputData.length; i++) sum += inputData[i] * inputData[i];
-              setVolume(Math.min(1, Math.sqrt(sum / inputData.length) * 12));
+              scriptProcessor.onaudioprocess = (event) => {
+                const inputData = event.inputBuffer.getChannelData(0);
+                let sum = 0;
+                for (let i = 0; i < inputData.length; i++) sum += inputData[i] * inputData[i];
+                setVolume(Math.min(1, Math.sqrt(sum / inputData.length) * 12));
 
-              const pcmBlob = createBlob(inputData);
-              sessionPromise.then((session) => {
-                session.sendRealtimeInput({ media: pcmBlob });
-              }).catch(() => { });
-            };
+                const pcmBlob = createBlob(inputData);
+                sessionPromise.then((session) => {
+                  session.sendRealtimeInput({ media: pcmBlob });
+                }).catch(() => { });
+              };
 
-            source.connect(scriptProcessor);
-            scriptProcessor.connect(inputCtx.destination);
+              source.connect(scriptProcessor);
+              scriptProcessor.connect(inputCtx.destination);
 
-            let welcomeMsg = language === 'Hebrew'
-              ? `שלום, אני Theia. סקרתי את ה-PR שלך "${prData.title}". מוכנה להתחיל בשיחה.`
-              : `Hi, I'm Theia. I've reviewed your PR "${prData.title}". Ready to discuss the changes.`;
+              let welcomeMsg = language === 'Hebrew'
+                ? `שלום, אני Theia. סקרתי את ה-PR שלך "${prData.title}". מוכנה להתחיל בשיחה.`
+                : `Hi, I'm Theia. I've reviewed your PR "${prData.title}". Ready to discuss the changes.`;
 
-            sessionPromise.then(s => s.sendRealtimeInput({ text: welcomeMsg }));
+              sessionPromise.then(s => s.sendRealtimeInput({ text: welcomeMsg })).catch(e => console.error("Failed to send welcome", e));
+            }, 1000); // 1 second delay before starting audio
           },
           onmessage: async (message: LiveServerMessage) => {
             // Handle Tool Calls
@@ -339,21 +363,24 @@ IF THE USER ASKS ABOUT THE LINEAR ISSUE, REFER TO THE "PRIMARY REQUIREMENTS" SEC
               nextStartTimeRef.current = outputCtx.currentTime;
             }
           },
-          onclose: () => disconnect(),
+          onclose: (e: any) => {
+            console.log('[Theia Live] Connection Status: Session Closed.', e);
+            // Use refs to check actual state (avoids stale closure)
+            if (isConnectingRef.current || !isActiveRef.current) {
+              setError("Connection closed immediately. Check API key and quota.");
+            }
+            disconnect();
+          },
           onerror: (err) => {
-            console.error('[Theia] Session error:', err);
-            setError("Connection issue. Please reconnect.");
+            console.error('[Theia Live] Session Error:', err);
+            setError(`Connection Error: ${err.message || 'Unknown error'}`);
+            setIsConnecting(false);
             disconnect();
           }
         },
         config: {
           responseModalities: [Modality.AUDIO],
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
           tools: [{ functionDeclarations: uiTools }],
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } }
-          },
           systemInstruction: systemInstruction,
         },
       });
@@ -361,7 +388,8 @@ IF THE USER ASKS ABOUT THE LINEAR ISSUE, REFER TO THE "PRIMARY REQUIREMENTS" SEC
       sessionPromiseRef.current = sessionPromise;
 
     } catch (e: any) {
-      setError("Microphone access is required.");
+      console.error('[Theia Live] Setup Error:', e);
+      setError(e.message || "Connection failed.");
       setIsConnecting(false);
     }
   };
