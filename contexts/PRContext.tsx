@@ -1,7 +1,7 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
 import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue, Diagram, NavigationTarget } from '../types';
-import { arePathsEquivalent, resolveFilePath } from '../utils/fileUtils';
+import { resolveFilePath } from '../utils/fileUtils';
 
 interface FocusedLocation {
   file: string;
@@ -61,6 +61,19 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isCodeViewerReady, setIsCodeViewerReady] = useState(false);
   const [viewportState, setViewportState] = useState<ViewportState>({ file: null, startLine: 0, endLine: 0 });
   const [selectionState, setSelectionState] = useState<SelectionState | null>(null);
+  const [focusedLocation, setFocusedLocation] = useState<FocusedLocation | null>(null);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [linearIssue, setLinearIssue] = useState<LinearIssue | null>(null);
+  const [diagrams, setDiagrams] = useState<Diagram[]>([]);
+  const [activeDiagram, setActiveDiagram] = useState<Diagram | null>(null);
+  const [diagramViewMode, setDiagramViewMode] = useState<'full' | 'split'>('full');
+  const [diagramSplitPercent, setDiagramSplitPercent] = useState(50);
+
+  const isCodeViewerReadyRef = useRef(false);
+  // NEW: Navigation Lock to prevent race conditions
+  const [isNavigating, setIsNavigating] = useState(false);
+
+  useEffect(() => { isCodeViewerReadyRef.current = isCodeViewerReady; }, [isCodeViewerReady]);
 
   const selectFile = (file: FileChange) => {
     setSelectedFile(file);
@@ -69,40 +82,56 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   };
 
   const navigateToCode = async (target: NavigationTarget): Promise<boolean> => {
-    if (!prData) return false;
+    if (!prData || isNavigating) return false;
 
-    // Resolve path using fuzzy logic to bridge gap between diagram refs and actual files
-    const resolution = resolveFilePath(target.filepath, prData.files.map(f => f.path));
-    if (!resolution.resolved) {
-      console.warn(`[PRContext] Navigation failed: Could not resolve ${target.filepath}`);
-      return false;
-    }
+    try {
+      setIsNavigating(true);
 
-    const fileToSelect = prData.files.find(f => f.path === resolution.resolved);
-    if (!fileToSelect) return false;
-
-    // Check if we need to switch file
-    if (selectedFile?.path !== fileToSelect.path) {
-      setIsCodeViewerReady(false);
-      selectFile(fileToSelect);
-
-      // Wait for viewer readiness (with a safety timeout)
-      let attempts = 0;
-      while (!isCodeViewerReadyRef.current && attempts < 30) {
-        await new Promise(r => setTimeout(r, 100));
-        attempts++;
+      // 5. Update Tab (Moved to top to ensure CodeViewer mounts if hidden)
+      if (leftTab !== 'files' && target.source !== 'tree') {
+        setLeftTab('files');
+        // Allow React to render the tab switch
+        await new Promise(r => setTimeout(r, 0));
       }
+
+      // 1. Resolve path
+      const resolution = resolveFilePath(target.filepath, prData.files.map(f => f.path));
+      if (!resolution.resolved) {
+        console.warn(`[PRContext] Navigation failed: Could not resolve ${target.filepath}`);
+        return false;
+      }
+
+      const fileToSelect = prData.files.find(f => f.path === resolution.resolved);
+      if (!fileToSelect) return false;
+
+      // 2. Switch File if needed
+      if (selectedFile?.path !== fileToSelect.path) {
+        setIsCodeViewerReady(false);
+        selectFile(fileToSelect);
+
+        // 3. Wait for File Load (Spec §5.3)
+        let attempts = 0;
+        while (!isCodeViewerReadyRef.current && attempts < 50) { // 5s timeout
+          await new Promise(r => setTimeout(r, 100));
+          attempts++;
+        }
+      }
+
+      // 4. Scroll (via FocusedLocation state)
+      // We add a timestamp to force updates even if line is same
+      setFocusedLocation({
+        file: fileToSelect.path,
+        line: target.line,
+        timestamp: Date.now()
+      });
+
+      return true;
+    } catch (e) {
+      console.error("Navigation error", e);
+      return false;
+    } finally {
+      setIsNavigating(false);
     }
-
-    // Set focused location for the CodeViewer to catch
-    setFocusedLocation({ file: fileToSelect.path, line: target.line, timestamp: Date.now() });
-
-    // Switch to file tab if we are in another tab (like diagrams or issue)
-    if (leftTab !== 'files' && target.source !== 'tree') {
-      setLeftTab('files');
-    }
-
-    return true;
   };
 
   const scrollToLine = (file: string, line: number) => {
