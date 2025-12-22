@@ -1,18 +1,26 @@
 # Active Context State
 
 ## 1. Current Focus
-**RELEASE: v_alpha_1 COMPLETED ✅**
-- **Version:** 0.1.0
-- **Status:** Merged to `main`, tagged as `v_alpha_1`.
-- **Fixes included:** Voice, Diagrams, Context Awareness (Phases 1, 2, 3, 5).
+**Phase 4: Two-Way Linear Traceability** (COMPLETED)
+- **Status:** Done & Verified.
+- **Features:** "Find It" (Target Icon) and "Verify It" (Context Menu).
+- **User Feedback:**
+  - Feature works well but lacks discoverability.
+  - Request: Add a "?" Help Tooltip to explain buttons.
+  - Request: Support bundling multiple Linear issues (Backlog).
 
 ## 2. Active Branch
-* **Current:** `dev`
+* **Current:** `feature/linear-traceability`
+* **Target:** `dev`
 
 ## 3. Architecture Constraints
-* **Production Readiness:** All tests pass (18 passed, 3 skipped).
-* **Versioning:** `package.json` updated to `0.1.0`.
+* **UX:** Tooltips must be unobtrusive but clear.
+* **Testing:** "Find It" tests skipped (requires live API), but logic verified manually.
 
-## 4. Next Actions (After Release)
-* [ ] **Phase 4:** Two-Way Linear Traceability (Backlog).
-
+## 4. Next Actions (Backlog)
+* [ ] Merge `feature/linear-traceability` to `dev`.
+* [ ] **Phase 4.5: UX Polish.**
+  - Add "?" Tooltip to Linear Panel explaining the Target/Sync buttons.
+* [ ] **Phase 6: Director/Actor Architecture.**
+  - Split "Thinking" (Gemini 1.5 Pro) from "Speaking" (Gemini 2.0 Flash).
+* [ ] **Future:** Support Multi-Issue bundling in Review.
