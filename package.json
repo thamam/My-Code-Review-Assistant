@@ -1,6 +1,6 @@
 {
   "name": "visual-code-review-poc",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "private": true,
   "dependencies": {
     "clsx": "^2.1.1",
