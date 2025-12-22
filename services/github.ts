@@ -26,7 +26,7 @@ export class GitHubService {
   }
 
   private getHeaders() {
-    return this.token 
+    return this.token
       ? { 'Authorization': `token ${this.token}`, 'Accept': 'application/vnd.github.v3+json' }
       : { 'Accept': 'application/vnd.github.v3+json' };
   }
@@ -57,11 +57,11 @@ export class GitHubService {
 
     // 1. Fetch PR Metadata
     const prResponse = await fetch(`${baseUrl}/pulls/${number}`, { headers });
-    
+
     if (prResponse.status === 403) throw new Error("GitHub API Rate Limit Exceeded. Please provide an Access Token.");
     if (prResponse.status === 404) throw new Error("PR not found. If this is a private repo, please provide an Access Token.");
     if (!prResponse.ok) throw new Error(`Failed to fetch PR: ${prResponse.statusText}`);
-    
+
     const prData: GitHubPR = await prResponse.json();
 
     // 2. Fetch Files List with Pagination
@@ -75,7 +75,7 @@ export class GitHubService {
     while (keepFetching) {
       const filesUrl = `${baseUrl}/pulls/${number}/files?per_page=${PER_PAGE}&page=${page}`;
       const filesResponse = await fetch(filesUrl, { headers });
-      
+
       if (!filesResponse.ok) {
         console.warn(`Failed to fetch files page ${page}: ${filesResponse.statusText}`);
         warningMsg = `Partial file list loaded (stopped at page ${page - 1} due to API error)`;
@@ -105,18 +105,18 @@ export class GitHubService {
     const fetchContent = async (sha: string, path: string) => {
       try {
         if (this.token) {
-           const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${sha}`, {
-               headers: {
-                   ...this.getHeaders(),
-                   'Accept': 'application/vnd.github.v3.raw' 
-               }
-           });
-           if (res.ok) return await res.text();
-           return '';
+          const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${sha}`, {
+            headers: {
+              ...this.getHeaders(),
+              'Accept': 'application/vnd.github.v3.raw'
+            }
+          });
+          if (res.ok) return await res.text();
+          return '';
         } else {
-           const res = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${sha}/${path}`);
-           if (res.ok) return await res.text();
-           return '';
+          const res = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${sha}/${path}`);
+          if (res.ok) return await res.text();
+          return '';
         }
       } catch (e) {
         console.error(`Failed to fetch content for ${path}`, e);
@@ -126,33 +126,33 @@ export class GitHubService {
 
     // Helper to process a single file
     const processFile = async (file: GitHubFile): Promise<FileChange> => {
-       let oldContent = '';
-       let newContent = '';
+      let oldContent = '';
+      let newContent = '';
 
-       if (file.status !== 'added') {
-          const originalPath = file.previous_filename || file.filename;
-          oldContent = await fetchContent(prData.base.sha, originalPath);
-       }
-       
-       if (file.status !== 'removed') {
-          newContent = await fetchContent(prData.head.sha, file.filename);
-       }
+      if (file.status !== 'added') {
+        const originalPath = file.previous_filename || file.filename;
+        oldContent = await fetchContent(prData.base.sha, originalPath);
+      }
 
-       return {
-          path: file.filename,
-          status: this.mapStatus(file.status),
-          additions: file.additions,
-          deletions: file.deletions,
-          oldContent: oldContent || undefined,
-          newContent: newContent || ''
-       };
+      if (file.status !== 'removed') {
+        newContent = await fetchContent(prData.head.sha, file.filename);
+      }
+
+      return {
+        path: file.filename,
+        status: this.mapStatus(file.status),
+        additions: file.additions,
+        deletions: file.deletions,
+        oldContent: oldContent || undefined,
+        newContent: newContent || ''
+      };
     };
 
     // Execute batches
     for (let i = 0; i < allFiles.length; i += BATCH_SIZE) {
-        const batch = allFiles.slice(i, i + BATCH_SIZE);
-        const results = await Promise.all(batch.map(file => processFile(file)));
-        processedFiles.push(...results);
+      const batch = allFiles.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(batch.map(file => processFile(file)));
+      processedFiles.push(...results);
     }
 
     return {

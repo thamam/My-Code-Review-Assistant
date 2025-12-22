@@ -61,46 +61,6 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isCodeViewerReady, setIsCodeViewerReady] = useState(false);
   const [viewportState, setViewportState] = useState<ViewportState>({ file: null, startLine: 0, endLine: 0 });
   const [selectionState, setSelectionState] = useState<SelectionState | null>(null);
-  const [annotations, setAnnotations] = useState<Annotation[]>([]);
-  const [linearIssue, setLinearIssue] = useState<LinearIssue | null>(null);
-  const [focusedLocation, setFocusedLocation] = useState<FocusedLocation | null>(null);
-  const [diagrams, setDiagrams] = useState<Diagram[]>([]);
-  const [activeDiagram, setActiveDiagram] = useState<Diagram | null>(null);
-  const [diagramViewMode, setDiagramViewMode] = useState<'full' | 'split'>('split');
-  const [diagramSplitPercent, setDiagramSplitPercent] = useState(50);
-
-  const isCodeViewerReadyRef = useRef(false);
-  useEffect(() => { isCodeViewerReadyRef.current = isCodeViewerReady; }, [isCodeViewerReady]);
-
-  // Load persisted data
-  useEffect(() => {
-    if (prData?.id) {
-      const savedAnns = localStorage.getItem(`vcr_annotations_${prData.id}`);
-      if (savedAnns) setAnnotations(JSON.parse(savedAnns));
-      else setAnnotations([]);
-
-      const savedDiagrams = localStorage.getItem(`vcr_diagrams_${prData.id}`);
-      if (savedDiagrams) setDiagrams(JSON.parse(savedDiagrams));
-      else setDiagrams([]);
-    }
-  }, [prData?.id]);
-
-  // Save persisted data
-  useEffect(() => {
-    if (prData?.id) {
-      localStorage.setItem(`vcr_annotations_${prData.id}`, JSON.stringify(annotations));
-    }
-  }, [annotations, prData?.id]);
-
-  useEffect(() => {
-    if (prData?.id && diagrams.length > 0) {
-      localStorage.setItem(`vcr_diagrams_${prData.id}`, JSON.stringify(diagrams));
-    }
-  }, [diagrams, prData?.id]);
-
-  useEffect(() => {
-    if (prData && prData.files.length > 0 && !selectedFile) setSelectedFile(prData.files[0]);
-  }, [prData]);
 
   const selectFile = (file: FileChange) => {
     setSelectedFile(file);
@@ -110,7 +70,7 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
   const navigateToCode = async (target: NavigationTarget): Promise<boolean> => {
     if (!prData) return false;
-    
+
     // Resolve path using fuzzy logic to bridge gap between diagram refs and actual files
     const resolution = resolveFilePath(target.filepath, prData.files.map(f => f.path));
     if (!resolution.resolved) {
@@ -123,25 +83,25 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
     // Check if we need to switch file
     if (selectedFile?.path !== fileToSelect.path) {
-        setIsCodeViewerReady(false);
-        selectFile(fileToSelect);
-        
-        // Wait for viewer readiness (with a safety timeout)
-        let attempts = 0;
-        while (!isCodeViewerReadyRef.current && attempts < 30) {
-            await new Promise(r => setTimeout(r, 100));
-            attempts++;
-        }
+      setIsCodeViewerReady(false);
+      selectFile(fileToSelect);
+
+      // Wait for viewer readiness (with a safety timeout)
+      let attempts = 0;
+      while (!isCodeViewerReadyRef.current && attempts < 30) {
+        await new Promise(r => setTimeout(r, 100));
+        attempts++;
+      }
     }
 
     // Set focused location for the CodeViewer to catch
     setFocusedLocation({ file: fileToSelect.path, line: target.line, timestamp: Date.now() });
-    
+
     // Switch to file tab if we are in another tab (like diagrams or issue)
     if (leftTab !== 'files' && target.source !== 'tree') {
-        setLeftTab('files');
+      setLeftTab('files');
     }
-    
+
     return true;
   };
 
@@ -158,13 +118,13 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
   return (
     <PRContext.Provider value={{
-      prData, setPRData: setPrData, selectedFile, selectFile, viewportState, updateViewport: (s) => setViewportState(v => ({...v, ...s})),
+      prData, setPRData: setPrData, selectedFile, selectFile, viewportState, updateViewport: (s) => setViewportState(v => ({ ...v, ...s })),
       selectionState, setSelectionState, walkthrough, loadWalkthrough: setWalkthrough, activeSectionId, setActiveSectionId,
       isDiffMode, setIsDiffMode, toggleDiffMode, focusedLocation, scrollToLine, navigateToCode, leftTab, setLeftTab, isCodeViewerReady, setIsCodeViewerReady,
       annotations, addAnnotation, removeAnnotation: (id) => setAnnotations(a => a.filter(x => x.id !== id)),
-      updateAnnotation: (id, u) => setAnnotations(a => a.map(x => x.id === id ? {...x, ...u} : x)),
+      updateAnnotation: (id, u) => setAnnotations(a => a.map(x => x.id === id ? { ...x, ...u } : x)),
       linearIssue, setLinearIssue, diagrams, activeDiagram, addDiagram: (d) => setDiagrams(p => [...p, d]),
-      removeDiagram: (id) => { setDiagrams(p => p.filter(d => d.id !== id)); if(activeDiagram?.id === id) setActiveDiagram(null); },
+      removeDiagram: (id) => { setDiagrams(p => p.filter(d => d.id !== id)); if (activeDiagram?.id === id) setActiveDiagram(null); },
       setActiveDiagram, diagramViewMode, setDiagramViewMode, diagramSplitPercent, setDiagramSplitPercent
     }}>
       {children}

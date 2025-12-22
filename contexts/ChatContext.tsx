@@ -6,6 +6,14 @@ import { usePR } from './PRContext';
 
 export type LanguagePreference = 'English' | 'Hebrew' | 'Auto';
 
+// NEW: Define the Context State Interface
+export interface UserContextState {
+  activeTab: 'files' | 'annotations' | 'issue' | 'diagrams';
+  activeFile: string | null;
+  activeSelection: string | null;
+  activeDiagram: string | null;
+}
+
 interface ChatContextType {
   messages: ChatMessage[];
   sendMessage: (text: string) => Promise<void>;
@@ -17,6 +25,7 @@ interface ChatContextType {
   setModel: (model: string) => void;
   language: LanguagePreference;
   setLanguage: (lang: LanguagePreference) => void;
+  updateUserContext: (state: Partial<UserContextState>) => void; // NEW
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -74,57 +83,82 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const { prData, selectionState, linearIssue, activeDiagram, navigateToCode, setLeftTab, setIsDiffMode, diagrams, setActiveDiagram } = usePR();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
-  const [currentModel, setModel] = useState('gemini-3-pro-preview');
+  const [currentModel, setModel] = useState('gemini-2.0-flash-exp');
   const [language, setLanguage] = useState<LanguagePreference>(() => {
     try {
       return (localStorage.getItem('theia_lang') as LanguagePreference) || 'Auto';
     } catch { return 'Auto'; }
   });
   const [sessionId, setSessionId] = useState(0);
-  
+
   const chatSessionRef = useRef<Chat | null>(null);
 
+  // NEW: Ref to hold the latest context without triggering re-renders
+  const userContextRef = useRef<UserContextState>({
+    activeTab: 'files',
+    activeFile: null,
+    activeSelection: null,
+    activeDiagram: null
+  });
+
+  // NEW: Expose state for E2E testing
   useEffect(() => {
-    try { localStorage.setItem('theia_lang', language); } catch {}
+    (window as any).__THEIA_CONTEXT_STATE__ = userContextRef.current;
+  });
+
+  // NEW: Function to update context (called by Monitor)
+  const updateUserContext = (updates: Partial<UserContextState>) => {
+    userContextRef.current = { ...userContextRef.current, ...updates };
+    (window as any).__THEIA_CONTEXT_STATE__ = userContextRef.current;
+  };
+
+  useEffect(() => {
+    try { localStorage.setItem('theia_lang', language); } catch { }
   }, [language]);
 
   const resetChat = () => {
-      if (!prData) return;
-      chatSessionRef.current = null;
-      setSessionId(prev => prev + 1);
-      
-      const welcomeMsg = language === 'Hebrew' 
-        ? `Theia מחוברת. מנתחת את השינויים ב-"${prData.title}". איך אוכל לעזור היום?`
-        : `Theia connected. Analyzing changes in "${prData.title}". How can I help you today?`;
-      
-      setMessages([
-          {
-              id: 'welcome',
-              role: 'system',
-              content: welcomeMsg,
-              timestamp: Date.now()
-          }
-      ]);
+    if (!prData) return;
+    chatSessionRef.current = null;
+    setSessionId(prev => prev + 1);
+
+    const welcomeMsg = language === 'Hebrew'
+      ? `Theia מחוברת. מנתחת את השינויים ב-"${prData.title}". איך אוכל לעזור היום?`
+      : `Theia connected. Analyzing changes in "${prData.title}". How can I help you today?`;
+
+    setMessages([
+      {
+        id: 'welcome',
+        role: 'system',
+        content: welcomeMsg,
+        timestamp: Date.now()
+      }
+    ]);
   };
 
   useEffect(() => {
     if (!prData) return;
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      
-      const langInstruction = language === 'Auto' 
-        ? "Respond in the same language the user uses (primarily English or Hebrew)." 
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+
+      const langInstruction = language === 'Auto'
+        ? "Respond in the same language the user uses (primarily English or Hebrew)."
         : `Respond strictly in ${language}.`;
 
       const manifest = prData.files.map(f => `- ${f.path} (${f.status})`).join('\n');
 
+      // UPDATED: System Instruction now references the dynamic user context
       let systemInstruction = `You are Theia, a world-class Staff Software Engineer. 
 ${langInstruction}
 
 You have access to the full PR context and linked Linear issues. 
 You can control the UI using tools to navigate code, switch tabs, or change views.
 Be concise, architecturally minded, and professional.
+
+CRITICAL: You have access to the user's current UI context. 
+Always check this context before answering generic questions like "what am I looking at?".
+- Current Tab: ${userContextRef.current.activeTab}
+- Open File: ${userContextRef.current.activeFile || 'None'}
 
 PR: "${prData.title}"
 Author: ${prData.author}
@@ -133,9 +167,9 @@ Description: ${prData.description}
 ## PROJECT MANIFEST (All changed files)
 ${manifest}
 \n`;
-      
+
       if (linearIssue) {
-          systemInstruction += `\n--- LINKED LINEAR ISSUE ---\nID: ${linearIssue.identifier}\nTitle: ${linearIssue.title}\nRequirements: ${linearIssue.description}\n`;
+        systemInstruction += `\n--- LINKED LINEAR ISSUE ---\nID: ${linearIssue.identifier}\nTitle: ${linearIssue.title}\nRequirements: ${linearIssue.description}\n`;
       }
 
       chatSessionRef.current = ai.chats.create({
@@ -156,18 +190,18 @@ ${manifest}
   }, [prData, linearIssue, currentModel, sessionId, language]);
 
   const addLocalMessage = (message: ChatMessage) => {
-      setMessages(prev => [...prev, message]);
+    setMessages(prev => [...prev, message]);
   };
 
   const upsertMessage = (message: ChatMessage) => {
     setMessages(prev => {
-        const index = prev.findIndex(m => m.id === message.id);
-        if (index >= 0) {
-            const newMessages = [...prev];
-            newMessages[index] = message;
-            return newMessages;
-        }
-        return [...prev, message];
+      const index = prev.findIndex(m => m.id === message.id);
+      if (index >= 0) {
+        const newMessages = [...prev];
+        newMessages[index] = message;
+        return newMessages;
+      }
+      return [...prev, message];
     });
   };
 
@@ -217,45 +251,47 @@ ${manifest}
 
     try {
       let contextMsg = text;
-      if (selectionState) {
-          contextMsg += `\n\nContext (${selectionState.file} L${selectionState.startLine}-${selectionState.endLine}):\n${selectionState.content}`;
-      }
-      if (activeDiagram) {
-          contextMsg += `\n\nReviewing Diagram: ${activeDiagram.title}`;
-      }
+      // Append current context context to the message invisibly to the user
+      const contextSuffix = `
+[SYSTEM CONTEXT INJECTION]
+Current Tab: ${userContextRef.current.activeTab}
+Active File: ${userContextRef.current.activeFile || 'None'}
+Active Selection: ${userContextRef.current.activeSelection || 'None'}
+Active Diagram: ${userContextRef.current.activeDiagram || 'None'}
+`;
 
-      let responseStream = await chatSessionRef.current.sendMessageStream({ message: contextMsg });
-      
+      // We send the context to the model, but we don't display it in the UI (the UI shows 'text')
+      // Using 'parts' array format as required by the types, but wrapping the text content
+      let responseStream = await chatSessionRef.current.sendMessageStream({
+        message: contextMsg + contextSuffix
+      });
+
       const aiMessageId = (Date.now() + 1).toString();
       let fullResponseText = "";
       setMessages(prev => [...prev, { id: aiMessageId, role: 'assistant', content: '', timestamp: Date.now() }]);
 
       for await (const chunk of responseStream) {
-        // Handle Function Calls (Tools)
         const functionCalls = chunk.functionCalls;
         if (functionCalls && functionCalls.length > 0) {
-            const responses = [];
-            for (const call of functionCalls) {
-                const result = await executeTool(call.name, call.args);
-                responses.push({
-                    name: call.name,
-                    response: { result }
-                });
-            }
-            // Send tool output back to model to continue conversation
-            responseStream = await chatSessionRef.current.sendMessageStream({
-                parts: [{ functionResponse: { name: responses[0].name, response: responses[0].response } }] 
-                // Note: Current simplified loop handles single function call return for now
-                // In production, handle mapping all functionResponses correctly
+          const responses = [];
+          for (const call of functionCalls) {
+            const result = await executeTool(call.name, call.args);
+            responses.push({
+              name: call.name,
+              response: { result }
             });
-            // Continue processing the new stream from the tool response
-             for await (const subChunk of responseStream) {
-                 if (subChunk.text) {
-                     fullResponseText += subChunk.text;
-                     setMessages(prev => prev.map(msg => msg.id === aiMessageId ? { ...msg, content: fullResponseText } : msg));
-                 }
-             }
-             return; // Exit after handling tool loop for this turn
+          }
+          // Send tool output back to model
+          responseStream = await chatSessionRef.current.sendMessageStream({
+            parts: [{ functionResponse: { name: responses[0].name, response: responses[0].response } }]
+          });
+          for await (const subChunk of responseStream) {
+            if (subChunk.text) {
+              fullResponseText += subChunk.text;
+              setMessages(prev => prev.map(msg => msg.id === aiMessageId ? { ...msg, content: fullResponseText } : msg));
+            }
+          }
+          return;
         }
 
         if (chunk.text) {
@@ -271,7 +307,7 @@ ${manifest}
   };
 
   return (
-    <ChatContext.Provider value={{ messages, sendMessage, addLocalMessage, upsertMessage, isTyping, resetChat, currentModel, setModel, language, setLanguage }}>
+    <ChatContext.Provider value={{ messages, sendMessage, addLocalMessage, upsertMessage, isTyping, resetChat, currentModel, setModel, language, setLanguage, updateUserContext }}>
       {children}
     </ChatContext.Provider>
   );
