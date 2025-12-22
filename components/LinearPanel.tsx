@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { usePR } from '../contexts/PRContext';
 import { useChat } from '../contexts/ChatContext';
 import { useLive } from '../contexts/LiveContext';
-import { Link, AlertCircle, ExternalLink, RefreshCw, Check, Target } from 'lucide-react';
+import { Link, AlertCircle, ExternalLink, RefreshCw, Check, Target, HelpCircle } from 'lucide-react';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import clsx from 'clsx';
 
@@ -126,6 +126,34 @@ export const LinearPanel: React.FC<LinearPanelProps> = ({ onLinkClick }) => {
               {linearIssue.state}
             </span>
           )}
+
+          {/* Help Tooltip */}
+          <div className="relative ml-auto group">
+            <button
+              className="p-1 text-gray-600 hover:text-gray-400 transition-colors"
+              aria-label="Help"
+              data-testid="linear-help-button"
+            >
+              <HelpCircle size={14} />
+            </button>
+            <div className="absolute right-0 top-full mt-2 w-64 p-3 bg-gray-800 border border-gray-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+              <h4 className="text-xs font-bold text-gray-200 mb-2 uppercase tracking-wide">Quick Guide</h4>
+              <div className="space-y-2 text-xs text-gray-400">
+                <div className="flex items-start gap-2">
+                  <span className="text-purple-400">🟣</span>
+                  <span><strong className="text-gray-200">Target Icon:</strong> Find the code that implements this issue.</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span>🔄</span>
+                  <span><strong className="text-gray-200">Sync Icon:</strong> Refresh issue details from Linear.</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span>✨</span>
+                  <span><strong className="text-gray-200">Selection:</strong> Highlight code to check it against Acceptance Criteria.</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
