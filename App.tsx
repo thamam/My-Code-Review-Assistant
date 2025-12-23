@@ -302,8 +302,8 @@ const MainLayout = () => {
 const App = () => (
     <PRProvider>
         <ChatProvider>
-            <UserContextMonitor />
             <LiveProvider>
+                <UserContextMonitor />
                 <MainLayout />
             </LiveProvider>
         </ChatProvider>

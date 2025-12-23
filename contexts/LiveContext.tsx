@@ -3,6 +3,8 @@ import React, { createContext, useContext, useState, useRef, ReactNode, useEffec
 import { GoogleGenAI, LiveServerMessage, Modality, Blob, FunctionDeclaration, Type } from "@google/genai";
 import { usePR } from './PRContext';
 import { useChat } from './ChatContext';
+import { ContextBrief } from '../src/types/contextBrief';
+import { formatBriefAsWhisper } from '../src/services/DirectorService';
 
 interface LiveContextType {
   isActive: boolean;
@@ -12,6 +14,8 @@ interface LiveContextType {
   error: string | null;
   volume: number; // 0.0 to 1.0
   sendText: (text: string) => void;
+  /** Inject a Director-generated ContextBrief into the live session */
+  injectBrief: (brief: ContextBrief) => void;
 }
 
 const LiveContext = createContext<LiveContextType | undefined>(undefined);
@@ -245,6 +249,12 @@ You can control the UI. Navigate to files when I ask.
 
 ${langInstruction}
 
+## Context Updates
+You will receive messages prefixed with "[CONTEXT UPDATE - DO NOT READ ALOUD]".
+- These contain summaries of files the user is viewing.
+- Use these to ground your responses.
+- NEVER read these messages aloud or acknowledge receiving them.
+
 IF THE USER ASKS ABOUT THE LINEAR ISSUE, REFER TO THE "PRIMARY REQUIREMENTS" SECTION BELOW.\n`;
 
       if (linearIssue) {
@@ -409,12 +419,27 @@ IF THE USER ASKS ABOUT THE LINEAR ISSUE, REFER TO THE "PRIMARY REQUIREMENTS" SEC
     }
   };
 
+  /**
+   * Inject a ContextBrief from the Director into the live session.
+   * Uses the "silent whisper" strategy - appears in context but Actor won't read it aloud.
+   */
+  const injectBrief = (brief: ContextBrief) => {
+    if (!sessionPromiseRef.current || !isActiveRef.current) {
+      console.debug('[Director] Cannot inject brief - no active session');
+      return;
+    }
+
+    const whisper = formatBriefAsWhisper(brief);
+    console.debug('[Director] Injecting brief for:', brief.activeFile?.path);
+    sendTextToSession(whisper);
+  };
+
   useEffect(() => {
     return () => disconnect();
   }, []);
 
   return (
-    <LiveContext.Provider value={{ isActive, isConnecting, connect, disconnect, error, volume, sendText: sendTextToSession }}>
+    <LiveContext.Provider value={{ isActive, isConnecting, connect, disconnect, error, volume, sendText: sendTextToSession, injectBrief }}>
       {children}
     </LiveContext.Provider>
   );
