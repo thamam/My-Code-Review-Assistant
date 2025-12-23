@@ -265,9 +265,28 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         recognition.onerror = (event: any) => {
           console.error('[Theia Precision] Recognition error', event.error);
-          if (event.error === 'not-allowed') {
-            setError("Microphone access denied.");
-            disconnect();
+
+          // Reset UI state on any error
+          setIsActive(false);
+          isActiveRef.current = false;
+
+          // Provide specific error messages
+          if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+            setError("Microphone access denied. Please allow microphone permissions.");
+          } else if (event.error === 'no-speech') {
+            setError("No speech detected. Please speak louder or check microphone.");
+          } else if (event.error === 'audio-capture') {
+            setError("Microphone not available. Please check your audio devices.");
+          } else if (event.error === 'network') {
+            setError("Network error during speech recognition.");
+          } else {
+            setError(`Speech recognition error: ${event.error}`);
+          }
+
+          // Stop the recognition
+          if (recognitionRef.current) {
+            try { recognitionRef.current.stop(); } catch (e) { }
+            recognitionRef.current = null;
           }
         };
 
