@@ -25,10 +25,17 @@ yarn-error.log*
 
 # User Configuration (Secrets)
 userConfig.ts
-
+.env
 # Playwright
 /test-results/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# AI
+.ai
+
+# temp directories  
+/temp
+/tmp
