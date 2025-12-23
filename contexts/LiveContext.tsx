@@ -4,7 +4,7 @@ import { GoogleGenAI, LiveServerMessage, Modality, Blob, FunctionDeclaration, Ty
 import { usePR } from './PRContext';
 import { useChat } from './ChatContext';
 import { ContextBrief } from '../src/types/contextBrief';
-import { formatBriefAsWhisper } from '../src/services/DirectorService';
+import { formatBriefAsWhisper, getBrainResponse } from '../src/services/DirectorService';
 
 interface LiveContextType {
   isActive: boolean;
@@ -16,6 +16,8 @@ interface LiveContextType {
   sendText: (text: string) => void;
   /** Inject a Director-generated ContextBrief into the live session */
   injectBrief: (brief: ContextBrief) => void;
+  mode: 'live' | 'precision';
+  setMode: (mode: 'live' | 'precision') => void;
 }
 
 const LiveContext = createContext<LiveContextType | undefined>(undefined);
@@ -122,11 +124,12 @@ function createBlob(data: Float32Array): Blob {
 
 export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { prData, linearIssue, navigateToCode, setLeftTab, setIsDiffMode, diagrams, setActiveDiagram } = usePR();
-  const { upsertMessage, language } = useChat();
+  const { upsertMessage, messages, language } = useChat(); // Need messages history for Precision Mode
   const [isActive, setIsActive] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [volume, setVolume] = useState(0);
+  const [mode, setMode] = useState<'live' | 'precision'>('live');
 
   // Refs to track state for callbacks (avoids stale closure issue)
   const isActiveRef = useRef(false);
@@ -138,6 +141,11 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const streamRef = useRef<MediaStream | null>(null);
   const nextStartTimeRef = useRef<number>(0);
   const audioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+
+  // Precision Mode Refs
+  const recognitionRef = useRef<any>(null);
+  const isSpeakingRef = useRef(false);
+
 
   const inputTranscript = useRef('');
   const outputTranscript = useRef('');
@@ -176,6 +184,8 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const disconnect = () => {
     console.debug('[Theia] Disconnecting session');
+
+    // Live Mode Cleanup
     if (inputAudioContextRef.current) {
       inputAudioContextRef.current.close().catch(() => { });
       inputAudioContextRef.current = null;
@@ -198,6 +208,14 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       sessionPromiseRef.current = null;
     }
 
+    // Precision Mode Cleanup
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+    window.speechSynthesis.cancel();
+    isSpeakingRef.current = false;
+
     setIsActive(false);
     isActiveRef.current = false;
     setIsConnecting(false);
@@ -213,11 +231,98 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!prData || !import.meta.env.VITE_GEMINI_API_KEY || isConnecting || isActive) return;
 
     try {
-      console.log('[Theia Live] Connection Status: Initiating...');
+      console.log(`[Theia Live] Connection Status: Initiating (${mode} mode)...`);
       setIsConnecting(true);
       isConnectingRef.current = true;
       setError(null);
 
+      // --- PRECISION MODE (Gemini 3 Pro + Browser STT/TTS) ---
+      if (mode === 'precision') {
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+          throw new Error("Browser does not support Speech Recognition.");
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = false;
+        recognition.lang = language === 'Hebrew' ? 'he-IL' : 'en-US';
+
+        recognition.onstart = () => {
+          console.log('[Theia Precision] Recognition started');
+          setIsActive(true);
+          isActiveRef.current = true;
+          setIsConnecting(false);
+          isConnectingRef.current = false;
+
+          // Speak welcome message
+          const welcomeMsg = language === 'Hebrew'
+            ? `מצב דיוק פעיל. אני מקשיבה.`
+            : `Precision mode active. I'm listening.`;
+          const utterance = new SpeechSynthesisUtterance(welcomeMsg);
+          window.speechSynthesis.speak(utterance);
+        };
+
+        recognition.onerror = (event: any) => {
+          console.error('[Theia Precision] Recognition error', event.error);
+          if (event.error === 'not-allowed') {
+            setError("Microphone access denied.");
+            disconnect();
+          }
+        };
+
+        recognition.onresult = async (event: any) => {
+          const transcript = event.results[event.results.length - 1][0].transcript;
+          if (!transcript.trim()) return;
+
+          console.log('[Theia Precision] User said:', transcript);
+
+          // User Message
+          const userId = 'user-' + Date.now();
+          upsertMessage({ id: userId, role: 'user', content: transcript, timestamp: Date.now() });
+
+          // "Thinking" state
+          const assistantId = 'ai-' + Date.now();
+          upsertMessage({ id: assistantId, role: 'assistant', content: 'Thinking...', timestamp: Date.now() });
+
+          // Generate Response
+          // Get current active file content for grounding
+          // In a real implementation we would get this from UserContextMonitor or tracked state
+          const contextState = (window as any).__THEIA_CONTEXT_STATE__;
+          let fileContent = '';
+          if (contextState?.activeFile) {
+            const file = prData.files.find(f => f.path === contextState.activeFile);
+            if (file) fileContent = file.newContent || '';
+          }
+
+          const responseText = await generatePrecisionResponse(
+            transcript,
+            messages, // Pass history
+            {
+              fileContent,
+              filePath: contextState?.activeFile || 'No file selected',
+              prTitle: prData.title,
+              prDescription: prData.description,
+              linearIssue: linearIssue
+            }
+          );
+
+          // Update Assistant Message
+          upsertMessage({ id: assistantId, role: 'assistant', content: responseText, timestamp: Date.now() });
+
+          // Speak Response
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(responseText);
+          utterance.lang = language === 'Hebrew' ? 'he-IL' : 'en-US';
+          window.speechSynthesis.speak(utterance);
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+        return;
+      }
+
+      // --- LIVE MODE (Gemini 2.0 Flash S2S) ---
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -263,10 +368,10 @@ IF THE USER ASKS ABOUT THE LINEAR ISSUE, REFER TO THE "PRIMARY REQUIREMENTS" SEC
 
       systemInstruction += `\nProvide expert, concise feedback. Respond immediately to spoken input.`;
 
-      console.log('[Theia Live] Connection Status: Connecting to Gemini API (model: gemini-2.0-flash-exp)...');
+      console.log('[Theia Live] Connection Status: Connecting to Gemini API (model: gemini-2.5-flash-native-audio-preview-12-2025)...');
 
       const sessionPromise = ai.live.connect({
-        model: 'gemini-2.0-flash-exp',
+        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
           onopen: () => {
             console.log('[Theia Live] Connection Status: Session Opened.');
@@ -439,7 +544,7 @@ IF THE USER ASKS ABOUT THE LINEAR ISSUE, REFER TO THE "PRIMARY REQUIREMENTS" SEC
   }, []);
 
   return (
-    <LiveContext.Provider value={{ isActive, isConnecting, connect, disconnect, error, volume, sendText: sendTextToSession, injectBrief }}>
+    <LiveContext.Provider value={{ isActive, isConnecting, connect, disconnect, error, volume, sendText: sendTextToSession, injectBrief, mode, setMode }}>
       {children}
     </LiveContext.Provider>
   );

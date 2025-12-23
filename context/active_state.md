@@ -1,33 +1,27 @@
 # Active State
 
 ## 1. Current Focus
-**Phase 6.5: Fix Voice Blindness**
-- Voice Model (2.0 Flash Live) fails to acknowledge injected code context.
-- **Status:** Phase 6 merged to `dev`. Wiring works (E2E passes), but Model cognitively refuses input.
+**Phase 7: Precision Mode & Live Upgrade**
+- Implemented "Precision Mode" using Gemini 3 Pro (via DirectorService).
+- Upgraded Live Mode to Gemini 2.5 Flash Native Audio Preview.
+- Added Conversation Export for debugging.
 
 ## 2. Active Branch
-- **Current:** `dev`
-- **Target:** Branch off for Phase 6.5 debug
+- **Current:** `dev` (merged from `feature/gemini-3-precision`)
 
 ## 3. Known Issue
-- **Symptom:** Actor ignores "[CONTEXT UPDATE - DO NOT READ ALOUD]" whispers.
-- **E2E Status:** All tests pass (wiring confirmed).
-- **Hypothesis:** Model may be filtering/ignoring text-only input during audio session.
+- **Symptom:** Actor ignoring whispered context is still under investigation, but Precision Mode provides a grounded workaround.
 
 ## 4. Architecture Constraints
 - `ContextBrief` must be < 1000 tokens.
-- Director prompt lives in `src/prompts/directorPrompt.ts`.
-- Fail-silent on Director errors.
+- Precision Mode uses `window.speechSynthesis` (Browser TTS), not Gemini Audio.
 
 ## 5. Recent Completions
-- [x] Phase 6: Director/Actor Architecture (merged to `dev`)
-  - `src/types/contextBrief.ts`
-  - `src/prompts/directorPrompt.ts`
-  - `src/services/DirectorService.ts`
-  - Modified `contexts/LiveContext.tsx`, `components/UserContextMonitor.tsx`, `App.tsx`
-  - Added 6 unit tests + 5 E2E tests
+- [x] **Precision Mode (Gemini 3 Pro)**
+  - Manual STT -> LLM -> TTS loop.
+  - Grounded with full file content.
+- [x] **Live Mode Upgrade**
+  - Switched to `gemini-2.5-flash-native-audio-preview-12-2025`.
+- [x] **Logging**
+  - Added Session Export (JSON).
 
-## 6. Next Actions
-- [ ] Debug Voice Blindness: Why does Actor ignore whispered context?
-- [ ] Investigate `sendRealtimeInput({ text })` behavior during active audio session
-- [ ] Consider alternative injection strategies

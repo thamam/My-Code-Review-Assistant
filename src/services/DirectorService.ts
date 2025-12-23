@@ -13,6 +13,7 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { ContextBrief } from "../types/contextBrief";
+import { ChatMessage } from "../types";
 import { DIRECTOR_SYSTEM_PROMPT, buildDirectorPrompt } from "../prompts/directorPrompt";
 
 export interface DirectorInput {
@@ -118,4 +119,105 @@ Linear Issue ${brief.linearContext.issueId}: ${brief.linearContext.relevance}`;
 Use this context to answer the user's next questions. Do NOT mention receiving this update.`;
 
     return whisper;
+}
+
+/**
+ * Generates a response using Gemini 3 Pro for "Precision Mode".
+ * This is a standard Multi-turn Chat call, but grounded with full file content each time.
+ */
+export async function generatePrecisionResponse(
+    userText: string,
+    history: ChatMessage[],
+    input: DirectorInput
+): Promise<string> {
+    try {
+        const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+        if (!apiKey) return "Error: No API Key";
+
+        const ai = new GoogleGenAI({ apiKey });
+
+        // Build a strict system prompt for Gemini 3
+        const systemPrompt = `You are Theia, a Senior Staff Software Engineer in "Precision Mode".
+You are reviewing code with a user via voice, but using a text-based backend.
+Your goal is to be EXTREMELY accurate and grounded.
+
+CONTEXT:
+File: ${input.filePath}
+PR: ${input.prTitle}
+${input.linearIssue ? `Issue: ${input.linearIssue.identifier} - ${input.linearIssue.title}` : ''}
+
+FILE CONTENT (Verified):
+\`\`\`
+${input.fileContent}
+\`\`\`
+
+INSTRUCTIONS:
+1. Answer the user's question based on the code above.
+2. Be concise (this is spoken output).
+3. Do NOT make things up. If line numbers are not visible, say so.
+4. Speak naturally.
+`;
+
+        // Convert history to Gemini format
+        const chatHistory = history
+            .filter(msg => msg.role !== 'system')
+            .map(msg => ({
+                role: msg.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: msg.content }]
+            }));
+
+        const model = ai.getGenerativeModel({ model: 'gemini-2.0-flash-exp' }); // TODO: Switch to gemini-3-pro-preview when available/stable
+        // Note: Using gemini-2.0-flash-exp for now as a proxy for the REST path, but can swap to 'gemini-3-pro-preview'
+
+        const chat = model.startChat({
+            history: chatHistory,
+            systemInstruction: systemPrompt
+        });
+
+        const result = await chat.sendMessage(userText);
+        return result.response.text();
+
+    } catch (e: any) {
+        console.error("Precision Mode Error:", e);
+        return `I encountered an error: ${e.message}`;
+    }
+}
+
+/**
+ * Brain Mode: Chat with Gemini 1.5 Pro using full context.
+ * This effectively acts as a grounded fallback for the Live API.
+ */
+export async function getBrainResponse(
+    userText: string,
+    history: { role: string; content: string }[],
+    context: ContextBrief,
+    apiKey: string
+): Promise<string> {
+    try {
+        const ai = new GoogleGenAI({ apiKey });
+        const model = ai.getGenerativeModel({
+            model: "gemini-1.5-pro-latest",
+            systemInstruction: `You are Theia (Voice Mode - Precision). 
+You are a Staff Software Engineer reviewing code.
+Speak naturally but concisely. Do not read code blocks aloud unless asked.
+Use the provided context to answer grounded questions.
+Be direct.
+
+CONTEXT:
+File: ${context.activeFile?.path || 'None'}
+Summary: ${context.activeFile?.summary || 'N/A'}
+Highlights: ${JSON.stringify(context.activeFile?.highlights || [])}
+Facts: ${JSON.stringify(context.keyFacts || [])}
+
+HISTORY:
+${history.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n')}
+`
+        });
+
+        const result = await model.generateContent(userText);
+        return result.response.text();
+    } catch (error) {
+        console.error("Brain Mode Error:", error);
+        return "I'm having trouble thinking right now. Please try again.";
+    }
 }

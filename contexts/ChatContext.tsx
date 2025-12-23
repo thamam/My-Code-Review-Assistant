@@ -26,6 +26,7 @@ interface ChatContextType {
   language: LanguagePreference;
   setLanguage: (lang: LanguagePreference) => void;
   updateUserContext: (state: Partial<UserContextState>) => void; // NEW
+  exportSessionLogs: () => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -363,8 +364,27 @@ Active Diagram: ${userContextRef.current.activeDiagram || 'None'}${activeFileCon
     }
   };
 
+  const exportSessionLogs = () => {
+    const sessionData = {
+      timestamp: new Date().toISOString(),
+      pr: prData?.title || 'Unknown',
+      messages: messages,
+      context: userContextRef.current
+    };
+
+    const blob = new Blob([JSON.stringify(sessionData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `theia-session-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <ChatContext.Provider value={{ messages, sendMessage, addLocalMessage, upsertMessage, isTyping, resetChat, currentModel, setModel, language, setLanguage, updateUserContext }}>
+    <ChatContext.Provider value={{ messages, sendMessage, addLocalMessage, upsertMessage, isTyping, resetChat, currentModel, setModel, language, setLanguage, updateUserContext, exportSessionLogs }}>
       {children}
     </ChatContext.Provider>
   );

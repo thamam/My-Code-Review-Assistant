@@ -13,12 +13,12 @@ import { LinearModal } from './components/LinearModal';
 import { LinearPanel } from './components/LinearPanel';
 import { DiagramPanel } from './components/Diagrams/DiagramPanel';
 import { DiagramViewer } from './components/Diagrams/DiagramViewer';
-import { Layout, MessageSquare, ArrowLeft, Mic, Loader2, BookMarked, FolderTree, RotateCcw, Link, Pause, FileUp, Target, Workflow, Eye } from 'lucide-react';
+import { Layout, MessageSquare, ArrowLeft, Mic, Loader2, BookMarked, FolderTree, RotateCcw, Link, Pause, FileUp, Target, Workflow, Eye, BrainCircuit } from 'lucide-react';
 import clsx from 'clsx';
 import { parseWalkthroughFile } from './services/walkthroughParser';
 
 const VoiceControls = () => {
-    const { isActive, isConnecting, connect, disconnect, error, volume } = useLive();
+    const { isActive, isConnecting, connect, disconnect, error, volume, mode, setMode } = useLive();
     const { resetChat } = useChat();
     const [confirmReset, setConfirmReset] = useState(false);
 
@@ -43,6 +43,32 @@ const VoiceControls = () => {
         <div className="flex items-center gap-2">
             {error && <div className="text-[10px] bg-red-900/50 border border-red-500/50 text-red-200 px-2 py-1 rounded animate-pulse">{error}</div>}
 
+            <div className="flex items-center bg-gray-800 rounded border border-gray-700 p-0.5">
+                <button
+                    onClick={() => setMode('live')}
+                    disabled={isActive}
+                    className={clsx(
+                        "px-2 py-1 text-[10px] uppercase font-bold rounded transition-colors",
+                        mode === 'live' ? "bg-amber-900 text-amber-200" : "text-gray-500 hover:text-gray-300"
+                    )}
+                    title="Live 2.0 Flash (Fastest, S2S)"
+                >
+                    Live
+                </button>
+                <div className="w-px h-3 bg-gray-700 mx-0.5" />
+                <button
+                    onClick={() => setMode('precision')}
+                    disabled={isActive}
+                    className={clsx(
+                        "px-2 py-1 text-[10px] uppercase font-bold rounded transition-colors",
+                        mode === 'precision' ? "bg-purple-900 text-purple-200" : "text-gray-500 hover:text-gray-300"
+                    )}
+                    title="Precision (Gemini 3 Pro, Slow but Accurate)"
+                >
+                    Precision
+                </button>
+            </div>
+
             <button
                 onClick={handleReset}
                 className={clsx(
@@ -66,7 +92,7 @@ const VoiceControls = () => {
                         ? "bg-amber-900/30 border-amber-500/50 text-amber-200 hover:bg-amber-900/50"
                         : "bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white"
                 )}
-                title={isActive ? "Stop Session" : "Voice Review"}
+                title={isActive ? "Stop Session" : (mode === 'live' ? "Start Live Voice" : "Start Precision Voice")}
             >
                 {isActive && (
                     <div
@@ -83,13 +109,19 @@ const VoiceControls = () => {
                             "w-2 h-2 rounded-full bg-amber-400 animate-ping absolute left-1 top-1",
                             volume < 0.05 && "opacity-0"
                         )} />
-                        <Pause size={16} className="text-amber-400 relative z-10" />
-                        <span className="hidden sm:inline relative z-10 font-bold uppercase tracking-widest text-[10px]">Theia Live</span>
+                        {mode === 'precision' ? (
+                            <BrainCircuit size={16} className="text-purple-400 relative z-10" />
+                        ) : (
+                            <Pause size={16} className="text-amber-400 relative z-10" />
+                        )}
+                        <span className="hidden sm:inline relative z-10 font-bold uppercase tracking-widest text-[10px]">
+                            {mode === 'precision' ? 'Thinking...' : 'Theia Live'}
+                        </span>
                     </>
                 ) : (
                     <>
-                        <Mic size={16} className="group-hover/btn:scale-110 transition-transform" />
-                        <span className="hidden sm:inline">Voice Review</span>
+                        {mode === 'precision' ? <BrainCircuit size={16} className="text-purple-400" /> : <Mic size={16} className="group-hover/btn:scale-110 transition-transform" />}
+                        <span className="hidden sm:inline">{mode === 'precision' ? 'Start Precision' : 'Voice Review'}</span>
                     </>
                 )}
             </button>
