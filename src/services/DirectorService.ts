@@ -166,19 +166,29 @@ INSTRUCTIONS:
                 parts: [{ text: msg.content }]
             }));
 
-        const model = ai.getGenerativeModel({ model: 'gemini-2.0-flash-exp' }); // TODO: Switch to gemini-3-pro-preview when available/stable
-        // Note: Using gemini-2.0-flash-exp for now as a proxy for the REST path, but can swap to 'gemini-3-pro-preview'
+        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash-preview-05-20' }); // Using Gemini 2.5 Flash for better reliability
+        // Note: This is a stable model for Precision Mode text generation
+
+        console.log('[DirectorService] Starting Precision Mode chat with history length:', chatHistory.length);
 
         const chat = model.startChat({
             history: chatHistory,
             systemInstruction: systemPrompt
         });
 
+        console.log('[DirectorService] Sending user message:', userText);
         const result = await chat.sendMessage(userText);
-        return result.response.text();
+        const responseText = result.response.text();
+
+        console.log('[DirectorService] Received response:', {
+            text: responseText.substring(0, 100) + '...',
+            fullLength: responseText.length
+        });
+
+        return responseText;
 
     } catch (e: any) {
-        console.error("Precision Mode Error:", e);
+        console.error("[DirectorService] Precision Mode Error:", e);
         return `I encountered an error: ${e.message}`;
     }
 }

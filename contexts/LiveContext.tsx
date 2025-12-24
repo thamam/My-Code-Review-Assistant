@@ -134,6 +134,12 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Refs to track state for callbacks (avoids stale closure issue)
   const isActiveRef = useRef(false);
   const isConnectingRef = useRef(false);
+  const modeRef = useRef<'live' | 'precision'>(mode); // Track mode for callbacks
+
+  // Keep modeRef in sync with state
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
 
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const inputAudioContextRef = useRef<AudioContext | null>(null);
@@ -228,16 +234,31 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const connect = async () => {
-    if (!prData || !import.meta.env.VITE_GEMINI_API_KEY || isConnecting || isActive) return;
+    // Use ref for mode to avoid stale closure
+    const currentMode = modeRef.current;
+
+    console.log('[Theia] connect() called:', {
+      currentMode,
+      prData: !!prData,
+      hasApiKey: !!import.meta.env.VITE_GEMINI_API_KEY,
+      isConnecting,
+      isActive
+    });
+
+    if (!prData || !import.meta.env.VITE_GEMINI_API_KEY || isConnecting || isActive) {
+      console.warn('[Theia] connect() early return - precondition not met');
+      return;
+    }
 
     try {
-      console.log(`[Theia Live] Connection Status: Initiating (${mode} mode)...`);
+      console.log(`[Theia Live] Connection Status: Initiating (${currentMode} mode)...`);
       setIsConnecting(true);
       isConnectingRef.current = true;
       setError(null);
 
       // --- PRECISION MODE (Gemini 3 Pro + Browser STT/TTS) ---
-      if (mode === 'precision') {
+      if (currentMode === 'precision') {
+        console.log('[Theia Precision] Entering Precision Mode branch...');
         const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
         if (!SpeechRecognition) {
           throw new Error("Browser does not support Speech Recognition.");
@@ -255,26 +276,36 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setIsConnecting(false);
           isConnectingRef.current = false;
 
-          // Speak welcome message
+          // Speak welcome message with correct language
           const welcomeMsg = language === 'Hebrew'
             ? `מצב דיוק פעיל. אני מקשיבה.`
             : `Precision mode active. I'm listening.`;
           const utterance = new SpeechSynthesisUtterance(welcomeMsg);
+          utterance.lang = language === 'Hebrew' ? 'he-IL' : 'en-US';
+          utterance.onstart = () => console.log('[Theia Precision] TTS Welcome started');
+          utterance.onend = () => console.log('[Theia Precision] TTS Welcome finished');
+          utterance.onerror = (e) => console.error('[Theia Precision] TTS Welcome error:', e);
           window.speechSynthesis.speak(utterance);
         };
 
         recognition.onerror = (event: any) => {
           console.error('[Theia Precision] Recognition error', event.error);
 
-          // Reset UI state on any error
+          // Handle no-speech specifically - this is NOT a fatal error
+          // Keep listening instead of disconnecting
+          if (event.error === 'no-speech') {
+            console.log('[Theia Precision] No speech detected, continuing to listen...');
+            // Do NOT reset UI state for no-speech - just keep listening
+            return; // Early return - don't disconnect
+          }
+
+          // For other errors, reset UI state
           setIsActive(false);
           isActiveRef.current = false;
 
           // Provide specific error messages
           if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
             setError("Microphone access denied. Please allow microphone permissions.");
-          } else if (event.error === 'no-speech') {
-            setError("No speech detected. Please speak louder or check microphone.");
           } else if (event.error === 'audio-capture') {
             setError("Microphone not available. Please check your audio devices.");
           } else if (event.error === 'network') {
@@ -292,7 +323,12 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         recognition.onresult = async (event: any) => {
           const transcript = event.results[event.results.length - 1][0].transcript;
-          if (!transcript.trim()) return;
+          console.log('[Theia Precision] STT Raw result:', { transcript, length: transcript?.length, isEmpty: !transcript?.trim() });
+
+          if (!transcript.trim()) {
+            console.warn('[Theia Precision] Empty transcript detected, ignoring...');
+            return;
+          }
 
           console.log('[Theia Precision] User said:', transcript);
 
@@ -314,6 +350,14 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (file) fileContent = file.newContent || '';
           }
 
+          console.log('[Theia Precision] Calling LLM with context:', {
+            transcript,
+            hasFileContent: !!fileContent,
+            fileContentLength: fileContent.length,
+            activeFile: contextState?.activeFile,
+            historyLength: messages.length
+          });
+
           const responseText = await generatePrecisionResponse(
             transcript,
             messages, // Pass history
@@ -326,14 +370,25 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
           );
 
+          console.log('[Theia Precision] LLM Response:', { responseText, length: responseText?.length });
+
           // Update Assistant Message
           upsertMessage({ id: assistantId, role: 'assistant', content: responseText, timestamp: Date.now() });
 
           // Speak Response
           window.speechSynthesis.cancel();
-          const utterance = new SpeechSynthesisUtterance(responseText);
-          utterance.lang = language === 'Hebrew' ? 'he-IL' : 'en-US';
-          window.speechSynthesis.speak(utterance);
+
+          if (responseText && responseText.trim()) {
+            console.log('[Theia Precision] Speaking response via TTS:', responseText.substring(0, 50) + '...');
+            const utterance = new SpeechSynthesisUtterance(responseText);
+            utterance.lang = language === 'Hebrew' ? 'he-IL' : 'en-US';
+            utterance.onstart = () => console.log('[Theia Precision] TTS started');
+            utterance.onend = () => console.log('[Theia Precision] TTS finished');
+            utterance.onerror = (e) => console.error('[Theia Precision] TTS error:', e);
+            window.speechSynthesis.speak(utterance);
+          } else {
+            console.error('[Theia Precision] Empty response from LLM, cannot speak');
+          }
         };
 
         recognitionRef.current = recognition;
