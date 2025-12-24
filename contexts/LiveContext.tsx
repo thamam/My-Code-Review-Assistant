@@ -145,13 +145,18 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     if (import.meta.env.MODE === 'test' || import.meta.env.DEV) {
       (window as any).__THEIA_VOICE_STATE__ = {
-        lastTranscript: inputTranscript.current,
-        lastLLMResponse: outputTranscript.current,
-        connectionStatus: isActive ? 'connected' : isConnecting ? 'connecting' : 'disconnected',
-        currentMode: mode
+        get lastTranscript() { return inputTranscript.current; },
+        get lastLLMResponse() { return outputTranscript.current; },
+        get connectionStatus() { return isActiveRef.current ? 'connected' : 'disconnected'; },
+        get currentMode() { return modeRef.current; }
+      };
+      // Expose the Speech Simulation Hook for the IQ Test
+      (window as any).__THEIA_SIMULATE_SPEECH__ = (text: string) => {
+        // Will be replaced when Precision mode connects with the actual handler
+        console.warn('[Theia] __THEIA_SIMULATE_SPEECH__ called before Precision mode connected');
       };
     }
-  });
+  }, []);
 
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const inputAudioContextRef = useRef<AudioContext | null>(null);
@@ -428,7 +433,7 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         };
 
         // TEST HOOK: Expose __THEIA_SIMULATE_SPEECH__ for E2E testing (bypasses STT)
-        if ((window as any).Cypress || import.meta.env.MODE === 'test' || import.meta.env.DEV) {
+        if (import.meta.env.MODE === 'test' || import.meta.env.DEV) {
           (window as any).__THEIA_SIMULATE_SPEECH__ = handleSpeechResult;
           console.log('[Theia Precision] Test hook __THEIA_SIMULATE_SPEECH__ exposed');
         }
