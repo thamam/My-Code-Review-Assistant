@@ -141,6 +141,18 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     modeRef.current = mode;
   }, [mode]);
 
+  // TEST HOOK: Expose voice state for E2E testing (tree-shaken in production)
+  useEffect(() => {
+    if (import.meta.env.MODE === 'test' || import.meta.env.DEV) {
+      (window as any).__THEIA_VOICE_STATE__ = {
+        lastTranscript: inputTranscript.current,
+        lastLLMResponse: outputTranscript.current,
+        connectionStatus: isActive ? 'connected' : isConnecting ? 'connecting' : 'disconnected',
+        currentMode: mode
+      };
+    }
+  });
+
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const inputAudioContextRef = useRef<AudioContext | null>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);

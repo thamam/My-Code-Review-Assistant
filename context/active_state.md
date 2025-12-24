@@ -1,21 +1,30 @@
 # Active State
 
 ## 1. Current Focus
-**Phase 7: Voice Mode Stability**
-- Fixed "dod dod" issue in Precision Mode.
-- All voice mode bugs resolved and tested.
+**Phase 7: QA Infrastructure - Deterministic Testing**
+- Refactored `director-actor.spec.ts` from console-log parsing to State Inspector pattern.
+- Added `__THEIA_VOICE_STATE__` test hook to `LiveContext.tsx`.
+- All 5 tests pass deterministically (6.1s).
 
 ## 2. Active Branch
 - **Current:** `dev`
 
 ## 3. Known Issues
-- None critical. Voice modes are now stable.
+- None critical. Voice modes and tests are stable.
 
 ## 4. Architecture Constraints
 - `ContextBrief` must be < 1000 tokens.
 - Precision Mode uses `window.speechSynthesis` (Browser TTS), not Gemini Audio.
+- Test hooks (`__THEIA_VOICE_STATE__`, `__THEIA_CONTEXT_STATE__`) are dev-only.
 
 ## 5. Recent Completions
+- [x] **QA Refactoring: Deterministic Tests** (2024-12-24)
+  - Created `tests/fixtures/fake_audio.wav` (5s silence)
+  - Updated `playwright.config.ts` with fake media stream args
+  - Added `__THEIA_VOICE_STATE__` to `LiveContext.tsx`
+  - Deleted all console-log assertions from tests
+  - 5 tests pass in 6.1s without flaking
+
 - [x] **Voice Mode Bug Fixes** (2024-12-24)
   - Fixed stale closure bug (modeRef)
   - Fixed TTS language mismatch
@@ -24,6 +33,6 @@
   - Added 5 E2E tests for voice mode code paths
 
 ## 6. Next Steps
-- Manual testing of end-to-end voice interaction with real microphone
-- Consider adding voice activity detection (VAD) for better UX
-- Monitor API stability with new model versions
+- Commit QA refactoring changes to `dev` branch
+- Consider audio injection tests for actual voice interaction flows
+- Expand State Inspector pattern to other test suites
