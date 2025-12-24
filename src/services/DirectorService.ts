@@ -158,7 +158,7 @@ INSTRUCTIONS:
 4. Speak naturally.
 `;
 
-        // Convert history to Gemini format
+        // Convert history to Gemini format (Content[])
         const chatHistory = history
             .filter(msg => msg.role !== 'system')
             .map(msg => ({
@@ -166,19 +166,24 @@ INSTRUCTIONS:
                 parts: [{ text: msg.content }]
             }));
 
-        const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash-preview-05-20' }); // Using Gemini 2.5 Flash for better reliability
-        // Note: This is a stable model for Precision Mode text generation
+        // Add the current user message
+        const contents = [
+            ...chatHistory,
+            { role: 'user', parts: [{ text: userText }] }
+        ];
 
         console.log('[DirectorService] Starting Precision Mode chat with history length:', chatHistory.length);
+        console.log('[DirectorService] Sending user message:', userText);
 
-        const chat = model.startChat({
-            history: chatHistory,
-            systemInstruction: systemPrompt
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.0-flash',
+            config: {
+                systemInstruction: systemPrompt,
+            },
+            contents: contents,
         });
 
-        console.log('[DirectorService] Sending user message:', userText);
-        const result = await chat.sendMessage(userText);
-        const responseText = result.response.text();
+        const responseText = response.text || '';
 
         console.log('[DirectorService] Received response:', {
             text: responseText.substring(0, 100) + '...',

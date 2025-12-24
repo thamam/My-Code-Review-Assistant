@@ -4,7 +4,7 @@ import { GoogleGenAI, LiveServerMessage, Modality, Blob, FunctionDeclaration, Ty
 import { usePR } from './PRContext';
 import { useChat } from './ChatContext';
 import { ContextBrief } from '../src/types/contextBrief';
-import { formatBriefAsWhisper, getBrainResponse } from '../src/services/DirectorService';
+import { formatBriefAsWhisper, getBrainResponse, generatePrecisionResponse } from '../src/services/DirectorService';
 
 interface LiveContextType {
   isActive: boolean;
@@ -333,9 +333,9 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
         };
 
-        recognition.onresult = async (event: any) => {
-          const transcript = event.results[event.results.length - 1][0].transcript;
-          console.log('[Theia Precision] STT Raw result:', { transcript, length: transcript?.length, isEmpty: !transcript?.trim() });
+        // Reusable speech result handler - can be called by real STT or test hook
+        const handleSpeechResult = async (transcript: string) => {
+          console.log('[Theia Precision] handleSpeechResult called:', { transcript, length: transcript?.length, isEmpty: !transcript?.trim() });
 
           if (!transcript.trim()) {
             console.warn('[Theia Precision] Empty transcript detected, ignoring...');
@@ -370,19 +370,36 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             historyLength: messages.length
           });
 
-          const responseText = await generatePrecisionResponse(
-            transcript,
-            messages, // Pass history
-            {
-              fileContent,
-              filePath: contextState?.activeFile || 'No file selected',
-              prTitle: prData.title,
-              prDescription: prData.description,
-              linearIssue: linearIssue
-            }
-          );
+          let responseText: string;
+          try {
+            responseText = await generatePrecisionResponse(
+              transcript,
+              messages, // Pass history
+              {
+                fileContent,
+                filePath: contextState?.activeFile || 'No file selected',
+                prTitle: prData.title,
+                prDescription: prData.description,
+                linearIssue: linearIssue
+              }
+            );
 
-          console.log('[Theia Precision] LLM Response:', { responseText, length: responseText?.length });
+            console.log('[Theia Precision] LLM Response:', { responseText, length: responseText?.length });
+          } catch (llmError: any) {
+            console.error('[Theia Precision] LLM call failed:', llmError.message || llmError);
+            responseText = `Error: ${llmError.message || 'LLM call failed'}`;
+          }
+
+          // Update voice state for E2E testing
+          if (import.meta.env.MODE === 'test' || import.meta.env.DEV) {
+            outputTranscript.current = responseText;
+            // Also update the global state
+            (window as any).__THEIA_VOICE_STATE__ = {
+              ...(window as any).__THEIA_VOICE_STATE__,
+              lastLLMResponse: responseText,
+              lastTranscript: transcript
+            };
+          }
 
           // Update Assistant Message
           upsertMessage({ id: assistantId, role: 'assistant', content: responseText, timestamp: Date.now() });
@@ -402,6 +419,19 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             console.error('[Theia Precision] Empty response from LLM, cannot speak');
           }
         };
+
+        // Wire the real STT to the handler
+        recognition.onresult = async (event: any) => {
+          const transcript = event.results[event.results.length - 1][0].transcript;
+          console.log('[Theia Precision] STT Raw result:', { transcript });
+          await handleSpeechResult(transcript);
+        };
+
+        // TEST HOOK: Expose __THEIA_SIMULATE_SPEECH__ for E2E testing (bypasses STT)
+        if ((window as any).Cypress || import.meta.env.MODE === 'test' || import.meta.env.DEV) {
+          (window as any).__THEIA_SIMULATE_SPEECH__ = handleSpeechResult;
+          console.log('[Theia Precision] Test hook __THEIA_SIMULATE_SPEECH__ exposed');
+        }
 
         recognitionRef.current = recognition;
         recognition.start();
