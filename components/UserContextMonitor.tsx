@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { usePR } from '../contexts/PRContext';
 import { useChat } from '../contexts/ChatContext';
 import { useLive } from '../contexts/LiveContext';
+import { useSpec } from '../contexts/SpecContext';
 import { generateBrief, DirectorInput } from '../src/services/DirectorService';
 
 /**
@@ -13,9 +14,10 @@ import { generateBrief, DirectorInput } from '../src/services/DirectorService';
  * for injection into the Live voice session.
  */
 export const UserContextMonitor: React.FC = () => {
-    const { leftTab, selectedFile, selectionState, activeDiagram, prData, linearIssue } = usePR();
+    const { leftTab, selectedFile, selectionState, activeDiagram, prData } = usePR();
     const { updateUserContext } = useChat();
     const { isActive: isLiveActive, injectBrief } = useLive();
+    const { activeSpec } = useSpec(); // Get spec atoms
 
     // Track the current file path for race condition handling (latest-wins)
     const currentFileRef = useRef<string | null>(null);
@@ -54,11 +56,7 @@ export const UserContextMonitor: React.FC = () => {
                 filePath,
                 prTitle: prData.title,
                 prDescription: prData.description,
-                linearIssue: linearIssue ? {
-                    identifier: linearIssue.identifier,
-                    title: linearIssue.title,
-                    description: linearIssue.description || ''
-                } : null
+                specAtoms: activeSpec?.atoms || []
             };
 
             console.debug('[Director] Generating brief for:', filePath);
@@ -76,7 +74,7 @@ export const UserContextMonitor: React.FC = () => {
         }, 500);
 
         return () => clearTimeout(timer);
-    }, [selectedFile?.path, prData, linearIssue, isLiveActive, updateUserContext, injectBrief]);
+    }, [selectedFile?.path, prData, activeSpec, isLiveActive, updateUserContext, injectBrief]);
 
     // Monitor Selection Changes
     useEffect(() => {
