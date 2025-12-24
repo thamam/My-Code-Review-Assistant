@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { PRProvider, usePR } from './contexts/PRContext';
 import { ChatProvider, useChat } from './contexts/ChatContext';
 import { LiveProvider, useLive } from './contexts/LiveContext';
+import { SpecProvider } from './contexts/SpecContext';
 import { UserContextMonitor } from './components/UserContextMonitor';
 import { FileTree } from './components/FileTree/FileTree';
 import { CodeViewer } from './components/CodeViewer/CodeViewer';
@@ -332,14 +333,16 @@ const MainLayout = () => {
 };
 
 const App = () => (
-    <PRProvider>
-        <ChatProvider>
-            <LiveProvider>
-                <UserContextMonitor />
-                <MainLayout />
-            </LiveProvider>
-        </ChatProvider>
-    </PRProvider>
+    <SpecProvider>
+        <PRProvider>
+            <ChatProvider>
+                <LiveProvider>
+                    <UserContextMonitor />
+                    <MainLayout />
+                </LiveProvider>
+            </ChatProvider>
+        </PRProvider>
+    </SpecProvider>
 );
 
 export default App;
