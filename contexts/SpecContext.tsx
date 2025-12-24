@@ -11,7 +11,7 @@
  * Provides a single source of truth for the active spec and its atoms.
  */
 
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { SpecDocument, SpecAtom } from '../src/types/SpecTypes';
 import { atomize } from '../src/services/AtomizerService';
 import { createLinearAdapter } from '../src/adapters/LinearAdapter';
@@ -55,6 +55,22 @@ export const SpecProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [activeSpec, setActiveSpec] = useState<SpecDocument | null>(null);
     const [status, setStatus] = useState<SpecStatus>('idle');
     const [error, setError] = useState<string | null>(null);
+
+    // TEST HOOK: Expose spec utilities for E2E testing
+    useEffect(() => {
+        if (import.meta.env.MODE === 'test' || import.meta.env.DEV) {
+            (window as any).__THEIA_SPEC_STATE__ = {
+                get activeSpec() { return activeSpec; },
+                get status() { return status; },
+            };
+            // Expose setMockSpec for direct test injection (bypasses atomizer)
+            (window as any).__THEIA_SET_MOCK_SPEC__ = (spec: SpecDocument) => {
+                console.log('[SpecContext Test] Injecting mock spec:', spec.title);
+                setActiveSpec(spec);
+                setStatus('success');
+            };
+        }
+    }, [activeSpec, status]);
 
     /**
      * Load a spec from Linear issue.

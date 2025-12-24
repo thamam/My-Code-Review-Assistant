@@ -28,6 +28,9 @@ export interface ContextBrief {
         relevance: string;
     };
 
+    /** Relevant requirement IDs from SpecAtoms (e.g., ["REQ-1", "REQ-3"]) */
+    relevantAtomIds?: string[];
+
     /** Suggested talking points for the Actor, max 3 */
     suggestedTopics: string[];
 }
