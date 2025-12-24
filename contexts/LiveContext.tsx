@@ -3,8 +3,10 @@ import React, { createContext, useContext, useState, useRef, ReactNode, useEffec
 import { GoogleGenAI, LiveServerMessage, Modality, Blob, FunctionDeclaration, Type } from "@google/genai";
 import { usePR } from './PRContext';
 import { useChat } from './ChatContext';
+import { useSpec } from './SpecContext';
 import { ContextBrief } from '../src/types/contextBrief';
-import { formatBriefAsWhisper, getBrainResponse, generatePrecisionResponse } from '../src/services/DirectorService';
+import { formatBriefAsWhisper, getBrainResponse, generatePrecisionResponse, PrecisionResponse } from '../src/services/DirectorService';
+import { speakWithCloudTTS } from '../src/services/TTSService';
 
 interface LiveContextType {
   isActive: boolean;
@@ -123,8 +125,9 @@ function createBlob(data: Float32Array): Blob {
 }
 
 export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { prData, linearIssue, navigateToCode, setLeftTab, setIsDiffMode, diagrams, setActiveDiagram } = usePR();
+  const { prData, navigateToCode, setLeftTab, setIsDiffMode, diagrams, setActiveDiagram } = usePR();
   const { upsertMessage, messages, language } = useChat(); // Need messages history for Precision Mode
+  const { activeSpec } = useSpec(); // Get activeSpec for SpecAtoms
   const [isActive, setIsActive] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -375,9 +378,9 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             historyLength: messages.length
           });
 
-          let responseText: string;
+          let result: PrecisionResponse | null;
           try {
-            responseText = await generatePrecisionResponse(
+            result = await generatePrecisionResponse(
               transcript,
               messages, // Pass history
               {
@@ -385,43 +388,49 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 filePath: contextState?.activeFile || 'No file selected',
                 prTitle: prData.title,
                 prDescription: prData.description,
-                linearIssue: linearIssue
+                specAtoms: activeSpec?.atoms || []
               }
             );
 
-            console.log('[Theia Precision] LLM Response:', { responseText, length: responseText?.length });
+            console.log('[Theia Precision] LLM Response:', {
+              hasResult: !!result,
+              voiceLength: result?.voice?.length,
+              screenLength: result?.screen?.length
+            });
           } catch (llmError: any) {
             console.error('[Theia Precision] LLM call failed:', llmError.message || llmError);
-            responseText = `Error: ${llmError.message || 'LLM call failed'}`;
+            result = null;
           }
+
+          // Handle response - fallback if null
+          const screenContent = result?.screen || 'I encountered an error processing your request.';
+          const voiceContent = result?.voice || 'I encountered an error processing your request.';
 
           // Update voice state for E2E testing
           if (import.meta.env.MODE === 'test' || import.meta.env.DEV) {
-            outputTranscript.current = responseText;
+            outputTranscript.current = screenContent;
             // Also update the global state
             (window as any).__THEIA_VOICE_STATE__ = {
               ...(window as any).__THEIA_VOICE_STATE__,
-              lastLLMResponse: responseText,
+              lastLLMResponse: screenContent,
               lastTranscript: transcript
             };
           }
 
-          // Update Assistant Message
-          upsertMessage({ id: assistantId, role: 'assistant', content: responseText, timestamp: Date.now() });
+          // Update Assistant Message with SCREEN content (full Markdown)
+          upsertMessage({ id: assistantId, role: 'assistant', content: screenContent, timestamp: Date.now() });
 
-          // Speak Response
-          window.speechSynthesis.cancel();
-
-          if (responseText && responseText.trim()) {
-            console.log('[Theia Precision] Speaking response via TTS:', responseText.substring(0, 50) + '...');
-            const utterance = new SpeechSynthesisUtterance(responseText);
-            utterance.lang = language === 'Hebrew' ? 'he-IL' : 'en-US';
-            utterance.onstart = () => console.log('[Theia Precision] TTS started');
-            utterance.onend = () => console.log('[Theia Precision] TTS finished');
-            utterance.onerror = (e) => console.error('[Theia Precision] TTS error:', e);
-            window.speechSynthesis.speak(utterance);
+          // Speak Response using Google Cloud TTS with VOICE content (no markdown)
+          if (voiceContent && voiceContent.trim()) {
+            console.log('[Theia Precision] Speaking voice content via Cloud TTS:', voiceContent.substring(0, 50) + '...');
+            // Use Cloud TTS with automatic fallback to browser TTS
+            speakWithCloudTTS(voiceContent, language, (speaking) => {
+              isSpeakingRef.current = speaking;
+            }).catch(err => {
+              console.error('[Theia Precision] TTS completely failed:', err);
+            });
           } else {
-            console.error('[Theia Precision] Empty response from LLM, cannot speak');
+            console.error('[Theia Precision] Empty voice content, cannot speak');
           }
         };
 
@@ -475,16 +484,24 @@ You can control the UI. Navigate to files when I ask.
 
 ${langInstruction}
 
-## Context Updates
-You will receive messages prefixed with "[CONTEXT UPDATE - DO NOT READ ALOUD]".
-- These contain summaries of files the user is viewing.
-- Use these to ground your responses.
-- NEVER read these messages aloud or acknowledge receiving them.
+## CRITICAL: Silent Context Updates
+You will receive internal system messages prefixed with "[CONTEXT UPDATE".
+ABSOLUTE RULES FOR THESE MESSAGES:
+1. NEVER speak these messages aloud - they are INTERNAL ONLY
+2. NEVER acknowledge receiving them ("I see you're looking at..." is FORBIDDEN)
+3. NEVER read ANY part of them to the user
+4. Simply absorb the information silently and use it to inform your responses
+5. If you catch yourself about to read one aloud, STOP IMMEDIATELY
+
+These are like stage directions - the audience (user) should never hear them.
 
 IF THE USER ASKS ABOUT THE LINEAR ISSUE, REFER TO THE "PRIMARY REQUIREMENTS" SECTION BELOW.\n`;
 
-      if (linearIssue) {
-        systemInstruction += `\n--- LINKED LINEAR ISSUE ---\nID: ${linearIssue.identifier}\nTitle: ${linearIssue.title}\nRequirements: ${linearIssue.description}\n`;
+      // Include SpecAtoms as requirements checklist
+      const atoms = activeSpec?.atoms || [];
+      if (atoms.length > 0) {
+        const atomsChecklist = atoms.map(atom => `${atom.id} [${atom.category}]: ${atom.description}`).join('\n');
+        systemInstruction += `\n--- REQUIREMENTS CHECKLIST ---\nCheck if the current file implements or violates these requirements. Cite Requirement IDs.\n${atomsChecklist}\n---\n`;
       }
 
       systemInstruction += `\nProvide expert, concise feedback. Respond immediately to spoken input.`;
