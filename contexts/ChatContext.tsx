@@ -341,7 +341,7 @@ Active Diagram: ${userContextRef.current.activeDiagram || 'None'}${activeFileCon
           }
           // Send tool output back to model
           responseStream = await chatSessionRef.current.sendMessageStream({
-            parts: [{ functionResponse: { name: responses[0].name, response: responses[0].response } }]
+            message: [{ functionResponse: { name: responses[0].name, response: responses[0].response } }]
           });
           for await (const subChunk of responseStream) {
             if (subChunk.text) {

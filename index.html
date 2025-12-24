@@ -1,48 +1,72 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Visual Code Review</title>
-    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            colors: {
-              gray: {
-                750: '#2d3748',
-                850: '#1a202c',
-                950: '#0f131a',
-              }
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Visual Code Review</title>
+  <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            gray: {
+              750: '#2d3748',
+              850: '#1a202c',
+              950: '#0f131a',
             }
           }
         }
       }
-    </script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
-    <style>
-      /* Custom scrollbar for webkit */
-      ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #1f2937;
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #4b5563;
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #6b7280;
-      }
-      
-      /* Code font settings */
-      .font-mono {
-        font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-      }
-    </style>
+    }
+  </script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+  <style>
+    /* Custom scrollbar for webkit */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #1f2937;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #4b5563;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #6b7280;
+    }
+
+    /* Code font settings */
+    .font-mono {
+      font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+    }
+
+    /* Diagram Navigation Styles (Phase 8) */
+    .clickable-ref {
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .clickable-ref:hover {
+      filter: brightness(1.2);
+      stroke: #a855f7 !important;
+      /* Purple-500 */
+      stroke-width: 3px !important;
+    }
+
+    /* The invisible hit area for easier clicking */
+    .message-hitarea {
+      stroke: transparent;
+      stroke-width: 20px;
+      cursor: pointer;
+    }
+  </style>
   <script type="importmap">
 {
   "imports": {
@@ -62,8 +86,10 @@
 }
 </script>
 </head>
-  <body class="bg-gray-900 text-white overflow-hidden h-screen w-screen">
-    <div id="root"></div>
-    <script type="module" src="/index.tsx"></script>
-  </body>
+
+<body class="bg-gray-900 text-white overflow-hidden h-screen w-screen">
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+
 </html>
