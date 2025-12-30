@@ -1,8 +1,15 @@
+/**
+ * src/contexts/PRContext.tsx
+ * The Presentation Layer.
+ * Now delegates data fetching to useNavigationModule().
+ */
 
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef, useCallback } from 'react';
-import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue, Diagram, NavigationTarget, RepoNode, LazyFile } from '../types';
+import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue, Diagram, NavigationTarget } from '../types';
 import { resolveFilePath } from '../utils/fileUtils';
-import { GitHubService } from '../services/github';
+// NEW IMPORTS
+import { useNavigationModule } from '../src/modules/navigation/hooks';
+import { RepoNode, LazyFile } from '../src/modules/navigation/types';
 
 interface FocusedLocation {
   file: string;
@@ -49,7 +56,8 @@ interface PRContextType {
   diagramSplitPercent: number;
   setDiagramSplitPercent: (val: number) => void;
   setDiagrams: (diagrams: Diagram[]) => void;
-  // Phase 9: Full Repo Context
+
+  // Phase 9: Delegated to Navigation Module
   repoTree: RepoNode[];
   lazyFiles: Map<string, LazyFile>;
   isFullRepoMode: boolean;
@@ -78,20 +86,10 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [diagramViewMode, setDiagramViewMode] = useState<'full' | 'split'>('full');
   const [diagramSplitPercent, setDiagramSplitPercent] = useState(50);
 
-  // Phase 9: Full Repo Context state
-  const [repoTree, setRepoTree] = useState<RepoNode[]>([]);
-  const [lazyFiles, setLazyFiles] = useState<Map<string, LazyFile>>(new Map());
-  const [isFullRepoMode, setIsFullRepoMode] = useState(false);
-  const [isLoadingRepoTree, setIsLoadingRepoTree] = useState(false);
-
-  // GitHub service instance (for lazy loading)
-  const githubServiceRef = useRef<GitHubService | null>(null);
-  if (!githubServiceRef.current) {
-    githubServiceRef.current = new GitHubService(import.meta.env.VITE_GITHUB_TOKEN);
-  }
+  // NEW: Hook into the Navigation Module
+  const navModule = useNavigationModule();
 
   const isCodeViewerReadyRef = useRef(false);
-  // NEW: Navigation Lock to prevent race conditions
   const [isNavigating, setIsNavigating] = useState(false);
 
   useEffect(() => { isCodeViewerReadyRef.current = isCodeViewerReady; }, [isCodeViewerReady]);
@@ -108,14 +106,13 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     try {
       setIsNavigating(true);
 
-      // 5. Update Tab (Moved to top to ensure CodeViewer mounts if hidden)
+      // Tab Management
       if (leftTab !== 'files' && target.source !== 'tree') {
         setLeftTab('files');
-        // Allow React to render the tab switch
         await new Promise(r => setTimeout(r, 0));
       }
 
-      // 1. Resolve path
+      // Resolve Path
       const resolution = resolveFilePath(target.filepath, prData.files.map(f => f.path));
       if (!resolution.resolved) {
         console.warn(`[PRContext] Navigation failed: Could not resolve ${target.filepath}`);
@@ -125,21 +122,19 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       const fileToSelect = prData.files.find(f => f.path === resolution.resolved);
       if (!fileToSelect) return false;
 
-      // 2. Switch File if needed
+      // Switch File
       if (selectedFile?.path !== fileToSelect.path) {
         setIsCodeViewerReady(false);
         selectFile(fileToSelect);
 
-        // 3. Wait for File Load (Spec §5.3)
         let attempts = 0;
-        while (!isCodeViewerReadyRef.current && attempts < 50) { // 5s timeout
+        while (!isCodeViewerReadyRef.current && attempts < 50) {
           await new Promise(r => setTimeout(r, 100));
           attempts++;
         }
       }
 
-      // 4. Scroll (via FocusedLocation state)
-      // We add a timestamp to force updates even if line is same
+      // Scroll
       setFocusedLocation({
         file: fileToSelect.path,
         line: target.line,
@@ -166,86 +161,29 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     setAnnotations(prev => [...prev, { id, file, line, type, title, timestamp: Date.now() }]);
   };
 
-  // Phase 9: Toggle Full Repo Mode - fetches repo tree if needed
+  // --- DELEGATED METHODS ---
+
   const toggleFullRepoMode = useCallback(async () => {
     if (!prData?.owner || !prData?.repo || !prData?.headSha) {
-      console.warn('[PRContext] Cannot toggle full repo mode: missing PR metadata');
+      console.warn('[PRContext] Missing PR metadata for full repo mode');
       return;
     }
+    await navModule.service.toggleFullRepoMode(prData.owner, prData.repo, prData.headSha);
+  }, [prData, navModule.service]);
 
-    // If turning on and tree is empty, fetch it
-    if (!isFullRepoMode && repoTree.length === 0) {
-      setIsLoadingRepoTree(true);
-      try {
-        const tree = await githubServiceRef.current!.fetchRepoTree(
-          prData.owner,
-          prData.repo,
-          prData.headSha
-        );
-        setRepoTree(tree);
-        console.log(`[PRContext] Loaded repo tree: ${tree.length} items`);
-      } catch (e) {
-        console.error('[PRContext] Failed to fetch repo tree:', e);
-      } finally {
-        setIsLoadingRepoTree(false);
-      }
-    }
-
-    setIsFullRepoMode(prev => !prev);
-  }, [prData, isFullRepoMode, repoTree.length]);
-
-  // Phase 9: Load a "ghost" file (non-PR file) on demand
   const loadGhostFile = useCallback(async (path: string): Promise<LazyFile | null> => {
-    // Check if already in PR files
+    // 1. Check local PR files (Hot)
     if (prData?.files.find(f => f.path === path)) {
-      console.log(`[PRContext] File ${path} is in PR files, not a ghost`);
       return null;
     }
 
-    // Check if already lazy-loaded
-    if (lazyFiles.has(path)) {
-      return lazyFiles.get(path)!;
-    }
-
-    // Fetch from GitHub
     if (!prData?.owner || !prData?.repo || !prData?.headSha) {
-      console.warn('[PRContext] Cannot load ghost file: missing PR metadata');
       return null;
     }
 
-    // Find SHA from repoTree
-    const node = repoTree.find(n => n.path === path && n.type === 'blob');
-    if (!node) {
-      console.warn(`[PRContext] File ${path} not found in repo tree`);
-      return null;
-    }
-
-    try {
-      const content = await githubServiceRef.current!.fetchFileContent(
-        prData.owner,
-        prData.repo,
-        path,
-        prData.headSha
-      );
-
-      const lazyFile: LazyFile = {
-        path,
-        content,
-        sha: node.sha,
-        isReadOnly: true,
-        fetchedAt: Date.now()
-      };
-
-      // Update lazy files map
-      setLazyFiles(prev => new Map(prev).set(path, lazyFile));
-      console.log(`[PRContext] Loaded ghost file: ${path}`);
-
-      return lazyFile;
-    } catch (e) {
-      console.error(`[PRContext] Failed to load ghost file ${path}:`, e);
-      return null;
-    }
-  }, [prData, lazyFiles, repoTree]);
+    // 2. Delegate to Module (Warm/Ghost)
+    return navModule.service.loadGhostFile(prData.owner, prData.repo, path, prData.headSha);
+  }, [prData, navModule.service]);
 
   return (
     <PRContext.Provider value={{
@@ -257,9 +195,14 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       linearIssue, setLinearIssue, diagrams, activeDiagram, addDiagram: (d) => setDiagrams(p => [...p, d]),
       removeDiagram: (id) => { setDiagrams(p => p.filter(d => d.id !== id)); if (activeDiagram?.id === id) setActiveDiagram(null); },
       setActiveDiagram, diagramViewMode, setDiagramViewMode, diagramSplitPercent, setDiagramSplitPercent,
-      setDiagrams, // Expose setter for full control (e.g. clearing)
-      // Phase 9: Full Repo Context
-      repoTree, lazyFiles, isFullRepoMode, isLoadingRepoTree, toggleFullRepoMode, loadGhostFile
+      setDiagrams,
+      // Mapped Module State
+      repoTree: navModule.repoTree,
+      lazyFiles: navModule.lazyFiles,
+      isFullRepoMode: navModule.isFullRepoMode,
+      isLoadingRepoTree: navModule.isLoadingRepoTree,
+      toggleFullRepoMode,
+      loadGhostFile
     }}>
       {children}
     </PRContext.Provider>
