@@ -8,6 +8,35 @@ export interface PRData {
   headRef: string;
   files: FileChange[];
   warning?: string;
+  // Phase 9: Full Repo Context
+  owner?: string;          // Repository owner (for API calls)
+  repo?: string;           // Repository name (for API calls)
+  headSha?: string;        // HEAD commit SHA (for fetching files)
+  repoTree?: RepoNode[];   // Full repository tree (lazy loaded)
+}
+
+/**
+ * Phase 9: Repository tree node - lightweight reference to any file in the repo.
+ * Used for the "Lazy Graph" architecture to enable navigation beyond PR files.
+ */
+export interface RepoNode {
+  path: string;            // Full path: "src/utils/auth.ts"
+  type: 'blob' | 'tree';   // 'blob' = file, 'tree' = directory
+  sha: string;             // Git SHA for fetching content
+  mode?: string;           // File mode (e.g., "100644")
+  size?: number;           // File size in bytes (only for blobs)
+}
+
+/**
+ * Phase 9: A lazily-loaded file (not part of PR changes).
+ * Used for displaying non-PR files in read-only mode.
+ */
+export interface LazyFile {
+  path: string;
+  content: string;
+  sha: string;
+  isReadOnly: true;        // Always true for non-PR files
+  fetchedAt: number;       // Timestamp for cache management
 }
 
 export type FileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'unchanged';

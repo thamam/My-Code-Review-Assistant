@@ -3,14 +3,18 @@ import React, { useEffect, useRef, useState } from 'react';
 import { usePR } from '../../contexts/PRContext';
 import { DiffView } from './DiffView';
 import { SourceView } from './SourceView';
-import { FileCode2, Eye } from 'lucide-react';
+import { FileCode2, Eye, Lock } from 'lucide-react';
 import { arePathsEquivalent } from '../../utils/fileUtils';
 import { MarkdownRenderer } from '../MarkdownRenderer';
+import clsx from 'clsx';
 
 export const CodeViewer: React.FC = () => {
-  const { selectedFile, updateViewport, isDiffMode, activeSectionId, walkthrough, focusedLocation, setIsCodeViewerReady } = usePR();
+  const { selectedFile, updateViewport, isDiffMode, activeSectionId, walkthrough, focusedLocation, setIsCodeViewerReady, lazyFiles } = usePR();
   const containerRef = useRef<HTMLDivElement>(null);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
+
+  // Check if current file is a lazy-loaded (read-only) file
+  const isReadOnly = selectedFile && lazyFiles.has(selectedFile.path);
 
   // Signal readiness when file changes or mode changes
   useEffect(() => {
@@ -67,7 +71,16 @@ export const CodeViewer: React.FC = () => {
         }
       `}</style>
       <div className="flex items-center justify-between p-3 border-b border-gray-800 bg-gray-900 shrink-0">
-        <span className="font-mono text-sm text-gray-300 truncate">{selectedFile.path}</span>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="font-mono text-sm text-gray-300 truncate">{selectedFile.path}</span>
+          {/* Phase 9: READ ONLY badge for lazy-loaded files */}
+          {isReadOnly && (
+            <span className="shrink-0 flex items-center gap-1 px-2 py-0.5 bg-gray-700 rounded text-[10px] text-gray-400 uppercase">
+              <Lock size={10} />
+              Read Only
+            </span>
+          )}
+        </div>
         <div className="flex gap-2">
           {selectedFile.path.endsWith('.md') && (
             <button
@@ -97,5 +110,3 @@ export const CodeViewer: React.FC = () => {
     </div>
   );
 };
-
-import clsx from 'clsx';

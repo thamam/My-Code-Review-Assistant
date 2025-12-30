@@ -1,4 +1,4 @@
-import { PRData, FileChange, FileStatus } from '../types';
+import { PRData, FileChange, FileStatus, RepoNode } from '../types';
 
 interface GitHubPR {
   number: number;
@@ -16,6 +16,21 @@ interface GitHubFile {
   additions: number;
   deletions: number;
   patch?: string;
+}
+
+// Phase 9: GitHub Tree API response types
+interface GitHubTreeItem {
+  path: string;
+  mode: string;
+  type: 'blob' | 'tree';
+  sha: string;
+  size?: number;
+}
+
+interface GitHubTreeResponse {
+  sha: string;
+  tree: GitHubTreeItem[];
+  truncated: boolean;
 }
 
 export class GitHubService {
@@ -163,7 +178,85 @@ export class GitHubService {
       baseRef: prData.base.ref,
       headRef: prData.head.ref,
       files: processedFiles,
-      warning: warningMsg
+      warning: warningMsg,
+      // Phase 9: Include repo info for lazy loading
+      owner: prData.base.repo.owner.login,
+      repo: prData.base.repo.name,
+      headSha: prData.head.sha
     };
+  }
+
+  /**
+   * Phase 9: Fetch the complete repository tree at a given commit SHA.
+   * Uses GitHub Git Trees API with recursive=1 to get all files.
+   * 
+   * @param owner - Repository owner
+   * @param repo - Repository name  
+   * @param sha - Commit SHA (usually head.sha from the PR)
+   * @returns Array of RepoNode objects representing all files in the repo
+   */
+  async fetchRepoTree(owner: string, repo: string, sha: string): Promise<RepoNode[]> {
+    const url = `https://api.github.com/repos/${owner}/${repo}/git/trees/${sha}?recursive=1`;
+
+    const response = await fetch(url, { headers: this.getHeaders() });
+
+    if (response.status === 403) {
+      throw new Error("GitHub API Rate Limit Exceeded. Please provide an Access Token.");
+    }
+    if (!response.ok) {
+      throw new Error(`Failed to fetch repository tree: ${response.statusText}`);
+    }
+
+    const data: GitHubTreeResponse = await response.json();
+
+    if (data.truncated) {
+      console.warn('[GitHubService] Repository tree was truncated due to size limits');
+    }
+
+    // Map to our RepoNode interface
+    return data.tree.map(item => ({
+      path: item.path,
+      type: item.type,
+      sha: item.sha,
+      mode: item.mode,
+      size: item.size
+    }));
+  }
+
+  /**
+   * Phase 9: Fetch content of a single file by path.
+   * Used for lazy loading non-PR files when user navigates to them.
+   * 
+   * @param owner - Repository owner
+   * @param repo - Repository name
+   * @param path - File path (e.g., "src/utils/auth.ts")
+   * @param ref - Git ref (branch, tag, or SHA)
+   * @returns File content as a string
+   */
+  async fetchFileContent(owner: string, repo: string, path: string, ref: string): Promise<string> {
+    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${ref}`;
+
+    const response = await fetch(url, { headers: this.getHeaders() });
+
+    if (response.status === 403) {
+      throw new Error("GitHub API Rate Limit Exceeded.");
+    }
+    if (response.status === 404) {
+      throw new Error(`File not found: ${path}`);
+    }
+    if (!response.ok) {
+      throw new Error(`Failed to fetch file content: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+
+    // GitHub returns content as base64 encoded
+    if (data.encoding === 'base64' && data.content) {
+      // Decode base64 content
+      return atob(data.content.replace(/\n/g, ''));
+    }
+
+    // If content is not base64 (shouldn't happen for normal files)
+    return data.content || '';
   }
 }
