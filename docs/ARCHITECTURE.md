@@ -44,31 +44,48 @@ graph TD
 The Agent is not just a chatbot; it is a context-aware **Director** that commands the UI.
 
 ### The Brain (Context Injection)
-Theia's intelligence comes from how we assemble the prompt. We don't just dump code; we construct a precise **Context Object**.
+Theia's intelligence comes from the **Context Engine**, which acts as an accumulator to build the "Prompt Object" for the LLM.
 
 ```mermaid
 graph LR
-    subgraph "Context Injection Pipeline"
+    subgraph "Context Sources"
         SI["System Instruction (Persona)"]
+        CH["Chat History (Short-term)"]
         FC["File Context (Active Code)"]
         LS["Linear Specs (Requirements)"]
         DS["Diagram State (Visual Location)"]
     end
     
-    SI --> Prompt
-    FC --> Prompt
-    LS --> Prompt
-    DS --> Prompt
-    Prompt --> Gemini["Gemini 3 Pro"]
+    SI & CH & FC & LS & DS --> Accumulator
+    Accumulator --> |"Consolidated Context"| Director["Director (Gemini)"]
 ```
 
-*   **System Instruction:** Enforces the "Senior Staff Engineer" persona (Direct, Concise).
-*   **File Context:** The active file's content (Lazy Loaded).
-*   **Linear Specs:** The acceptance criteria for the feature code is actively implementing.
-*   **Diagram State:** "Where am I in the map?" (Architecture grounding).
+#### Context Components
+1.  **System Instruction:** Defines the "Senior Staff Engineer" persona. Enforces brevity and strict adherence to provided tools.
+2.  **Chat History:** Last 10 turns of conversation (User <-> Agent).
+3.  **File Context:** The content of the file currently open in `SourceView`. *Crucial:* If the file is large, we only send the visible viewport +/- 50 lines (Context Window Optimization).
+4.  **Linear Specs:** The specific requirements (tickets) associated with the current PR or file.
+5.  **User State:** "User is selecting lines 12-15 in `AuthService.ts`".
 
-### The Voice Loop (Director/Actor)
+### The Director-Actor Handshake (Dual-Track)
 We separate **Reasoning (Director)** from **Speech (Actor)** to prevent the AI from reading code blocks aloud.
+
+**The Flow:**
+1.  **Input:** User Audio -> STT -> Text.
+2.  **Thinking (Director):** Gemini processes the *Consolidated Context*.
+3.  **Output (Director):** Returns a JSON object:
+    ```json
+    {
+      "voice": "The error handling is missing here.",
+      "screen": {
+        "action": "highlight_lines",
+        "payload": { "file": "auth.ts", "lines": [15, 16] }
+      }
+    }
+    ```
+4.  **Execution (Actor):**
+    *   **Voice Track:** Sends `voice` string to Google Cloud TTS -> Audio Stream.
+    *   **Screen Track:** Orchestrator executes `highlight_lines` -> UI updates immediately.
 
 ```mermaid
 sequenceDiagram
@@ -80,11 +97,23 @@ sequenceDiagram
     User->>Browser: "Does this handle the Auth Error?"
     Browser->>Director: POST /api/chat (Context + Audio)
     Director->>Director: Analyze Code vs Spec
-    Director->>Browser: JSON { "speak": "No, it's missing try/catch.", "action": "highlight_line(15)" }
-    Browser->>Actor: POST /api/tts ("No, it's missing...")
-    Actor->>Browser: Audio Stream
-    Browser->>User: Plays Audio & Highlights Line 15
+    Director->>Browser: JSON { "speak": "No...", "screen": { "action": "highlight" } }
+    par Voice Track
+        Browser->>Actor: POST /api/tts ("No...")
+        Actor->>Browser: Audio Stream
+    and Screen Track
+        Browser->>Browser: CodeViewer.highlight(15)
+    end
+    Browser->>User: Audio Playback + Visual Highlight
 ```
+
+### Agent Capabilities (Tools)
+The Director has access to a specific toolset to manipulate the "World":
+*   `speak(text)`: Generate audio response.
+*   `navigate(file_path)`: Open a file in the code viewer.
+*   `highlight(lines)`: Visually emphasize code blocks.
+*   `query_repo(pattern)`: Lazy-fetch files from the git tree (for exploration).
+*   `verify_spec(atom_id)`: Mark a requirement as "Verified" in the Traceability Engine.
 
 ---
 
