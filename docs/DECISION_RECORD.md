@@ -16,3 +16,12 @@
 ## ADR-004: Lazy Repo Loading
 **Decision:** Fetch Git Tree + On-Demand Blobs.
 **Why:** Avoid cloning the entire repo. Performance for large repositories.
+
+## ADR-005: State-Driven Navigation
+**Decision:** Use a central Reducer (`PRContext`) for navigation state vs URL routing.
+**Why:** Complex multi-pane interactions (Diagram + Code + Spec) are easier to coordinate synchronously in a single state tree than parsing URL parameters.
+
+## ADR-006: Hybrid Diagrams
+**Decision:** Static Mermaid diagrams with interactive overlays.
+**Why:** React Flow was too heavy. Mermaid is text-based (LLM-friendly) and we can overlay click handlers for the "Interactive Map" feel.
+
