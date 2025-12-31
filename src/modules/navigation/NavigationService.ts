@@ -58,15 +58,19 @@ class NavigationService {
                 const tree = await this.github.fetchRepoTree(owner, repo, headSha);
                 this.setState({ repoTree: tree });
                 console.log(`[NavigationService] Loaded repo tree: ${tree.length} items`);
+                // Toggle only on success
+                this.setState({ isFullRepoMode: true });
             } catch (e) {
                 console.error('[NavigationService] Failed to fetch repo tree:', e);
+                // Don't toggle mode on failure
+                return;
             } finally {
                 this.setState({ isLoadingRepoTree: false });
             }
+        } else {
+            // 2. Toggle Mode (only when not fetching)
+            this.setState({ isFullRepoMode: !this.state.isFullRepoMode });
         }
-
-        // 2. Toggle Mode
-        this.setState({ isFullRepoMode: !this.state.isFullRepoMode });
     }
 
     /**
