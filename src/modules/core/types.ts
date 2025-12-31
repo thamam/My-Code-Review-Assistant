@@ -8,11 +8,32 @@
 // INPUT SIGNALS (UserIntent) - UI -> Agent
 // ============================================================================
 
+// UI Context passed with messages (what the user currently sees)
+export interface UIContext {
+    activeTab: 'files' | 'annotations' | 'issue' | 'diagrams';
+    activeFile: string | null;
+    activeSelection: string | null;
+    activeDiagram: string | null;
+    prData?: {
+        title: string;
+        author: string;
+        description: string;
+        files: Array<{ path: string; status: string; newContent?: string }>;
+    };
+    linearIssue?: {
+        identifier: string;
+        title: string;
+        description: string;
+    };
+    diagrams?: Array<{ id: string; title: string }>;
+}
+
 export interface UserMessageEvent {
     type: 'USER_MESSAGE';
     payload: {
         content: string;
         source: 'voice' | 'text';
+        context?: UIContext;
         timestamp: number;
     };
 }
@@ -47,7 +68,10 @@ export type UserIntent = UserMessageEvent | UIInteractionEvent | CodeChangeEvent
 export interface AgentSpeakEvent {
     type: 'AGENT_SPEAK';
     payload: {
+        messageId: string;
         content: string;
+        isStreaming: boolean;
+        isFinal: boolean;
         mode: 'tts' | 'text' | 'both';
         priority: 'high' | 'normal' | 'low';
         timestamp: number;
