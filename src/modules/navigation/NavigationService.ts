@@ -51,7 +51,7 @@ class NavigationService {
      */
     public async toggleFullRepoMode(owner: string, repo: string, headSha: string) {
         // 1. If turning on and tree is empty, fetch it
-        if (!this.state.isFullRepoMode && this.state.repoTree.length === 0) {
+        if (!this.state.isFullRepoMode && this.state.repoTree.length === 0 && !this.state.isLoadingRepoTree) {
             this.setState({ isLoadingRepoTree: true });
             try {
                 console.log(`[NavigationService] Fetching repo tree for ${owner}/${repo}...`);
