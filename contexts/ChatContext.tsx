@@ -81,7 +81,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // 2. Agent Thinking (Status)
       if (event.type === 'AGENT_THINKING') {
-        setIsTyping(event.payload.status !== 'idle');
+        setIsTyping(event.payload.stage !== 'completed');
       }
 
       // 3. Agent Navigate (The Hands - Navigation)

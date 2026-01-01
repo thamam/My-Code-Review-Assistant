@@ -95,7 +95,10 @@ class TheiaAgent {
    */
   private async process(input: string, context: any, prData: any) {
     // Emit "Thinking" Signal
-    eventBus.emit({ type: 'AGENT_THINKING', payload: { status: 'Analyzing...' }, timestamp: Date.now() });
+    eventBus.emit({
+      type: 'AGENT_THINKING',
+      payload: { stage: 'started', message: 'Analyzing...', timestamp: Date.now() }
+    });
 
     try {
       // Execute Graph
@@ -108,13 +111,11 @@ class TheiaAgent {
       console.error("[Agent] Graph Execution Failed:", error);
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: `System Error: ${error.message}` },
-        timestamp: Date.now()
+        payload: { text: `System Error: ${error.message}` }
       });
       eventBus.emit({
         type: 'AGENT_THINKING',
-        payload: { status: 'idle' },
-        timestamp: Date.now()
+        payload: { stage: 'completed', timestamp: Date.now() }
       });
     }
   }
@@ -196,16 +197,14 @@ Selection: ${context?.activeSelection || 'None'}
     if (text) {
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text },
-        timestamp: Date.now()
+        payload: { text }
       });
     }
 
-    // Emit "Idle" Signal
+    // Emit "Completed" Signal
     eventBus.emit({
       type: 'AGENT_THINKING',
-      payload: { status: 'idle' },
-      timestamp: Date.now()
+      payload: { stage: 'completed', timestamp: Date.now() }
     });
 
     return { messages: [{ role: 'assistant', content: text }] };
@@ -229,8 +228,7 @@ Selection: ${context?.activeSelection || 'None'}
             reason: 'Tool execution',
             highlight: true,
             timestamp
-          },
-          timestamp
+          }
         });
         console.log(`[TheiaAgent] AGENT_NAVIGATE emitted: ${args.filepath}:${args.line || 1}`);
         break;
@@ -241,8 +239,7 @@ Selection: ${context?.activeSelection || 'None'}
           payload: {
             tab: args.tab_name,
             timestamp
-          },
-          timestamp
+          }
         });
         console.log(`[TheiaAgent] AGENT_TAB_SWITCH emitted: ${args.tab_name}`);
         break;
@@ -253,8 +250,7 @@ Selection: ${context?.activeSelection || 'None'}
           payload: {
             enable: args.enable,
             timestamp
-          },
-          timestamp
+          }
         });
         console.log(`[TheiaAgent] AGENT_DIFF_MODE emitted: ${args.enable}`);
         break;
