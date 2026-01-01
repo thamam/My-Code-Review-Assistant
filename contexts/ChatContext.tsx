@@ -1,13 +1,14 @@
 /**
- * src/contexts/ChatContext.tsx
+ * contexts/ChatContext.tsx
  * The Dumb Terminal: Renders state and emits events.
+ * Phase 10.3: The Hands - Executes Agent commands via EventBus.
  * No LLM logic allowed.
  */
 
-import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect, useRef, useCallback } from 'react';
 import { ChatMessage } from '../types';
 import { usePR } from './PRContext';
-// NEW IMPORTS
+// Event-Driven Architecture imports
 import { eventBus } from '../src/modules/core/EventBus';
 import { agent } from '../src/modules/core/Agent'; // Force instantiation
 
@@ -38,7 +39,14 @@ interface ChatContextType {
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
 export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { prData } = usePR(); // We still need PR data to pass to the agent
+  // Inject dependencies from PRContext (The Hands)
+  const {
+    prData,
+    navigateToCode,
+    setLeftTab,
+    setIsDiffMode
+  } = usePR();
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [currentModel, setModel] = useState('gemini-2.0-flash-exp');
@@ -54,28 +62,56 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // --- NERVOUS SYSTEM CONNECTION ---
   useEffect(() => {
-    // Subscribe to Agent Actions
-    const unsubscribe = eventBus.subscribe((event) => {
+    console.log('[ChatContext] Subscribing to Agent events (The Hands)...');
+
+    // Subscribe to all Agent Actions via wildcard
+    const unsubscribe = eventBus.subscribe('*', (envelope) => {
+      const event = envelope.event; // Extract event from envelope
 
       // 1. Agent Speaks (Output)
       if (event.type === 'AGENT_SPEAK') {
         const msg: ChatMessage = {
-          id: `ai-${event.timestamp}`,
+          id: `ai-${envelope.timestamp}`,
           role: 'assistant',
           content: event.payload.text,
-          timestamp: event.timestamp
+          timestamp: envelope.timestamp
         };
-        addLocalMessage(msg);
+        setMessages(prev => [...prev, msg]);
       }
 
       // 2. Agent Thinking (Status)
       if (event.type === 'AGENT_THINKING') {
-        setIsTyping(event.payload.status !== 'idle');
+        setIsTyping(event.payload.stage !== 'completed');
+      }
+
+      // 3. Agent Navigate (The Hands - Navigation)
+      if (event.type === 'AGENT_NAVIGATE') {
+        const { target, reason } = event.payload;
+        console.log(`[ChatContext] AGENT_NAVIGATE received: ${target.file}:${target.line} - ${reason}`);
+        navigateToCode({
+          filepath: target.file,
+          line: target.line,
+          source: 'search'
+        });
+      }
+
+      // 4. Agent Tab Switch (The Hands - Tab Control)
+      if (event.type === 'AGENT_TAB_SWITCH') {
+        const { tab } = event.payload;
+        console.log(`[ChatContext] AGENT_TAB_SWITCH received: ${tab}`);
+        setLeftTab(tab);
+      }
+
+      // 5. Agent Diff Mode (The Hands - Diff Toggle)
+      if (event.type === 'AGENT_DIFF_MODE') {
+        const { enable } = event.payload;
+        console.log(`[ChatContext] AGENT_DIFF_MODE received: ${enable}`);
+        setIsDiffMode(enable);
       }
     });
 
     return unsubscribe;
-  }, []);
+  }, [navigateToCode, setLeftTab, setIsDiffMode]);
 
   // --- ACTIONS ---
 
@@ -87,7 +123,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       content: text,
       timestamp: Date.now()
     };
-    addLocalMessage(userMsg);
+    setMessages(prev => [...prev, userMsg]);
 
     // 2. Emit Signal to Brain
     console.log('[ChatContext] Emitting USER_MESSAGE to EventBus');
@@ -102,11 +138,11 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
   };
 
-  const addLocalMessage = (message: ChatMessage) => {
+  const addLocalMessage = useCallback((message: ChatMessage) => {
     setMessages(prev => [...prev, message]);
-  };
+  }, []);
 
-  const upsertMessage = (message: ChatMessage) => {
+  const upsertMessage = useCallback((message: ChatMessage) => {
     setMessages(prev => {
       const idx = prev.findIndex(m => m.id === message.id);
       if (idx >= 0) {
@@ -116,18 +152,50 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
       return [...prev, message];
     });
-  };
+  }, []);
 
-  const updateUserContext = (updates: Partial<UserContextState>) => {
+  const updateUserContext = useCallback((updates: Partial<UserContextState>) => {
     userContextRef.current = { ...userContextRef.current, ...updates };
-  };
+  }, []);
 
-  // Boilerplate...
-  const resetChat = () => setMessages([]);
-  const exportSessionLogs = () => {}; // Todo
+  const resetChat = useCallback(() => {
+    setMessages([]);
+  }, []);
+
+  const exportSessionLogs = useCallback(() => {
+    const sessionData = {
+      timestamp: new Date().toISOString(),
+      pr: prData?.title || 'Unknown',
+      messages: messages,
+      context: userContextRef.current
+    };
+
+    const blob = new Blob([JSON.stringify(sessionData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `theia-session-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [prData, messages]);
 
   return (
-    <ChatContext.Provider value={{ messages, sendMessage, addLocalMessage, upsertMessage, isTyping, resetChat, currentModel, setModel, language, setLanguage, updateUserContext, exportSessionLogs }}>
+    <ChatContext.Provider value={{
+      messages,
+      sendMessage,
+      addLocalMessage,
+      upsertMessage,
+      isTyping,
+      resetChat,
+      currentModel,
+      setModel,
+      language,
+      setLanguage,
+      updateUserContext,
+      exportSessionLogs
+    }}>
       {children}
     </ChatContext.Provider>
   );

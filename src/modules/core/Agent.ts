@@ -1,13 +1,12 @@
 /**
  * src/modules/core/Agent.ts
  * The Control Plane: LangGraph State Machine.
- * Replaces the ad-hoc logic in ChatContext.
+ * Phase 10.3: Tool Loop Enabled - The Hands.
  */
 
 import { StateGraph, END } from "@langchain/langgraph";
 import { GoogleGenAI, ChatSession, FunctionDeclaration, Type } from "@google/genai";
 import { eventBus } from "./EventBus";
-import { UserIntent } from "./types";
 
 // --- Types ---
 
@@ -17,16 +16,16 @@ interface AgentState {
   prData: any;  // PR metadata
 }
 
-// --- Tools Definition (Moved from ChatContext) ---
+// --- Tools Definition (The Hands) ---
 const uiTools: FunctionDeclaration[] = [
   {
     name: "navigate_to_code",
-    description: "Navigate to a specific file and line number.",
+    description: "Navigate to a specific file and line number in the code viewer.",
     parameters: {
       type: Type.OBJECT,
       properties: {
-        filepath: { type: Type.STRING },
-        line: { type: Type.NUMBER }
+        filepath: { type: Type.STRING, description: "The file path to navigate to" },
+        line: { type: Type.NUMBER, description: "The line number to jump to" }
       },
       required: ["filepath"]
     }
@@ -40,6 +39,17 @@ const uiTools: FunctionDeclaration[] = [
         tab_name: { type: Type.STRING, enum: ["files", "annotations", "issue", "diagrams"] }
       },
       required: ["tab_name"]
+    }
+  },
+  {
+    name: "toggle_diff_mode",
+    description: "Enable or disable diff mode to show/hide code changes.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        enable: { type: Type.BOOLEAN, description: "True to show diff, false to hide" }
+      },
+      required: ["enable"]
     }
   }
 ];
@@ -76,6 +86,8 @@ class TheiaAgent {
         await this.process(text, context, prData);
       }
     });
+
+    console.log('[TheiaAgent] Initialized with Tool Loop. Hands connected.');
   }
 
   /**
@@ -83,7 +95,10 @@ class TheiaAgent {
    */
   private async process(input: string, context: any, prData: any) {
     // Emit "Thinking" Signal
-    eventBus.emit({ type: 'AGENT_THINKING', payload: { status: 'Analyzing...' }, timestamp: Date.now() });
+    eventBus.emit({
+      type: 'AGENT_THINKING',
+      payload: { stage: 'started', message: 'Analyzing...', timestamp: Date.now() }
+    });
 
     try {
       // Execute Graph
@@ -96,15 +111,18 @@ class TheiaAgent {
       console.error("[Agent] Graph Execution Failed:", error);
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: `System Error: ${error.message}` },
-        timestamp: Date.now()
+        payload: { text: `System Error: ${error.message}` }
+      });
+      eventBus.emit({
+        type: 'AGENT_THINKING',
+        payload: { stage: 'completed', timestamp: Date.now() }
       });
     }
   }
 
   /**
-   * Node: Reasoning (The "Brain")
-   * Replicates the exact logic previously in ChatContext
+   * Node: Reasoning (The "Brain" with Hands)
+   * Now handles functionCall -> functionResponse loop
    */
   private async reasoningNode(state: AgentState) {
     const { context, prData } = state;
@@ -124,36 +142,136 @@ class TheiaAgent {
     // Context Injection (Hidden)
     const contextSuffix = `
 [SYSTEM INJECTION]
-User View: ${context.activeFile || 'None'}
-Tab: ${context.activeTab}
-Selection: ${context.activeSelection || 'None'}
+User View: ${context?.activeFile || 'None'}
+Tab: ${context?.activeTab || 'files'}
+Selection: ${context?.activeSelection || 'None'}
 `;
 
-    const response = await this.chatSession.sendMessage(userMsg.content + contextSuffix);
-    const text = response.response.text(); // Simplify for this iteration
+    let response = await this.chatSession.sendMessage(userMsg.content + contextSuffix);
+
+    // =========================================================================
+    // TOOL LOOP: Execute until we get a text response
+    // =========================================================================
+    let maxIterations = 10; // Safety limit
+    let iteration = 0;
+
+    while (iteration < maxIterations) {
+      iteration++;
+      // Access functionCalls via response.response.functionCalls()
+      const functionCalls = response.response.functionCalls();
+
+      if (!functionCalls || functionCalls.length === 0) {
+        // No function calls - we have a text response, break the loop
+        break;
+      }
+
+      console.log(`[TheiaAgent] Tool Loop Iteration ${iteration}: ${functionCalls.length} function call(s)`);
+
+      // Process each function call and emit corresponding events
+      // Build function response parts array
+      const functionResponseParts: Array<{ functionResponse: { name: string; response: { result: string } } }> = [];
+
+      for (const fc of functionCalls) {
+        console.log(`[TheiaAgent] Executing tool: ${fc.name}`, fc.args);
+
+        // Emit the corresponding event based on function name
+        this.executeTool(fc.name, fc.args);
+
+        // Build function response part
+        functionResponseParts.push({
+          functionResponse: {
+            name: fc.name,
+            response: { result: 'OK' }
+          }
+        });
+      }
+
+      // Send function responses back to Gemini as array of Part objects
+      response = await this.chatSession.sendMessage(functionResponseParts);
+    }
+
+    // Extract final text response via response.response.text()
+    const text = response.response.text() || '';
 
     // Emit "Speak" Signal (Action)
-    eventBus.emit({
-      type: 'AGENT_SPEAK',
-      payload: { text },
-      timestamp: Date.now()
-    });
+    if (text) {
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text }
+      });
+    }
 
-    // Emit "Idle" Signal
+    // Emit "Completed" Signal
     eventBus.emit({
       type: 'AGENT_THINKING',
-      payload: { status: 'idle' },
-      timestamp: Date.now()
+      payload: { stage: 'completed', timestamp: Date.now() }
     });
 
     return { messages: [{ role: 'assistant', content: text }] };
   }
 
+  /**
+   * Execute a tool by emitting the corresponding event
+   */
+  private executeTool(name: string, args: any): void {
+    const timestamp = Date.now();
+
+    switch (name) {
+      case 'navigate_to_code':
+        eventBus.emit({
+          type: 'AGENT_NAVIGATE',
+          payload: {
+            target: {
+              file: args.filepath,
+              line: args.line || 1
+            },
+            reason: 'Tool execution',
+            highlight: true,
+            timestamp
+          }
+        });
+        console.log(`[TheiaAgent] AGENT_NAVIGATE emitted: ${args.filepath}:${args.line || 1}`);
+        break;
+
+      case 'change_tab':
+        eventBus.emit({
+          type: 'AGENT_TAB_SWITCH',
+          payload: {
+            tab: args.tab_name,
+            timestamp
+          }
+        });
+        console.log(`[TheiaAgent] AGENT_TAB_SWITCH emitted: ${args.tab_name}`);
+        break;
+
+      case 'toggle_diff_mode':
+        eventBus.emit({
+          type: 'AGENT_DIFF_MODE',
+          payload: {
+            enable: args.enable,
+            timestamp
+          }
+        });
+        console.log(`[TheiaAgent] AGENT_DIFF_MODE emitted: ${args.enable}`);
+        break;
+
+      default:
+        console.warn(`[TheiaAgent] Unknown tool: ${name}`);
+    }
+  }
+
   private buildSystemPrompt(context: any, prData: any): string {
-    return `You are Theia, a Senior Staff Software Engineer.
+    return `You are Theia, a Senior Staff Software Engineer reviewing code.
 PR: "${prData?.title || 'Unknown'}"
-Be direct. Use tools proactively.
-Current File: ${context?.activeFile || 'None'}`;
+Author: ${prData?.author || 'Unknown'}
+
+Be direct and professional. Use tools proactively to navigate and demonstrate.
+When discussing specific code, use navigate_to_code to show the user.
+When switching context, use change_tab.
+Use toggle_diff_mode to show or hide changes.
+
+Current File: ${context?.activeFile || 'None'}
+Current Tab: ${context?.activeTab || 'files'}`;
   }
 }
 

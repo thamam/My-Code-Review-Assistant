@@ -100,7 +100,28 @@ export interface AgentThinkingEvent {
     };
 }
 
-export type AgentAction = AgentSpeakEvent | AgentNavigateEvent | AgentThinkingEvent;
+export interface AgentTabSwitchEvent {
+    type: 'AGENT_TAB_SWITCH';
+    payload: {
+        tab: 'files' | 'annotations' | 'issue' | 'diagrams';
+        timestamp: number;
+    };
+}
+
+export interface AgentDiffModeEvent {
+    type: 'AGENT_DIFF_MODE';
+    payload: {
+        enable: boolean;
+        timestamp: number;
+    };
+}
+
+export type AgentAction =
+    | AgentSpeakEvent
+    | AgentNavigateEvent
+    | AgentThinkingEvent
+    | AgentTabSwitchEvent
+    | AgentDiffModeEvent;
 
 // ============================================================================
 // UNIFIED EVENT TYPE
@@ -114,7 +135,7 @@ export function isUserIntent(event: TheiaEvent): event is UserIntent {
 }
 
 export function isAgentAction(event: TheiaEvent): event is AgentAction {
-    return ['AGENT_SPEAK', 'AGENT_NAVIGATE', 'AGENT_THINKING'].includes(event.type);
+    return ['AGENT_SPEAK', 'AGENT_NAVIGATE', 'AGENT_THINKING', 'AGENT_TAB_SWITCH', 'AGENT_DIFF_MODE'].includes(event.type);
 }
 
 // ============================================================================
