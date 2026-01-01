@@ -64,16 +64,17 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     console.log('[ChatContext] Subscribing to Agent events (The Hands)...');
 
-    // Subscribe to Agent Actions
-    const unsubscribe = eventBus.subscribe((event: any) => {
+    // Subscribe to all Agent Actions via wildcard
+    const unsubscribe = eventBus.subscribe('*', (envelope) => {
+      const event = envelope.event; // Extract event from envelope
 
       // 1. Agent Speaks (Output)
       if (event.type === 'AGENT_SPEAK') {
         const msg: ChatMessage = {
-          id: `ai-${event.timestamp || Date.now()}`,
+          id: `ai-${envelope.timestamp}`,
           role: 'assistant',
           content: event.payload.text,
-          timestamp: event.timestamp || Date.now()
+          timestamp: envelope.timestamp
         };
         setMessages(prev => [...prev, msg]);
       }

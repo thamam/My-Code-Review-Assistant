@@ -156,7 +156,8 @@ Selection: ${context?.activeSelection || 'None'}
 
     while (iteration < maxIterations) {
       iteration++;
-      const functionCalls = response.functionCalls;
+      // Access functionCalls via response.response.functionCalls()
+      const functionCalls = response.response.functionCalls();
 
       if (!functionCalls || functionCalls.length === 0) {
         // No function calls - we have a text response, break the loop
@@ -166,7 +167,8 @@ Selection: ${context?.activeSelection || 'None'}
       console.log(`[TheiaAgent] Tool Loop Iteration ${iteration}: ${functionCalls.length} function call(s)`);
 
       // Process each function call and emit corresponding events
-      const functionResponses: Array<{ name: string; response: { result: string } }> = [];
+      // Build function response parts array
+      const functionResponseParts: Array<{ functionResponse: { name: string; response: { result: string } } }> = [];
 
       for (const fc of functionCalls) {
         console.log(`[TheiaAgent] Executing tool: ${fc.name}`, fc.args);
@@ -174,21 +176,21 @@ Selection: ${context?.activeSelection || 'None'}
         // Emit the corresponding event based on function name
         this.executeTool(fc.name, fc.args);
 
-        // Build function response (synchronous acknowledgment)
-        functionResponses.push({
-          name: fc.name,
-          response: { result: 'OK' }
+        // Build function response part
+        functionResponseParts.push({
+          functionResponse: {
+            name: fc.name,
+            response: { result: 'OK' }
+          }
         });
       }
 
-      // Send function responses back to Gemini
-      response = await this.chatSession.sendMessage({
-        functionResponse: functionResponses
-      } as any);
+      // Send function responses back to Gemini as array of Part objects
+      response = await this.chatSession.sendMessage(functionResponseParts);
     }
 
-    // Extract final text response
-    const text = response.text || '';
+    // Extract final text response via response.response.text()
+    const text = response.response.text() || '';
 
     // Emit "Speak" Signal (Action)
     if (text) {
