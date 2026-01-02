@@ -94,6 +94,18 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
   useEffect(() => { isCodeViewerReadyRef.current = isCodeViewerReady; }, [isCodeViewerReady]);
 
+  // Expose PR State for test verification (Phase 10.4 Smoke Test Hook)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).__THEIA_PR_STATE__ = {
+        isDiffMode,
+        leftTab,
+        selectedFile: selectedFile?.path || null,
+        isCodeViewerReady
+      };
+    }
+  }, [isDiffMode, leftTab, selectedFile, isCodeViewerReady]);
+
   const selectFile = (file: FileChange) => {
     setSelectedFile(file);
     setViewportState({ file: file.path, startLine: 0, endLine: 0 });

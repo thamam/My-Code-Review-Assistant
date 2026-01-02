@@ -64,6 +64,11 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     console.log('[ChatContext] Subscribing to Agent events (The Hands)...');
 
+    // Expose EventBus for test injection (The Smoke Test Hook)
+    if (typeof window !== 'undefined') {
+      (window as any).__THEIA_EVENT_BUS__ = eventBus;
+    }
+
     // Subscribe to all Agent Actions via wildcard
     const unsubscribe = eventBus.subscribe('*', (envelope) => {
       const event = envelope.event; // Extract event from envelope
