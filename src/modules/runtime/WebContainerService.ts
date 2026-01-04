@@ -28,7 +28,16 @@ class WebContainerService {
             await this.execute(event.payload.command, event.payload.args);
         });
 
-        console.log('[Runtime] WebContainerService ready, listening for AGENT_EXEC_CMD');
+        // Listen for file sync events from NavigationService (The Bridge)
+        eventBus.subscribe('SYSTEM_FILE_SYNC', async (envelope) => {
+            const event = envelope.event;
+            if (event.type !== 'SYSTEM_FILE_SYNC') return;
+
+            console.log('[Runtime] Received SYSTEM_FILE_SYNC event:', event.payload.path);
+            await this.mountFile(event.payload.path, event.payload.content);
+        });
+
+        console.log('[Runtime] WebContainerService ready, listening for AGENT_EXEC_CMD and SYSTEM_FILE_SYNC');
     }
 
     // ========================================================================
@@ -151,6 +160,43 @@ class WebContainerService {
     public async readFile(path: string): Promise<string> {
         if (!this.instance) throw new Error('Container not booted');
         return await this.instance.fs.readFile(path, 'utf-8');
+    }
+
+    /**
+     * Mount a single file to the container's virtual filesystem.
+     * Automatically creates parent directories as needed.
+     * This is the "receiver" side of the file sync bridge.
+     */
+    public async mountFile(path: string, content: string): Promise<void> {
+        // Ignore if not booted (files will be synced manually after boot)
+        if (!this.instance) {
+            console.log(`[Runtime] Skipping mount for ${path} - container not booted`);
+            return;
+        }
+
+        try {
+            // Parse path and create directories if needed
+            const parts = path.split('/');
+            const filename = parts.pop();
+            const dir = parts.join('/');
+
+            if (dir) {
+                await this.instance.fs.mkdir(dir, { recursive: true });
+            }
+
+            // Write the file
+            await this.instance.fs.writeFile(path, content);
+
+            // Emit visible log to terminal for debugging
+            eventBus.emit({
+                type: 'RUNTIME_OUTPUT',
+                payload: { stream: 'stdout', data: `[System] Mounted: ${path}\r\n` }
+            });
+
+            console.log(`[Runtime] Mounted file: ${path} (${content.length} bytes)`);
+        } catch (error) {
+            console.error(`[Runtime] Failed to mount file ${path}:`, error);
+        }
     }
 
     // ========================================================================

@@ -159,7 +159,15 @@ export interface RuntimeExitEvent {
     };
 }
 
-export type SystemEvent = RuntimeOutputEvent | RuntimeReadyEvent | RuntimeExitEvent;
+export interface SystemFileSyncEvent {
+    type: 'SYSTEM_FILE_SYNC';
+    payload: {
+        path: string;
+        content: string;
+    };
+}
+
+export type SystemEvent = RuntimeOutputEvent | RuntimeReadyEvent | RuntimeExitEvent | SystemFileSyncEvent;
 
 // ============================================================================
 // UNIFIED EVENT TYPE
@@ -177,7 +185,7 @@ export function isAgentAction(event: TheiaEvent): event is AgentAction {
 }
 
 export function isSystemEvent(event: TheiaEvent): event is SystemEvent {
-    return ['RUNTIME_OUTPUT', 'RUNTIME_READY', 'RUNTIME_EXIT'].includes(event.type);
+    return ['RUNTIME_OUTPUT', 'RUNTIME_READY', 'RUNTIME_EXIT', 'SYSTEM_FILE_SYNC'].includes(event.type);
 }
 
 // ============================================================================
