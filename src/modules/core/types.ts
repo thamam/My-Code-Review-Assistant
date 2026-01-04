@@ -116,18 +116,56 @@ export interface AgentDiffModeEvent {
     };
 }
 
+export interface AgentExecCmdEvent {
+    type: 'AGENT_EXEC_CMD';
+    payload: {
+        command: string;
+        args: string[];
+        timestamp: number;
+    };
+}
+
 export type AgentAction =
     | AgentSpeakEvent
     | AgentNavigateEvent
     | AgentThinkingEvent
     | AgentTabSwitchEvent
-    | AgentDiffModeEvent;
+    | AgentDiffModeEvent
+    | AgentExecCmdEvent;
+
+// ============================================================================
+// SYSTEM EVENTS (Runtime / Infrastructure)
+// ============================================================================
+
+export interface RuntimeOutputEvent {
+    type: 'RUNTIME_OUTPUT';
+    payload: {
+        stream: 'stdout' | 'stderr';
+        data: string;
+    };
+}
+
+export interface RuntimeReadyEvent {
+    type: 'RUNTIME_READY';
+    payload: {
+        url: string;
+    };
+}
+
+export interface RuntimeExitEvent {
+    type: 'RUNTIME_EXIT';
+    payload: {
+        exitCode: number;
+    };
+}
+
+export type SystemEvent = RuntimeOutputEvent | RuntimeReadyEvent | RuntimeExitEvent;
 
 // ============================================================================
 // UNIFIED EVENT TYPE
 // ============================================================================
 
-export type TheiaEvent = UserIntent | AgentAction;
+export type TheiaEvent = UserIntent | AgentAction | SystemEvent;
 
 // Type guard helpers
 export function isUserIntent(event: TheiaEvent): event is UserIntent {
@@ -135,7 +173,11 @@ export function isUserIntent(event: TheiaEvent): event is UserIntent {
 }
 
 export function isAgentAction(event: TheiaEvent): event is AgentAction {
-    return ['AGENT_SPEAK', 'AGENT_NAVIGATE', 'AGENT_THINKING', 'AGENT_TAB_SWITCH', 'AGENT_DIFF_MODE'].includes(event.type);
+    return ['AGENT_SPEAK', 'AGENT_NAVIGATE', 'AGENT_THINKING', 'AGENT_TAB_SWITCH', 'AGENT_DIFF_MODE', 'AGENT_EXEC_CMD'].includes(event.type);
+}
+
+export function isSystemEvent(event: TheiaEvent): event is SystemEvent {
+    return ['RUNTIME_OUTPUT', 'RUNTIME_READY', 'RUNTIME_EXIT'].includes(event.type);
 }
 
 // ============================================================================

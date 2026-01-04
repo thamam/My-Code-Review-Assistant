@@ -10,7 +10,13 @@ import { ChatMessage } from '../types';
 import { usePR } from './PRContext';
 // Event-Driven Architecture imports
 import { eventBus } from '../src/modules/core/EventBus';
-import { agent } from '../src/modules/core/Agent'; // Force instantiation
+// TEMP: Disabled agent import - LangGraph crashes on node:async_hooks in browser
+// import { agent } from '../src/modules/core/Agent'; // Force instantiation
+import { runtime } from '../src/modules/runtime'; // Force runtime instantiation (Phase 11)
+
+// Force side-effect execution (prevent tree-shaking)
+// void agent; // TEMP: Disabled
+void runtime;
 
 export type LanguagePreference = 'English' | 'Hebrew' | 'Auto';
 

@@ -5,6 +5,9 @@
   "dependencies": {
     "@langchain/core": "^1.1.8",
     "@langchain/langgraph": "^1.0.7",
+    "@webcontainer/api": "^1.6.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "clsx": "^2.1.1",
     "date-fns": "^3.3.1",
     "diff": "^5.2.0",

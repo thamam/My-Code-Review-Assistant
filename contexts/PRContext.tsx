@@ -36,8 +36,8 @@ interface PRContextType {
   focusedLocation: FocusedLocation | null;
   scrollToLine: (file: string, line: number) => void;
   navigateToCode: (target: NavigationTarget) => Promise<boolean>;
-  setLeftTab: (tab: 'files' | 'annotations' | 'issue' | 'diagrams') => void;
-  leftTab: 'files' | 'annotations' | 'issue' | 'diagrams';
+  setLeftTab: (tab: 'files' | 'annotations' | 'issue' | 'diagrams' | 'terminal') => void;
+  leftTab: 'files' | 'annotations' | 'issue' | 'diagrams' | 'terminal';
   isCodeViewerReady: boolean;
   setIsCodeViewerReady: (ready: boolean) => void;
   annotations: Annotation[];
@@ -74,7 +74,7 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [walkthrough, setWalkthrough] = useState<Walkthrough | null>(null);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const [isDiffMode, setIsDiffMode] = useState(true);
-  const [leftTab, setLeftTab] = useState<'files' | 'annotations' | 'issue' | 'diagrams'>('files');
+  const [leftTab, setLeftTab] = useState<'files' | 'annotations' | 'issue' | 'diagrams' | 'terminal'>('files');
   const [isCodeViewerReady, setIsCodeViewerReady] = useState(false);
   const [viewportState, setViewportState] = useState<ViewportState>({ file: null, startLine: 0, endLine: 0 });
   const [selectionState, setSelectionState] = useState<SelectionState | null>(null);

@@ -15,7 +15,8 @@ import { LinearPanel } from './components/LinearPanel';
 import { SpecPanel } from './components/Specs/SpecPanel';
 import { DiagramPanel } from './components/Diagrams/DiagramPanel';
 import { DiagramViewer } from './components/Diagrams/DiagramViewer';
-import { Layout, MessageSquare, ArrowLeft, Mic, Loader2, BookMarked, FolderTree, RotateCcw, Link, Pause, FileUp, Target, Workflow, Eye, BrainCircuit, FileText } from 'lucide-react';
+import { RuntimePanel } from './components/RuntimePanel';
+import { Layout, MessageSquare, ArrowLeft, Mic, Loader2, BookMarked, FolderTree, RotateCcw, Link, Pause, FileUp, Target, Workflow, Eye, BrainCircuit, FileText, Terminal } from 'lucide-react';
 import clsx from 'clsx';
 import { parseWalkthroughFile } from './services/walkthroughParser';
 
@@ -276,12 +277,14 @@ const MainLayout = () => {
                             <button onClick={() => setLeftTab('annotations')} className={clsx("flex-1 py-2 text-xs flex items-center justify-center transition-colors", leftTab === 'annotations' ? "text-amber-400 border-b-2 border-amber-400" : "text-gray-500 hover:text-gray-300")} title="Annotations"><BookMarked size={14} /></button>
                             <button onClick={() => setLeftTab('issue')} className={clsx("flex-1 py-2 text-xs flex items-center justify-center transition-colors", leftTab === 'issue' ? "text-amber-400 border-b-2 border-amber-400" : "text-gray-500 hover:text-gray-300")} title="Specs"><FileText size={14} /></button>
                             <button onClick={() => setLeftTab('diagrams')} className={clsx("flex-1 py-2 text-xs flex items-center justify-center transition-colors", leftTab === 'diagrams' ? "text-amber-400 border-b-2 border-amber-400" : "text-gray-500 hover:text-gray-300")} title="Diagrams"><Workflow size={14} /></button>
+                            <button onClick={() => setLeftTab('terminal')} className={clsx("flex-1 py-2 text-xs flex items-center justify-center transition-colors", leftTab === 'terminal' ? "text-green-400 border-b-2 border-green-400" : "text-gray-500 hover:text-gray-300")} title="Terminal"><Terminal size={14} /></button>
                         </div>
                         <div className="w-full flex-1 overflow-hidden">
                             {leftTab === 'files' && <FileTree />}
                             {leftTab === 'annotations' && <AnnotationList />}
                             {leftTab === 'issue' && <SpecPanel onLinkLinear={() => setShowLinearModal(true)} />}
                             {leftTab === 'diagrams' && <DiagramPanel />}
+                            {leftTab === 'terminal' && <RuntimePanel />}
                         </div>
                         <div onMouseDown={startResizingTree} className="absolute right-0 top-0 bottom-0 w-1 bg-gray-800 hover:bg-amber-500 cursor-col-resize z-30 transition-colors" />
                     </div>
