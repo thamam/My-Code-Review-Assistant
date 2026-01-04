@@ -4,7 +4,7 @@
  * Phase 10.3: Tool Loop Enabled - The Hands.
  */
 
-import { StateGraph, END } from "@langchain/langgraph";
+import { StateGraph, START, END } from "@langchain/langgraph";
 import { GoogleGenAI, ChatSession, FunctionDeclaration, Type } from "@google/genai";
 import { eventBus } from "./EventBus";
 
@@ -36,7 +36,7 @@ const uiTools: FunctionDeclaration[] = [
     parameters: {
       type: Type.OBJECT,
       properties: {
-        tab_name: { type: Type.STRING, enum: ["files", "annotations", "issue", "diagrams"] }
+        tab_name: { type: Type.STRING, enum: ["files", "annotations", "issue", "diagrams", "terminal"] }
       },
       required: ["tab_name"]
     }
@@ -50,6 +50,18 @@ const uiTools: FunctionDeclaration[] = [
         enable: { type: Type.BOOLEAN, description: "True to show diff, false to hide" }
       },
       required: ["enable"]
+    }
+  },
+  {
+    name: "run_terminal_command",
+    description: "Execute a shell command in the runtime terminal. Use this to run tests, install packages, check node version, or verify builds.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        command: { type: Type.STRING, description: "The command to run (e.g., 'npm', 'node', 'ls')" },
+        args: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Arguments for the command" }
+      },
+      required: ["command"]
     }
   }
 ];
@@ -73,14 +85,15 @@ class TheiaAgent {
     });
 
     graph.addNode("reasoning", this.reasoningNode.bind(this));
-    graph.addEdge("start", "reasoning");
+    graph.addEdge(START, "reasoning");
     graph.addEdge("reasoning", END);
 
     // 2. Compile
     this.workflow = graph.compile();
 
     // 3. Subscribe to Nervous System
-    eventBus.subscribe(async (event) => {
+    eventBus.subscribe('USER_MESSAGE', async (envelope) => {
+      const event = envelope.event;
       if (event.type === 'USER_MESSAGE') {
         const { text, context, prData } = event.payload;
         await this.process(text, context, prData);
@@ -128,6 +141,12 @@ class TheiaAgent {
     const { context, prData } = state;
     const userMsg = state.messages[state.messages.length - 1];
 
+    // Safety check: Ensure we have a valid message
+    if (!userMsg || !userMsg.content) {
+      console.error('[TheiaAgent] No user message found in state');
+      return { messages: [] };
+    }
+
     // Lazy Init Session
     if (!this.chatSession) {
       this.chatSession = this.ai.chats.create({
@@ -147,7 +166,14 @@ Tab: ${context?.activeTab || 'files'}
 Selection: ${context?.activeSelection || 'None'}
 `;
 
-    let response = await this.chatSession.sendMessage(userMsg.content + contextSuffix);
+    // Ensure message content is a valid non-empty string
+    const messageContent = String(userMsg.content || '').trim();
+    if (!messageContent) {
+      console.error('[TheiaAgent] Empty message content');
+      return { messages: [] };
+    }
+
+    let response = await this.chatSession.sendMessage({ message: messageContent + contextSuffix });
 
     // =========================================================================
     // TOOL LOOP: Execute until we get a text response
@@ -157,8 +183,8 @@ Selection: ${context?.activeSelection || 'None'}
 
     while (iteration < maxIterations) {
       iteration++;
-      // Access functionCalls via response.response.functionCalls()
-      const functionCalls = response.response.functionCalls();
+      // Access functionCalls - SDK uses getter property, not method
+      const functionCalls = response?.functionCalls || [];
 
       if (!functionCalls || functionCalls.length === 0) {
         // No function calls - we have a text response, break the loop
@@ -187,11 +213,11 @@ Selection: ${context?.activeSelection || 'None'}
       }
 
       // Send function responses back to Gemini as array of Part objects
-      response = await this.chatSession.sendMessage(functionResponseParts);
+      response = await this.chatSession.sendMessage({ message: functionResponseParts });
     }
 
-    // Extract final text response via response.response.text()
-    const text = response.response.text() || '';
+    // Extract final text response - SDK uses getter property
+    const text = response?.text || '';
 
     // Emit "Speak" Signal (Action)
     if (text) {
@@ -253,6 +279,18 @@ Selection: ${context?.activeSelection || 'None'}
           }
         });
         console.log(`[TheiaAgent] AGENT_DIFF_MODE emitted: ${args.enable}`);
+        break;
+
+      case 'run_terminal_command':
+        eventBus.emit({
+          type: 'AGENT_EXEC_CMD',
+          payload: {
+            command: args.command,
+            args: args.args || [],
+            timestamp
+          }
+        });
+        console.log(`[TheiaAgent] AGENT_EXEC_CMD emitted: ${args.command} ${(args.args || []).join(' ')}`);
         break;
 
       default:
