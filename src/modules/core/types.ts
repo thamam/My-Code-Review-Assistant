@@ -31,10 +31,13 @@ export interface UIContext {
 export interface UserMessageEvent {
     type: 'USER_MESSAGE';
     payload: {
-        content: string;
-        source: 'voice' | 'text';
+        content?: string;
+        text?: string; // Alias for content (backwards compat)
+        source?: 'voice' | 'text';
+        mode?: 'voice' | 'text'; // Alias for source
         context?: UIContext;
-        timestamp: number;
+        prData?: any; // PR Data snapshot
+        timestamp?: number;
     };
 }
 
@@ -68,13 +71,14 @@ export type UserIntent = UserMessageEvent | UIInteractionEvent | CodeChangeEvent
 export interface AgentSpeakEvent {
     type: 'AGENT_SPEAK';
     payload: {
-        messageId: string;
-        content: string;
-        isStreaming: boolean;
-        isFinal: boolean;
-        mode: 'tts' | 'text' | 'both';
-        priority: 'high' | 'normal' | 'low';
-        timestamp: number;
+        messageId?: string;
+        content?: string;
+        text?: string; // Alias for content (backwards compat)
+        isStreaming?: boolean;
+        isFinal?: boolean;
+        mode?: 'tts' | 'text' | 'both';
+        priority?: 'high' | 'normal' | 'low';
+        timestamp?: number;
     };
 }
 
@@ -125,13 +129,21 @@ export interface AgentExecCmdEvent {
     };
 }
 
+export interface AgentPlanCreatedEvent {
+    type: 'AGENT_PLAN_CREATED';
+    payload: {
+        plan: any; // AgentPlan from planner/types.ts
+    };
+}
+
 export type AgentAction =
     | AgentSpeakEvent
     | AgentNavigateEvent
     | AgentThinkingEvent
     | AgentTabSwitchEvent
     | AgentDiffModeEvent
-    | AgentExecCmdEvent;
+    | AgentExecCmdEvent
+    | AgentPlanCreatedEvent;
 
 // ============================================================================
 // SYSTEM EVENTS (Runtime / Infrastructure)
@@ -181,7 +193,7 @@ export function isUserIntent(event: TheiaEvent): event is UserIntent {
 }
 
 export function isAgentAction(event: TheiaEvent): event is AgentAction {
-    return ['AGENT_SPEAK', 'AGENT_NAVIGATE', 'AGENT_THINKING', 'AGENT_TAB_SWITCH', 'AGENT_DIFF_MODE', 'AGENT_EXEC_CMD'].includes(event.type);
+    return ['AGENT_SPEAK', 'AGENT_NAVIGATE', 'AGENT_THINKING', 'AGENT_TAB_SWITCH', 'AGENT_DIFF_MODE', 'AGENT_EXEC_CMD', 'AGENT_PLAN_CREATED'].includes(event.type);
 }
 
 export function isSystemEvent(event: TheiaEvent): event is SystemEvent {

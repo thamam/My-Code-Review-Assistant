@@ -1,12 +1,13 @@
 /**
  * src/modules/core/Agent.ts
  * The Control Plane: LangGraph State Machine.
- * Phase 10.3: Tool Loop Enabled - The Hands.
+ * Phase 12.2: The Planner - Deliberative Reasoning.
  */
 
 import { StateGraph, START, END } from "@langchain/langgraph";
-import { GoogleGenAI, ChatSession, FunctionDeclaration, Type } from "@google/genai";
+import { GoogleGenAI, FunctionDeclaration, Type } from "@google/genai";
 import { eventBus } from "./EventBus";
+import { AgentPlan, PlanStep } from "../planner/types";
 
 // --- Types ---
 
@@ -14,9 +15,36 @@ interface AgentState {
   messages: { role: string; content: string }[];
   context: any; // The UserContextState passed from UI
   prData: any;  // PR metadata
+  plan?: AgentPlan; // The Cortex - Deliberative Reasoning
 }
 
-// --- Tools Definition (The Hands) ---
+// --- Planner Tools (Forces Structured Output) ---
+const plannerTools: FunctionDeclaration[] = [
+  {
+    name: "submit_plan",
+    description: "Submit a step-by-step plan to achieve the user's goal.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        goal: { type: Type.STRING, description: "The high-level goal." },
+        steps: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              description: { type: Type.STRING, description: "What to do in this step." },
+              tool: { type: Type.STRING, description: "The tool to use (e.g., run_terminal_command, navigate_to_code)." }
+            },
+            required: ["description"]
+          }
+        }
+      },
+      required: ["goal", "steps"]
+    }
+  }
+];
+
+// --- Executor Tools (The Hands) ---
 const uiTools: FunctionDeclaration[] = [
   {
     name: "navigate_to_code",
@@ -66,11 +94,15 @@ const uiTools: FunctionDeclaration[] = [
   }
 ];
 
+// Combined Tools for Executor (The Full Toolset)
+const executorTools = [...uiTools];
+
 class TheiaAgent {
   private ai: GoogleGenAI;
   private model: string = 'gemini-2.0-flash-exp';
-  private chatSession: ChatSession | null = null;
+  private chatSession: any = null;
   private workflow: any;
+  private unsubscribeTemp: (() => void) | null = null;
 
   constructor() {
     this.ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
@@ -80,13 +112,28 @@ class TheiaAgent {
       channels: {
         messages: { reducer: (x: any, y: any) => x.concat(y) },
         context: { reducer: (x: any, y: any) => y }, // Latest wins
-        prData: { reducer: (x: any, y: any) => y }
+        prData: { reducer: (x: any, y: any) => y },
+        plan: { reducer: (x: any, y: any) => y || x } // Simple overwrite
       }
     });
 
-    graph.addNode("reasoning", this.reasoningNode.bind(this));
-    graph.addEdge(START, "reasoning");
-    graph.addEdge("reasoning", END);
+    // Phase 12.3: Planner -> Executor Loop
+    graph.addNode("planner", this.plannerNode.bind(this));
+    graph.addNode("executor", this.executorNode.bind(this));
+
+    // Define Edges
+    (graph as any).addEdge(START, "planner");
+    (graph as any).addEdge("planner", "executor"); // Pass plan to executor
+
+    // The Loop: Executor decides whether to repeat or finish
+    (graph as any).addConditionalEdges(
+      "executor",
+      this.routePlan.bind(this),
+      {
+        executor: "executor",
+        [END]: END
+      }
+    );
 
     // 2. Compile
     this.workflow = graph.compile();
@@ -95,12 +142,41 @@ class TheiaAgent {
     eventBus.subscribe('USER_MESSAGE', async (envelope) => {
       const event = envelope.event;
       if (event.type === 'USER_MESSAGE') {
-        const { text, context, prData } = event.payload;
-        await this.process(text, context, prData);
+        const { content, text, context, prData } = event.payload;
+        await this.process(content || text || '', context, prData);
       }
     });
 
-    console.log('[TheiaAgent] Initialized with Tool Loop. Hands connected.');
+    console.log('[TheiaAgent] Initialized with Planner + Executor Loop. Phase 12.3 Active.');
+  }
+
+  /**
+   * Conditional Edge: Route Plan
+   * Decides whether to loop back to executor or end.
+   */
+  private routePlan(state: AgentState): string {
+    const { plan } = state;
+
+    // Safety Rail (The Governor): Prevent infinite loops
+    // Hard-stop after 15 steps to prevent API credit drain
+    const MAX_STEPS = 15;
+    if (plan && plan.activeStepIndex > MAX_STEPS) {
+      console.warn(`[Governor] Max steps (${MAX_STEPS}) exceeded. Aborting to prevent runaway.`);
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text: `Safety limit reached: Maximum ${MAX_STEPS} steps exceeded. Stopping execution.` }
+      });
+      eventBus.emit({
+        type: 'AGENT_THINKING',
+        payload: { stage: 'completed', timestamp: Date.now() }
+      });
+      return END;
+    }
+
+    if (plan && plan.status === 'executing' && plan.activeStepIndex < plan.steps.length) {
+      return "executor"; // Loop back
+    }
+    return END; // Done
   }
 
   /**
@@ -134,8 +210,239 @@ class TheiaAgent {
   }
 
   /**
+   * Node: Planner (The "Architect" - Phase 12.2)
+   * Analyzes user request and creates a step-by-step plan.
+   * Does NOT execute the steps yet.
+   */
+  private async plannerNode(state: AgentState) {
+    const { context, prData } = state;
+    const userMsg = state.messages[state.messages.length - 1];
+
+    console.log('[Agent] Planning...');
+
+    // Safety check
+    if (!userMsg || !userMsg.content) {
+      console.error('[TheiaAgent] No user message found in state');
+      return { plan: undefined };
+    }
+
+    // 1. Initialize Planner Session (separate from Executor)
+    const planningSession = this.ai.chats.create({
+      model: this.model,
+      config: {
+        systemInstruction: `You are Theia's Planner (Level 5 Architect).
+Your job is to analyze the user request and break it down into atomic, executable steps.
+DO NOT execute the steps. Just plan them.
+Available Tools for the Executor: run_terminal_command, navigate_to_code, change_tab.
+Context: File: ${context?.activeFile}, Repo: ${prData?.title}`,
+        tools: [{ functionDeclarations: plannerTools }]
+      }
+    });
+
+    // 2. Ask for the Plan
+    const response = await planningSession.sendMessage({ message: userMsg.content });
+
+    // 3. Extract the Plan (Function Call)
+    const functionCalls = response?.functionCalls || [];
+    let plan: AgentPlan | undefined;
+
+    if (functionCalls.length > 0 && functionCalls[0].name === 'submit_plan') {
+      const args = functionCalls[0].args as any;
+      plan = {
+        id: `plan-${Date.now()}`,
+        goal: args.goal,
+        steps: args.steps.map((s: any, i: number): PlanStep => ({
+          id: `step-${i}`,
+          description: s.description,
+          tool: s.tool,
+          status: 'pending'
+        })),
+        activeStepIndex: 0,
+        status: 'planning',
+        generatedAt: Date.now()
+      };
+
+      // Broadcast the thought
+      eventBus.emit({
+        type: 'AGENT_PLAN_CREATED',
+        payload: { plan }
+      });
+
+      // Also Speak it (UX feedback)
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text: `I have created a plan with ${plan.steps.length} steps: ${plan.goal}` }
+      });
+
+      console.log('[Agent] Plan created:', plan);
+    } else {
+      // LLM returned text instead of a plan - fallback
+      const text = response?.text || '';
+      if (text) {
+        eventBus.emit({
+          type: 'AGENT_SPEAK',
+          payload: { text }
+        });
+      }
+    }
+
+    // Return state update with status set to 'executing' to trigger the loop
+    if (plan) {
+      plan.status = 'executing';
+    }
+    return { plan };
+  }
+
+  /**
+   * Node: Executor
+   * Takes the current step from the plan and executes it.
+   */
+  private async executorNode(state: AgentState) {
+    console.log('[Agent] Executing Step...');
+    const { plan, context, prData } = state;
+
+    // Safety check
+    if (!plan || plan.activeStepIndex >= plan.steps.length) {
+      return { plan: { ...plan, status: 'completed' } };
+    }
+
+    const currentStep = plan.steps[plan.activeStepIndex];
+
+    // 1. Verify Tool Binding (Debug)
+    console.log('[Executor] Available Tools:', executorTools.map(t => t.name));
+    if (executorTools.length === 0) {
+      console.error('[CRITICAL] Executor has no tools!');
+    }
+
+    // 2. Create Execution Session with RIGID Directive
+    const chat = this.ai.chats.create({
+      model: this.model,
+      config: {
+        systemInstruction: `You are Theia's Execution Engine.
+Your SOLE purpose is to call the function required to complete the current step.
+DO NOT provide explanations. DO NOT apologize. DO NOT chat.
+IMMEDIATELY call the tool "${currentStep.tool || 'appropriate_tool'}" with the necessary arguments.
+
+Plan Context:
+- Goal: "${plan.goal}"
+- Current Step: "${currentStep.description}"
+- Context: ${context?.activeFile}
+
+FORCE: Output a Function Call.`,
+        tools: [{ functionDeclarations: executorTools }]
+      }
+    });
+
+    // 3. Trigger the LLM with forceful message
+    const response = await chat.sendMessage({ message: "EXECUTE_NOW" });
+    const functionCalls = response?.functionCalls || [];
+    const functionCall = functionCalls[0];
+
+    let stepResult = "No tool execution needed.";
+
+    // 4. Execute Tool (if any) or handle fallback
+    if (functionCall) {
+      const { name, args } = functionCall;
+      console.log(`[Executor] Calling ${name} with`, args);
+
+      // UX: Notify user we are starting
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text: `Running: ${name}` }
+      });
+
+      // WAIT for the result (The Observer)
+      try {
+        const output = await this.executeTool(name, args);
+        stepResult = output; // Capture the real terminal output
+      } catch (err: any) {
+        stepResult = `Error: ${err.message}`;
+      }
+
+      // UX: Tell the user what we got
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text: `Step ${plan.activeStepIndex + 1}: ${stepResult}` }
+      });
+    } else {
+      // Fallback: Model returned text instead of tool call
+      const textResponse = response?.text || '';
+      console.warn('[Executor] Model returned text instead of tool:', textResponse);
+      stepResult = `Failed to execute (model chatted): ${textResponse.substring(0, 100)}`;
+    }
+
+    // 5. Analyze Result (The Judge)
+    // We look for the [Exit Code: N] signature from executeCommandAndWait
+    const exitCodeMatch = stepResult.match(/\[Exit Code: (\d+)\]/);
+    const exitCode = exitCodeMatch ? parseInt(exitCodeMatch[1], 10) : 0;
+
+    // Determine Step Status
+    const isSuccess = exitCode === 0;
+    const stepStatus: PlanStep['status'] = isSuccess ? 'completed' : 'failed';
+
+    // 6. Update the Plan
+    const newSteps = [...plan.steps];
+    newSteps[plan.activeStepIndex] = {
+      ...currentStep,
+      status: stepStatus,
+      result: stepResult
+    };
+
+    // Critical Decision: Stop or Continue?
+    let nextStatus: AgentPlan['status'] = plan.status;
+    let nextIndex = plan.activeStepIndex;
+
+    if (isSuccess) {
+      // Success: Advance pointer
+      nextIndex++;
+      // If we ran out of steps, we are done
+      if (nextIndex >= plan.steps.length) {
+        nextStatus = 'completed';
+      }
+    } else {
+      // Failure: STOP IMMEDIATELY
+      console.warn(`[Executor] Step ${plan.activeStepIndex + 1} Failed with Exit Code ${exitCode}. Stopping.`);
+      nextStatus = 'failed';
+      // We do NOT increment nextIndex, so the plan freezes at the failure point
+    }
+
+    const updatedPlan: AgentPlan = {
+      ...plan,
+      steps: newSteps,
+      activeStepIndex: nextIndex,
+      status: nextStatus
+    };
+
+    // UX: Speak the result
+    if (!isSuccess) {
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text: `Step Failed: ${stepResult}` }
+      });
+    }
+
+    // Emit completion signal when plan ends (success or failure)
+    if (updatedPlan.status === 'completed' || updatedPlan.status === 'failed') {
+      eventBus.emit({
+        type: 'AGENT_THINKING',
+        payload: { stage: 'completed', timestamp: Date.now() }
+      });
+      if (updatedPlan.status === 'completed') {
+        eventBus.emit({
+          type: 'AGENT_SPEAK',
+          payload: { text: `Plan completed: ${plan.goal}` }
+        });
+      }
+    }
+
+    // Return partial state update
+    return { plan: updatedPlan };
+  }
+
+  /**
    * Node: Reasoning (The "Brain" with Hands)
    * Now handles functionCall -> functionResponse loop
+   * NOTE: Currently disconnected in Phase 12.2 (planner -> END)
    */
   private async reasoningNode(state: AgentState) {
     const { context, prData } = state;
@@ -237,11 +544,65 @@ Selection: ${context?.activeSelection || 'None'}
   }
 
   /**
-   * Execute a tool by emitting the corresponding event
+   * Helper: Executes a runtime command and waits for the exit signal.
+   * Captures stdout/stderr into a single string.
    */
-  private executeTool(name: string, args: any): void {
+  private async executeCommandAndWait(command: string, args: string[]): Promise<string> {
+    return new Promise((resolve) => {
+      let outputBuffer = '';
+
+      // Definition of handlers
+      const onOutput = (envelope: any) => {
+        const event = envelope.event || envelope;
+        if (event.type === 'RUNTIME_OUTPUT') {
+          outputBuffer += event.payload.data;
+        }
+      };
+
+      const onExit = (envelope: any) => {
+        const event = envelope.event || envelope;
+        if (event.type === 'RUNTIME_EXIT') {
+          cleanup();
+          const exitMsg = event.payload.exitCode === 0 ? '' : `\n[Exit Code: ${event.payload.exitCode}]`;
+          resolve(outputBuffer + exitMsg);
+        }
+      };
+
+      // Cleanup to prevent memory leaks
+      const cleanup = () => {
+        this.unsubscribeTemp?.();
+      };
+
+      // Subscribe to EventBus (using wildcard to catch all events)
+      const unsubOutput = eventBus.subscribe('RUNTIME_OUTPUT', onOutput);
+      const unsubExit = eventBus.subscribe('RUNTIME_EXIT', onExit);
+
+      this.unsubscribeTemp = () => {
+        unsubOutput();
+        unsubExit();
+      };
+
+      // Trigger the Nervous System
+      eventBus.emit({
+        type: 'AGENT_EXEC_CMD',
+        payload: { command, args, timestamp: Date.now() }
+      });
+    });
+  }
+
+  /**
+   * Execute a tool by emitting the corresponding event
+   * Returns a Promise<string> for async tools like terminal commands
+   */
+  private async executeTool(name: string, args: any): Promise<string> {
     const timestamp = Date.now();
 
+    // 1. Runtime Tools (Async/Observed)
+    if (name === 'run_terminal_command') {
+      return this.executeCommandAndWait(args.command, args.args || []);
+    }
+
+    // 2. UI Tools (Sync/Fire-and-Forget)
     switch (name) {
       case 'navigate_to_code':
         eventBus.emit({
@@ -257,7 +618,7 @@ Selection: ${context?.activeSelection || 'None'}
           }
         });
         console.log(`[TheiaAgent] AGENT_NAVIGATE emitted: ${args.filepath}:${args.line || 1}`);
-        break;
+        return `Mapped to ${args.filepath}`;
 
       case 'change_tab':
         eventBus.emit({
@@ -268,7 +629,7 @@ Selection: ${context?.activeSelection || 'None'}
           }
         });
         console.log(`[TheiaAgent] AGENT_TAB_SWITCH emitted: ${args.tab_name}`);
-        break;
+        return `Switched tab to ${args.tab_name}`;
 
       case 'toggle_diff_mode':
         eventBus.emit({
@@ -279,22 +640,11 @@ Selection: ${context?.activeSelection || 'None'}
           }
         });
         console.log(`[TheiaAgent] AGENT_DIFF_MODE emitted: ${args.enable}`);
-        break;
-
-      case 'run_terminal_command':
-        eventBus.emit({
-          type: 'AGENT_EXEC_CMD',
-          payload: {
-            command: args.command,
-            args: args.args || [],
-            timestamp
-          }
-        });
-        console.log(`[TheiaAgent] AGENT_EXEC_CMD emitted: ${args.command} ${(args.args || []).join(' ')}`);
-        break;
+        return `Toggled Diff Mode`;
 
       default:
         console.warn(`[TheiaAgent] Unknown tool: ${name}`);
+        return "Unknown tool";
     }
   }
 

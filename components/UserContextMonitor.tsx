@@ -24,7 +24,9 @@ export const UserContextMonitor: React.FC = () => {
 
     // Monitor Tab Changes
     useEffect(() => {
-        updateUserContext({ activeTab: leftTab });
+        // Filter out terminal tab since UserContextState only supports the 4 main tabs
+        const validTab = leftTab === 'terminal' ? 'files' : leftTab;
+        updateUserContext({ activeTab: validTab });
     }, [leftTab, updateUserContext]);
 
     // Monitor File Changes + Director Integration

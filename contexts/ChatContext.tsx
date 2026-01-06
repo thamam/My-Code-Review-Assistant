@@ -83,7 +83,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const msg: ChatMessage = {
           id: `ai-${envelope.timestamp}`,
           role: 'assistant',
-          content: event.payload.text,
+          content: event.payload.text || event.payload.content || '',
           timestamp: envelope.timestamp
         };
         setMessages(prev => [...prev, msg]);
@@ -117,6 +117,13 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const { enable } = event.payload;
         console.log(`[ChatContext] AGENT_DIFF_MODE received: ${enable}`);
         setIsDiffMode(enable);
+      }
+
+      // 6. Agent Plan Created (Phase 12.2 - Deliberative Reasoning)
+      if (event.type === 'AGENT_PLAN_CREATED') {
+        console.log('[Plan Created]', event.payload.plan);
+        // Optional: Add system message to show plan in UI
+        // addLocalMessage({ id: `plan-${Date.now()}`, role: 'system', content: `Plan: ${event.payload.plan.goal}`, timestamp: Date.now() });
       }
     });
 
