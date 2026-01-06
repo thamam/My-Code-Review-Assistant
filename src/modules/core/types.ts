@@ -31,10 +31,13 @@ export interface UIContext {
 export interface UserMessageEvent {
     type: 'USER_MESSAGE';
     payload: {
-        content: string;
-        source: 'voice' | 'text';
+        content?: string;
+        text?: string; // Alias for content (backwards compat)
+        source?: 'voice' | 'text';
+        mode?: 'voice' | 'text'; // Alias for source
         context?: UIContext;
-        timestamp: number;
+        prData?: any; // PR Data snapshot
+        timestamp?: number;
     };
 }
 
@@ -68,13 +71,14 @@ export type UserIntent = UserMessageEvent | UIInteractionEvent | CodeChangeEvent
 export interface AgentSpeakEvent {
     type: 'AGENT_SPEAK';
     payload: {
-        messageId: string;
-        content: string;
-        isStreaming: boolean;
-        isFinal: boolean;
-        mode: 'tts' | 'text' | 'both';
-        priority: 'high' | 'normal' | 'low';
-        timestamp: number;
+        messageId?: string;
+        content?: string;
+        text?: string; // Alias for content (backwards compat)
+        isStreaming?: boolean;
+        isFinal?: boolean;
+        mode?: 'tts' | 'text' | 'both';
+        priority?: 'high' | 'normal' | 'low';
+        timestamp?: number;
     };
 }
 
@@ -100,13 +104,88 @@ export interface AgentThinkingEvent {
     };
 }
 
-export type AgentAction = AgentSpeakEvent | AgentNavigateEvent | AgentThinkingEvent;
+export interface AgentTabSwitchEvent {
+    type: 'AGENT_TAB_SWITCH';
+    payload: {
+        tab: 'files' | 'annotations' | 'issue' | 'diagrams';
+        timestamp: number;
+    };
+}
+
+export interface AgentDiffModeEvent {
+    type: 'AGENT_DIFF_MODE';
+    payload: {
+        enable: boolean;
+        timestamp: number;
+    };
+}
+
+export interface AgentExecCmdEvent {
+    type: 'AGENT_EXEC_CMD';
+    payload: {
+        command: string;
+        args: string[];
+        timestamp: number;
+    };
+}
+
+export interface AgentPlanCreatedEvent {
+    type: 'AGENT_PLAN_CREATED';
+    payload: {
+        plan: any; // AgentPlan from planner/types.ts
+    };
+}
+
+export type AgentAction =
+    | AgentSpeakEvent
+    | AgentNavigateEvent
+    | AgentThinkingEvent
+    | AgentTabSwitchEvent
+    | AgentDiffModeEvent
+    | AgentExecCmdEvent
+    | AgentPlanCreatedEvent;
+
+// ============================================================================
+// SYSTEM EVENTS (Runtime / Infrastructure)
+// ============================================================================
+
+export interface RuntimeOutputEvent {
+    type: 'RUNTIME_OUTPUT';
+    payload: {
+        stream: 'stdout' | 'stderr';
+        data: string;
+    };
+}
+
+export interface RuntimeReadyEvent {
+    type: 'RUNTIME_READY';
+    payload: {
+        url: string;
+    };
+}
+
+export interface RuntimeExitEvent {
+    type: 'RUNTIME_EXIT';
+    payload: {
+        exitCode: number;
+    };
+}
+
+export interface SystemFileSyncEvent {
+    type: 'SYSTEM_FILE_SYNC';
+    payload: {
+        path: string;
+        content: string;
+    };
+}
+
+export type SystemEvent = RuntimeOutputEvent | RuntimeReadyEvent | RuntimeExitEvent | SystemFileSyncEvent;
 
 // ============================================================================
 // UNIFIED EVENT TYPE
 // ============================================================================
 
-export type TheiaEvent = UserIntent | AgentAction;
+export type TheiaEvent = UserIntent | AgentAction | SystemEvent;
 
 // Type guard helpers
 export function isUserIntent(event: TheiaEvent): event is UserIntent {
@@ -114,7 +193,11 @@ export function isUserIntent(event: TheiaEvent): event is UserIntent {
 }
 
 export function isAgentAction(event: TheiaEvent): event is AgentAction {
-    return ['AGENT_SPEAK', 'AGENT_NAVIGATE', 'AGENT_THINKING'].includes(event.type);
+    return ['AGENT_SPEAK', 'AGENT_NAVIGATE', 'AGENT_THINKING', 'AGENT_TAB_SWITCH', 'AGENT_DIFF_MODE', 'AGENT_EXEC_CMD', 'AGENT_PLAN_CREATED'].includes(event.type);
+}
+
+export function isSystemEvent(event: TheiaEvent): event is SystemEvent {
+    return ['RUNTIME_OUTPUT', 'RUNTIME_READY', 'RUNTIME_EXIT', 'SYSTEM_FILE_SYNC'].includes(event.type);
 }
 
 // ============================================================================

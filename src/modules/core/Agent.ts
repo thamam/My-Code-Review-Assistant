@@ -1,428 +1,666 @@
 /**
  * src/modules/core/Agent.ts
- * TheiaAgent: The Brain - LangGraph StateGraph with Gemini.
- *
- * Phase 10.2: Full Neural Loop implementation.
- * - Receives USER_MESSAGE from EventBus
- * - Processes through LangGraph StateGraph
- * - Emits AGENT_SPEAK, AGENT_THINKING, AGENT_NAVIGATE
+ * The Control Plane: LangGraph State Machine.
+ * Phase 12.2: The Planner - Deliberative Reasoning.
  */
 
-import { StateGraph, END, START } from '@langchain/langgraph/web';
-import { GoogleGenAI, Chat } from '@google/genai';
-import { eventBus } from './EventBus';
-import {
-    EventEnvelope,
-    UserMessageEvent,
-    AgentSpeakEvent,
-    AgentThinkingEvent,
-    UIContext,
-    isUserIntent
-} from './types';
+import { StateGraph, START, END } from "@langchain/langgraph";
+import { GoogleGenAI, FunctionDeclaration, Type } from "@google/genai";
+import { eventBus } from "./EventBus";
+import { AgentPlan, PlanStep } from "../planner/types";
 
-// ============================================================================
-// STATE DEFINITION
-// ============================================================================
+// --- Types ---
 
 interface AgentState {
-    messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
-    context: UIContext | null;
-    currentResponse: string;
-    isComplete: boolean;
+  messages: { role: string; content: string }[];
+  context: any; // The UserContextState passed from UI
+  prData: any;  // PR metadata
+  plan?: AgentPlan; // The Cortex - Deliberative Reasoning
 }
 
-// ============================================================================
-// QUEUED MESSAGE TYPE
-// ============================================================================
+// --- Planner Tools (Forces Structured Output) ---
+const plannerTools: FunctionDeclaration[] = [
+  {
+    name: "submit_plan",
+    description: "Submit a step-by-step plan to achieve the user's goal.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        goal: { type: Type.STRING, description: "The high-level goal." },
+        steps: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              description: { type: Type.STRING, description: "What to do in this step." },
+              tool: { type: Type.STRING, description: "The tool to use (e.g., run_terminal_command, navigate_to_code)." }
+            },
+            required: ["description"]
+          }
+        }
+      },
+      required: ["goal", "steps"]
+    }
+  }
+];
 
-interface QueuedMessage {
-    event: UserMessageEvent;
-    envelope: EventEnvelope;
-}
+// --- Executor Tools (The Hands) ---
+const uiTools: FunctionDeclaration[] = [
+  {
+    name: "navigate_to_code",
+    description: "Navigate to a specific file and line number in the code viewer.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        filepath: { type: Type.STRING, description: "The file path to navigate to" },
+        line: { type: Type.NUMBER, description: "The line number to jump to" }
+      },
+      required: ["filepath"]
+    }
+  },
+  {
+    name: "change_tab",
+    description: "Switch the application sidebar tab.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        tab_name: { type: Type.STRING, enum: ["files", "annotations", "issue", "diagrams", "terminal"] }
+      },
+      required: ["tab_name"]
+    }
+  },
+  {
+    name: "toggle_diff_mode",
+    description: "Enable or disable diff mode to show/hide code changes.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        enable: { type: Type.BOOLEAN, description: "True to show diff, false to hide" }
+      },
+      required: ["enable"]
+    }
+  },
+  {
+    name: "run_terminal_command",
+    description: "Execute a shell command in the runtime terminal. Use this to run tests, install packages, check node version, or verify builds.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        command: { type: Type.STRING, description: "The command to run (e.g., 'npm', 'node', 'ls')" },
+        args: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Arguments for the command" }
+      },
+      required: ["command"]
+    }
+  }
+];
 
-// ============================================================================
-// THEIA AGENT CLASS
-// ============================================================================
+// Combined Tools for Executor (The Full Toolset)
+const executorTools = [...uiTools];
 
 class TheiaAgent {
-    private isProcessing = false;
-    private messageQueue: QueuedMessage[] = [];
-    private chatSession: Chat | null = null;
-    private ai: GoogleGenAI | null = null;
-    private currentModel = 'gemini-2.0-flash-exp';
+  private ai: GoogleGenAI;
+  private model: string = 'gemini-2.0-flash-exp';
+  private chatSession: any = null;
+  private workflow: any;
+  private unsubscribeTemp: (() => void) | null = null;
 
-    constructor() {
-        this.initializeAI();
-        this.subscribeToEvents();
-        console.log('[TheiaAgent] Initialized. Neural Loop ready.');
+  constructor() {
+    this.ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+
+    // 1. Define the Graph
+    const graph = new StateGraph<AgentState>({
+      channels: {
+        messages: { reducer: (x: any, y: any) => x.concat(y) },
+        context: { reducer: (x: any, y: any) => y }, // Latest wins
+        prData: { reducer: (x: any, y: any) => y },
+        plan: { reducer: (x: any, y: any) => y || x } // Simple overwrite
+      }
+    });
+
+    // Phase 12.3: Planner -> Executor Loop
+    graph.addNode("planner", this.plannerNode.bind(this));
+    graph.addNode("executor", this.executorNode.bind(this));
+
+    // Define Edges
+    (graph as any).addEdge(START, "planner");
+    (graph as any).addEdge("planner", "executor"); // Pass plan to executor
+
+    // The Loop: Executor decides whether to repeat or finish
+    (graph as any).addConditionalEdges(
+      "executor",
+      this.routePlan.bind(this),
+      {
+        executor: "executor",
+        [END]: END
+      }
+    );
+
+    // 2. Compile
+    this.workflow = graph.compile();
+
+    // 3. Subscribe to Nervous System
+    eventBus.subscribe('USER_MESSAGE', async (envelope) => {
+      const event = envelope.event;
+      if (event.type === 'USER_MESSAGE') {
+        const { content, text, context, prData } = event.payload;
+        await this.process(content || text || '', context, prData);
+      }
+    });
+
+    console.log('[TheiaAgent] Initialized with Planner + Executor Loop. Phase 12.3 Active.');
+  }
+
+  /**
+   * Conditional Edge: Route Plan
+   * Decides whether to loop back to executor or end.
+   */
+  private routePlan(state: AgentState): string {
+    const { plan } = state;
+
+    // Safety Rail (The Governor): Prevent infinite loops
+    // Hard-stop after 15 steps to prevent API credit drain
+    const MAX_STEPS = 15;
+    if (plan && plan.activeStepIndex > MAX_STEPS) {
+      console.warn(`[Governor] Max steps (${MAX_STEPS}) exceeded. Aborting to prevent runaway.`);
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text: `Safety limit reached: Maximum ${MAX_STEPS} steps exceeded. Stopping execution.` }
+      });
+      eventBus.emit({
+        type: 'AGENT_THINKING',
+        payload: { stage: 'completed', timestamp: Date.now() }
+      });
+      return END;
     }
 
-    // =========================================================================
-    // INITIALIZATION
-    // =========================================================================
+    if (plan && plan.status === 'executing' && plan.activeStepIndex < plan.steps.length) {
+      return "executor"; // Loop back
+    }
+    return END; // Done
+  }
 
-    private initializeAI(): void {
-        try {
-            const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-            if (!apiKey) {
-                console.error('[TheiaAgent] VITE_GEMINI_API_KEY not found');
-                return;
-            }
-            this.ai = new GoogleGenAI({ apiKey });
-            console.log('[TheiaAgent] GoogleGenAI initialized.');
-        } catch (e) {
-            console.error('[TheiaAgent] Failed to initialize GoogleGenAI:', e);
-        }
+  /**
+   * Main Entry Point
+   */
+  private async process(input: string, context: any, prData: any) {
+    // Emit "Thinking" Signal
+    eventBus.emit({
+      type: 'AGENT_THINKING',
+      payload: { stage: 'started', message: 'Analyzing...', timestamp: Date.now() }
+    });
+
+    try {
+      // Execute Graph
+      await this.workflow.invoke({
+        messages: [{ role: 'user', content: input }],
+        context,
+        prData
+      });
+    } catch (error: any) {
+      console.error("[Agent] Graph Execution Failed:", error);
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text: `System Error: ${error.message}` }
+      });
+      eventBus.emit({
+        type: 'AGENT_THINKING',
+        payload: { stage: 'completed', timestamp: Date.now() }
+      });
+    }
+  }
+
+  /**
+   * Node: Planner (The "Architect" - Phase 12.2)
+   * Analyzes user request and creates a step-by-step plan.
+   * Does NOT execute the steps yet.
+   */
+  private async plannerNode(state: AgentState) {
+    const { context, prData } = state;
+    const userMsg = state.messages[state.messages.length - 1];
+
+    console.log('[Agent] Planning...');
+
+    // Safety check
+    if (!userMsg || !userMsg.content) {
+      console.error('[TheiaAgent] No user message found in state');
+      return { plan: undefined };
     }
 
-    private subscribeToEvents(): void {
-        console.log('[TheiaAgent] Subscribing to EventBus...');
+    // 1. Initialize Planner Session (separate from Executor)
+    const planningSession = this.ai.chats.create({
+      model: this.model,
+      config: {
+        systemInstruction: `You are Theia's Planner (Level 5 Architect).
+Your job is to analyze the user request and break it down into atomic, executable steps.
+DO NOT execute the steps. Just plan them.
+Available Tools for the Executor: run_terminal_command, navigate_to_code, change_tab.
+Context: File: ${context?.activeFile}, Repo: ${prData?.title}`,
+        tools: [{ functionDeclarations: plannerTools }]
+      }
+    });
 
-        eventBus.subscribe(
-            ['USER_MESSAGE', 'UI_INTERACTION', 'CODE_CHANGE'],
-            this.handleIncomingEvent.bind(this)
-        );
+    // 2. Ask for the Plan
+    const response = await planningSession.sendMessage({ message: userMsg.content });
 
-        console.log('[TheiaAgent] Subscribed to UserIntent events.');
-    }
+    // 3. Extract the Plan (Function Call)
+    const functionCalls = response?.functionCalls || [];
+    let plan: AgentPlan | undefined;
 
-    // =========================================================================
-    // EVENT HANDLING WITH QUEUE
-    // =========================================================================
+    if (functionCalls.length > 0 && functionCalls[0].name === 'submit_plan') {
+      const args = functionCalls[0].args as any;
+      plan = {
+        id: `plan-${Date.now()}`,
+        goal: args.goal,
+        steps: args.steps.map((s: any, i: number): PlanStep => ({
+          id: `step-${i}`,
+          description: s.description,
+          tool: s.tool,
+          status: 'pending'
+        })),
+        activeStepIndex: 0,
+        status: 'planning',
+        generatedAt: Date.now()
+      };
 
-    private handleIncomingEvent(envelope: EventEnvelope): void {
-        const { event } = envelope;
-        if (!isUserIntent(event)) return;
+      // Broadcast the thought
+      eventBus.emit({
+        type: 'AGENT_PLAN_CREATED',
+        payload: { plan }
+      });
 
-        if (event.type === 'USER_MESSAGE') {
-            this.enqueueMessage(event, envelope);
-        } else {
-            // Log other events for now
-            console.log(`[TheiaAgent] ${event.type} received:`, event.payload);
-        }
-    }
+      // Also Speak it (UX feedback)
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text: `I have created a plan with ${plan.steps.length} steps: ${plan.goal}` }
+      });
 
-    private enqueueMessage(event: UserMessageEvent, envelope: EventEnvelope): void {
-        this.messageQueue.push({ event, envelope });
-        console.log(`[TheiaAgent] Message queued. Queue size: ${this.messageQueue.length}`);
-
-        // If not currently processing, start processing the queue
-        if (!this.isProcessing) {
-            this.processNextMessage();
-        }
-    }
-
-    private async processNextMessage(): Promise<void> {
-        if (this.messageQueue.length === 0) {
-            return;
-        }
-
-        const queuedMessage = this.messageQueue.shift()!;
-        this.isProcessing = true;
-
-        try {
-            await this.handleUserMessage(queuedMessage.event, queuedMessage.envelope);
-        } catch (e) {
-            console.error('[TheiaAgent] Error processing message:', e);
-            this.emitThinking('completed', 'An error occurred while processing your request.');
-        } finally {
-            this.isProcessing = false;
-            // Process next message in queue if any
-            if (this.messageQueue.length > 0) {
-                // Use setTimeout to avoid stack overflow on large queues
-                setTimeout(() => this.processNextMessage(), 0);
-            }
-        }
-    }
-
-    // =========================================================================
-    // MESSAGE PROCESSING - THE NEURAL LOOP
-    // =========================================================================
-
-    private async handleUserMessage(event: UserMessageEvent, envelope: EventEnvelope): Promise<void> {
-        const { content, context } = event.payload;
-        console.log(`[TheiaAgent] Processing USER_MESSAGE: "${content.slice(0, 50)}..."`);
-
-        // 1. Emit THINKING started
-        this.emitThinking('started', 'Processing your request...');
-
-        // 2. Build or refresh chat session with context
-        this.refreshChatSession(context);
-
-        if (!this.chatSession) {
-            console.error('[TheiaAgent] No chat session available');
-            this.emitSpeak('msg_' + Date.now(), 'I apologize, but I am not properly initialized. Please refresh the page.', true);
-            return;
-        }
-
-        // 3. Build context-enriched message
-        const enrichedMessage = this.buildEnrichedMessage(content, context);
-
-        // 4. Execute the graph (single-node for Phase 1)
-        await this.executeReasoningGraph(enrichedMessage, context);
-    }
-
-    private refreshChatSession(context: UIContext | null): void {
-        if (!this.ai) {
-            console.error('[TheiaAgent] AI not initialized');
-            return;
-        }
-
-        const systemPrompt = this.buildSystemPrompt(context);
-
-        this.chatSession = this.ai.chats.create({
-            model: this.currentModel,
-            config: {
-                systemInstruction: systemPrompt
-                // Tools disabled for Phase 1 - will re-enable in Phase 2
-            }
+      console.log('[Agent] Plan created:', plan);
+    } else {
+      // LLM returned text instead of a plan - fallback
+      const text = response?.text || '';
+      if (text) {
+        eventBus.emit({
+          type: 'AGENT_SPEAK',
+          payload: { text }
         });
+      }
     }
 
-    private buildSystemPrompt(context: UIContext | null): string {
-        const prData = context?.prData;
-        const linearIssue = context?.linearIssue;
+    // Return state update with status set to 'executing' to trigger the loop
+    if (plan) {
+      plan.status = 'executing';
+    }
+    return { plan };
+  }
 
-        const manifest = prData?.files
-            .map(f => `- ${f.path} (${f.status})`)
-            .join('\n') || 'No files loaded';
+  /**
+   * Node: Executor
+   * Takes the current step from the plan and executes it.
+   */
+  private async executorNode(state: AgentState) {
+    console.log('[Agent] Executing Step...');
+    const { plan, context, prData } = state;
 
-        let systemInstruction = `You are Theia, a **Senior Staff Software Engineer**. Be direct, not a tutor.
-Respond in the same language the user uses (primarily English or Hebrew).
+    // Safety check
+    if (!plan || plan.activeStepIndex >= plan.steps.length) {
+      return { plan: { ...plan, status: 'completed' } };
+    }
 
-## ⚠️ HARD CONSTRAINTS - VIOLATION = FAILURE
+    const currentStep = plan.steps[plan.activeStepIndex];
 
-### 1. THE PROJECT MANIFEST IS ABSOLUTE TRUTH
-The files listed below under "PROJECT MANIFEST" are the ONLY files that changed in this PR.
-- **DO NOT invent files that are not in this list.**
-- **DO NOT claim more files changed than are listed.**
-- If you mention a file, it MUST appear in the manifest below.
+    // 1. Verify Tool Binding (Debug)
+    console.log('[Executor] Available Tools:', executorTools.map(t => t.name));
+    if (executorTools.length === 0) {
+      console.error('[CRITICAL] Executor has no tools!');
+    }
 
-### 2. NO GUESSING LINE NUMBERS
-- **NEVER cite a line number unless you can see it in the "File Content" section of my message.**
-- If I haven't shown you the file content, say: "I need to open that file to see the specific lines."
-- Wrong: "Check line 44 for the bug" (when you haven't seen the file)
-- Right: "I can see at line X..." (after viewing file content)
+    // 2. Create Execution Session with RIGID Directive
+    const chat = this.ai.chats.create({
+      model: this.model,
+      config: {
+        systemInstruction: `You are Theia's Execution Engine.
+Your SOLE purpose is to call the function required to complete the current step.
+DO NOT provide explanations. DO NOT apologize. DO NOT chat.
+IMMEDIATELY call the tool "${currentStep.tool || 'appropriate_tool'}" with the necessary arguments.
 
-### 3. GROUNDED RESPONSES ONLY
-- Every claim must be backed by evidence visible in the context.
-- If you cannot see the code, acknowledge it.
+Plan Context:
+- Goal: "${plan.goal}"
+- Current Step: "${currentStep.description}"
+- Context: ${context?.activeFile}
 
-## Current Context
-- Current Tab: ${context?.activeTab || 'files'}
-- Open File: ${context?.activeFile || 'None'}
-- Selected Text: ${context?.activeSelection || 'None'}
-- Active Diagram: ${context?.activeDiagram || 'None'}
+FORCE: Output a Function Call.`,
+        tools: [{ functionDeclarations: executorTools }]
+      }
+    });
 
-## PR Information
+    // 3. Trigger the LLM with forceful message
+    const response = await chat.sendMessage({ message: "EXECUTE_NOW" });
+    const functionCalls = response?.functionCalls || [];
+    const functionCall = functionCalls[0];
+
+    let stepResult = "No tool execution needed.";
+
+    // 4. Execute Tool (if any) or handle fallback
+    if (functionCall) {
+      const { name, args } = functionCall;
+      console.log(`[Executor] Calling ${name} with`, args);
+
+      // UX: Notify user we are starting
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text: `Running: ${name}` }
+      });
+
+      // WAIT for the result (The Observer)
+      try {
+        const output = await this.executeTool(name, args);
+        stepResult = output; // Capture the real terminal output
+      } catch (err: any) {
+        stepResult = `Error: ${err.message}`;
+      }
+
+      // UX: Tell the user what we got
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text: `Step ${plan.activeStepIndex + 1}: ${stepResult}` }
+      });
+    } else {
+      // Fallback: Model returned text instead of tool call
+      const textResponse = response?.text || '';
+      console.warn('[Executor] Model returned text instead of tool:', textResponse);
+      stepResult = `Failed to execute (model chatted): ${textResponse.substring(0, 100)}`;
+    }
+
+    // 5. Analyze Result (The Judge)
+    // We look for the [Exit Code: N] signature from executeCommandAndWait
+    const exitCodeMatch = stepResult.match(/\[Exit Code: (\d+)\]/);
+    const exitCode = exitCodeMatch ? parseInt(exitCodeMatch[1], 10) : 0;
+
+    // Determine Step Status
+    const isSuccess = exitCode === 0;
+    const stepStatus: PlanStep['status'] = isSuccess ? 'completed' : 'failed';
+
+    // 6. Update the Plan
+    const newSteps = [...plan.steps];
+    newSteps[plan.activeStepIndex] = {
+      ...currentStep,
+      status: stepStatus,
+      result: stepResult
+    };
+
+    // Critical Decision: Stop or Continue?
+    let nextStatus: AgentPlan['status'] = plan.status;
+    let nextIndex = plan.activeStepIndex;
+
+    if (isSuccess) {
+      // Success: Advance pointer
+      nextIndex++;
+      // If we ran out of steps, we are done
+      if (nextIndex >= plan.steps.length) {
+        nextStatus = 'completed';
+      }
+    } else {
+      // Failure: STOP IMMEDIATELY
+      console.warn(`[Executor] Step ${plan.activeStepIndex + 1} Failed with Exit Code ${exitCode}. Stopping.`);
+      nextStatus = 'failed';
+      // We do NOT increment nextIndex, so the plan freezes at the failure point
+    }
+
+    const updatedPlan: AgentPlan = {
+      ...plan,
+      steps: newSteps,
+      activeStepIndex: nextIndex,
+      status: nextStatus
+    };
+
+    // UX: Speak the result
+    if (!isSuccess) {
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text: `Step Failed: ${stepResult}` }
+      });
+    }
+
+    // Emit completion signal when plan ends (success or failure)
+    if (updatedPlan.status === 'completed' || updatedPlan.status === 'failed') {
+      eventBus.emit({
+        type: 'AGENT_THINKING',
+        payload: { stage: 'completed', timestamp: Date.now() }
+      });
+      if (updatedPlan.status === 'completed') {
+        eventBus.emit({
+          type: 'AGENT_SPEAK',
+          payload: { text: `Plan completed: ${plan.goal}` }
+        });
+      }
+    }
+
+    // Return partial state update
+    return { plan: updatedPlan };
+  }
+
+  /**
+   * Node: Reasoning (The "Brain" with Hands)
+   * Now handles functionCall -> functionResponse loop
+   * NOTE: Currently disconnected in Phase 12.2 (planner -> END)
+   */
+  private async reasoningNode(state: AgentState) {
+    const { context, prData } = state;
+    const userMsg = state.messages[state.messages.length - 1];
+
+    // Safety check: Ensure we have a valid message
+    if (!userMsg || !userMsg.content) {
+      console.error('[TheiaAgent] No user message found in state');
+      return { messages: [] };
+    }
+
+    // Lazy Init Session
+    if (!this.chatSession) {
+      this.chatSession = this.ai.chats.create({
+        model: this.model,
+        config: {
+          systemInstruction: this.buildSystemPrompt(context, prData),
+          tools: [{ functionDeclarations: uiTools }]
+        }
+      });
+    }
+
+    // Context Injection (Hidden)
+    const contextSuffix = `
+[SYSTEM INJECTION]
+User View: ${context?.activeFile || 'None'}
+Tab: ${context?.activeTab || 'files'}
+Selection: ${context?.activeSelection || 'None'}
+`;
+
+    // Ensure message content is a valid non-empty string
+    const messageContent = String(userMsg.content || '').trim();
+    if (!messageContent) {
+      console.error('[TheiaAgent] Empty message content');
+      return { messages: [] };
+    }
+
+    let response = await this.chatSession.sendMessage({ message: messageContent + contextSuffix });
+
+    // =========================================================================
+    // TOOL LOOP: Execute until we get a text response
+    // =========================================================================
+    let maxIterations = 10; // Safety limit
+    let iteration = 0;
+
+    while (iteration < maxIterations) {
+      iteration++;
+      // Access functionCalls - SDK uses getter property, not method
+      const functionCalls = response?.functionCalls || [];
+
+      if (!functionCalls || functionCalls.length === 0) {
+        // No function calls - we have a text response, break the loop
+        break;
+      }
+
+      console.log(`[TheiaAgent] Tool Loop Iteration ${iteration}: ${functionCalls.length} function call(s)`);
+
+      // Process each function call and emit corresponding events
+      // Build function response parts array
+      const functionResponseParts: Array<{ functionResponse: { name: string; response: { result: string } } }> = [];
+
+      for (const fc of functionCalls) {
+        console.log(`[TheiaAgent] Executing tool: ${fc.name}`, fc.args);
+
+        // Emit the corresponding event based on function name
+        this.executeTool(fc.name, fc.args);
+
+        // Build function response part
+        functionResponseParts.push({
+          functionResponse: {
+            name: fc.name,
+            response: { result: 'OK' }
+          }
+        });
+      }
+
+      // Send function responses back to Gemini as array of Part objects
+      response = await this.chatSession.sendMessage({ message: functionResponseParts });
+    }
+
+    // Extract final text response - SDK uses getter property
+    const text = response?.text || '';
+
+    // Emit "Speak" Signal (Action)
+    if (text) {
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text }
+      });
+    }
+
+    // Emit "Completed" Signal
+    eventBus.emit({
+      type: 'AGENT_THINKING',
+      payload: { stage: 'completed', timestamp: Date.now() }
+    });
+
+    return { messages: [{ role: 'assistant', content: text }] };
+  }
+
+  /**
+   * Helper: Executes a runtime command and waits for the exit signal.
+   * Captures stdout/stderr into a single string.
+   */
+  private async executeCommandAndWait(command: string, args: string[]): Promise<string> {
+    return new Promise((resolve) => {
+      let outputBuffer = '';
+
+      // Definition of handlers
+      const onOutput = (envelope: any) => {
+        const event = envelope.event || envelope;
+        if (event.type === 'RUNTIME_OUTPUT') {
+          outputBuffer += event.payload.data;
+        }
+      };
+
+      const onExit = (envelope: any) => {
+        const event = envelope.event || envelope;
+        if (event.type === 'RUNTIME_EXIT') {
+          cleanup();
+          const exitMsg = event.payload.exitCode === 0 ? '' : `\n[Exit Code: ${event.payload.exitCode}]`;
+          resolve(outputBuffer + exitMsg);
+        }
+      };
+
+      // Cleanup to prevent memory leaks
+      const cleanup = () => {
+        this.unsubscribeTemp?.();
+      };
+
+      // Subscribe to EventBus (using wildcard to catch all events)
+      const unsubOutput = eventBus.subscribe('RUNTIME_OUTPUT', onOutput);
+      const unsubExit = eventBus.subscribe('RUNTIME_EXIT', onExit);
+
+      this.unsubscribeTemp = () => {
+        unsubOutput();
+        unsubExit();
+      };
+
+      // Trigger the Nervous System
+      eventBus.emit({
+        type: 'AGENT_EXEC_CMD',
+        payload: { command, args, timestamp: Date.now() }
+      });
+    });
+  }
+
+  /**
+   * Execute a tool by emitting the corresponding event
+   * Returns a Promise<string> for async tools like terminal commands
+   */
+  private async executeTool(name: string, args: any): Promise<string> {
+    const timestamp = Date.now();
+
+    // 1. Runtime Tools (Async/Observed)
+    if (name === 'run_terminal_command') {
+      return this.executeCommandAndWait(args.command, args.args || []);
+    }
+
+    // 2. UI Tools (Sync/Fire-and-Forget)
+    switch (name) {
+      case 'navigate_to_code':
+        eventBus.emit({
+          type: 'AGENT_NAVIGATE',
+          payload: {
+            target: {
+              file: args.filepath,
+              line: args.line || 1
+            },
+            reason: 'Tool execution',
+            highlight: true,
+            timestamp
+          }
+        });
+        console.log(`[TheiaAgent] AGENT_NAVIGATE emitted: ${args.filepath}:${args.line || 1}`);
+        return `Mapped to ${args.filepath}`;
+
+      case 'change_tab':
+        eventBus.emit({
+          type: 'AGENT_TAB_SWITCH',
+          payload: {
+            tab: args.tab_name,
+            timestamp
+          }
+        });
+        console.log(`[TheiaAgent] AGENT_TAB_SWITCH emitted: ${args.tab_name}`);
+        return `Switched tab to ${args.tab_name}`;
+
+      case 'toggle_diff_mode':
+        eventBus.emit({
+          type: 'AGENT_DIFF_MODE',
+          payload: {
+            enable: args.enable,
+            timestamp
+          }
+        });
+        console.log(`[TheiaAgent] AGENT_DIFF_MODE emitted: ${args.enable}`);
+        return `Toggled Diff Mode`;
+
+      default:
+        console.warn(`[TheiaAgent] Unknown tool: ${name}`);
+        return "Unknown tool";
+    }
+  }
+
+  private buildSystemPrompt(context: any, prData: any): string {
+    return `You are Theia, a Senior Staff Software Engineer reviewing code.
 PR: "${prData?.title || 'Unknown'}"
 Author: ${prData?.author || 'Unknown'}
-Description: ${prData?.description || 'No description'}
 
-## PROJECT MANIFEST (ONLY these files changed - this is the TRUTH)
-${manifest}
-`;
+Be direct and professional. Use tools proactively to navigate and demonstrate.
+When discussing specific code, use navigate_to_code to show the user.
+When switching context, use change_tab.
+Use toggle_diff_mode to show or hide changes.
 
-        if (linearIssue) {
-            systemInstruction += `
---- LINKED LINEAR ISSUE ---
-ID: ${linearIssue.identifier}
-Title: ${linearIssue.title}
-Requirements: ${linearIssue.description}
-`;
-        }
-
-        return systemInstruction;
-    }
-
-    private buildEnrichedMessage(content: string, context: UIContext | null): string {
-        let enrichedMessage = content;
-
-        // Add file content if user is viewing a file
-        if (context?.activeFile && context?.prData?.files) {
-            const fileData = context.prData.files.find(f => f.path === context.activeFile);
-            if (fileData?.newContent) {
-                const numberedLines = fileData.newContent
-                    .split('\n')
-                    .map((line, i) => `${String(i + 1).padStart(4, ' ')} | ${line}`)
-                    .join('\n');
-
-                enrichedMessage += `
-
-[FILE CONTENT - USE THIS FOR LINE REFERENCES]
-File: ${context.activeFile}
-\`\`\`
-${numberedLines}
-\`\`\``;
-            }
-        }
-
-        // Add system context suffix
-        enrichedMessage += `
-
-[SYSTEM INJECTION - CURRENT VIEW]
-User is looking at: ${context?.activeFile || 'No file open'}
-Current Tab: ${context?.activeTab || 'files'}
-Selected Text: ${context?.activeSelection || 'None'}
-Active Diagram: ${context?.activeDiagram || 'None'}`;
-
-        return enrichedMessage;
-    }
-
-    // =========================================================================
-    // LANGGRAPH STATE MACHINE (Single Node for Phase 1)
-    // =========================================================================
-
-    private async executeReasoningGraph(message: string, context: UIContext | null): Promise<void> {
-        const messageId = 'msg_' + Date.now();
-
-        try {
-            // Create the state graph
-            const graph = new StateGraph<AgentState>({
-                channels: {
-                    messages: { default: () => [] },
-                    context: { default: () => null },
-                    currentResponse: { default: () => '' },
-                    isComplete: { default: () => false }
-                }
-            });
-
-            // Add the reasoning node
-            graph.addNode('reasoning', async (state: AgentState) => {
-                return await this.reasoningNode(state, messageId);
-            });
-
-            // Define edges
-            graph.addEdge(START, 'reasoning');
-            graph.addEdge('reasoning', END);
-
-            // Compile and execute
-            const app = graph.compile();
-
-            const initialState: AgentState = {
-                messages: [{ role: 'user', content: message }],
-                context,
-                currentResponse: '',
-                isComplete: false
-            };
-
-            // Execute the graph
-            await app.invoke(initialState);
-
-            this.emitThinking('completed');
-
-        } catch (e) {
-            console.error('[TheiaAgent] Graph execution error:', e);
-            this.emitSpeak(messageId, 'I encountered an error processing your request. Please try again.', true);
-            this.emitThinking('completed');
-        }
-    }
-
-    private async reasoningNode(state: AgentState, messageId: string): Promise<Partial<AgentState>> {
-        if (!this.chatSession) {
-            return { currentResponse: 'No chat session', isComplete: true };
-        }
-
-        this.emitThinking('processing', 'Thinking...');
-
-        const userMessage = state.messages[state.messages.length - 1]?.content || '';
-        let fullResponse = '';
-
-        try {
-            // Use streaming for real-time response
-            const responseStream = await this.chatSession.sendMessageStream({
-                message: userMessage
-            });
-
-            for await (const chunk of responseStream) {
-                if (chunk.text) {
-                    fullResponse += chunk.text;
-                    // Emit streaming update
-                    this.emitSpeak(messageId, fullResponse, false, true);
-                }
-            }
-
-            // Emit final response
-            this.emitSpeak(messageId, fullResponse, true, false);
-
-            return {
-                currentResponse: fullResponse,
-                isComplete: true,
-                messages: [...state.messages, { role: 'assistant' as const, content: fullResponse }]
-            };
-
-        } catch (e) {
-            console.error('[TheiaAgent] Reasoning node error:', e);
-            const errorMsg = 'I apologize, but I encountered an issue. Please try again.';
-            this.emitSpeak(messageId, errorMsg, true, false);
-            return { currentResponse: errorMsg, isComplete: true };
-        }
-    }
-
-    // =========================================================================
-    // EVENT EMITTERS
-    // =========================================================================
-
-    private emitThinking(
-        stage: AgentThinkingEvent['payload']['stage'],
-        message?: string
-    ): void {
-        try {
-            const event: AgentThinkingEvent = {
-                type: 'AGENT_THINKING',
-                payload: {
-                    stage,
-                    message,
-                    timestamp: Date.now()
-                }
-            };
-            eventBus.emit(event, 'agent');
-        } catch (e) {
-            console.error('[TheiaAgent] Failed to emit AGENT_THINKING:', e);
-        }
-    }
-
-    private emitSpeak(
-        messageId: string,
-        content: string,
-        isFinal: boolean,
-        isStreaming: boolean = false
-    ): void {
-        try {
-            const event: AgentSpeakEvent = {
-                type: 'AGENT_SPEAK',
-                payload: {
-                    messageId,
-                    content,
-                    isStreaming,
-                    isFinal,
-                    mode: 'text',
-                    priority: 'normal',
-                    timestamp: Date.now()
-                }
-            };
-            eventBus.emit(event, 'agent');
-        } catch (e) {
-            console.error('[TheiaAgent] Failed to emit AGENT_SPEAK:', e);
-        }
-    }
-
-    // =========================================================================
-    // PUBLIC API
-    // =========================================================================
-
-    public isBusy(): boolean {
-        return this.isProcessing;
-    }
-
-    public getQueueSize(): number {
-        return this.messageQueue.length;
-    }
-
-    public getEventHistory(count = 10): EventEnvelope[] {
-        return eventBus.getRecentEvents(count);
-    }
+Current File: ${context?.activeFile || 'None'}
+Current Tab: ${context?.activeTab || 'files'}`;
+  }
 }
 
-// Export Singleton
-export const theiaAgent = new TheiaAgent();
+export const agent = new TheiaAgent();

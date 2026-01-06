@@ -6,6 +6,7 @@
 
 import { GitHubService } from '../../../services/github';
 import { NavigationState, RepoNode, LazyFile } from './types';
+import { eventBus } from '../core/EventBus';
 
 class NavigationService {
     // Initial State
@@ -107,6 +108,12 @@ class NavigationService {
             const newMap = new Map(this.state.lazyFiles);
             newMap.set(path, lazyFile);
             this.setState({ lazyFiles: newMap });
+
+            // 5. Broadcast to Nervous System (for WebContainer sync)
+            eventBus.emit({
+                type: 'SYSTEM_FILE_SYNC',
+                payload: { path, content }
+            });
 
             console.log(`[NavigationService] Loaded ghost file: ${path}`);
             return lazyFile;
