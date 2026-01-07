@@ -16,6 +16,7 @@ interface AgentState {
   context: any; // The UserContextState passed from UI
   prData: any;  // PR metadata
   plan?: AgentPlan; // The Cortex - Deliberative Reasoning
+  lastError?: string; // Phase 13: The reason for failure (Trauma Memory)
 }
 
 // --- Planner Tools (Forces Structured Output) ---
@@ -113,7 +114,8 @@ class TheiaAgent {
         messages: { reducer: (x: any, y: any) => x.concat(y) },
         context: { reducer: (x: any, y: any) => y }, // Latest wins
         prData: { reducer: (x: any, y: any) => y },
-        plan: { reducer: (x: any, y: any) => y || x } // Simple overwrite
+        plan: { reducer: (x: any, y: any) => y || x }, // Simple overwrite
+        lastError: { reducer: (x: any, y: any) => y } // Phase 13: Overwrite with latest error
       }
     });
 
@@ -125,12 +127,13 @@ class TheiaAgent {
     (graph as any).addEdge(START, "planner");
     (graph as any).addEdge("planner", "executor"); // Pass plan to executor
 
-    // The Loop: Executor decides whether to repeat or finish
+    // The Loop: Executor decides whether to repeat, replan, or finish
     (graph as any).addConditionalEdges(
       "executor",
       this.routePlan.bind(this),
       {
         executor: "executor",
+        planner: "planner", // Phase 13.2: Self-correction path
         [END]: END
       }
     );
@@ -152,19 +155,18 @@ class TheiaAgent {
 
   /**
    * Conditional Edge: Route Plan
-   * Decides whether to loop back to executor or end.
+   * Decides whether to loop back to executor, reroute to planner for repair, or end.
+   * Phase 13.2: Self-Correction Path
    */
   private routePlan(state: AgentState): string {
     const { plan } = state;
 
     // Safety Rail (The Governor): Prevent infinite loops
-    // Hard-stop after 15 steps to prevent API credit drain
-    const MAX_STEPS = 15;
-    if (plan && plan.activeStepIndex > MAX_STEPS) {
-      console.warn(`[Governor] Max steps (${MAX_STEPS}) exceeded. Aborting to prevent runaway.`);
+    if (plan && plan.activeStepIndex > 15) {
+      console.warn('[Governor] Max steps exceeded. Aborting.');
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: `Safety limit reached: Maximum ${MAX_STEPS} steps exceeded. Stopping execution.` }
+        payload: { text: 'Safety limit reached: Maximum steps exceeded. Stopping execution.' }
       });
       eventBus.emit({
         type: 'AGENT_THINKING',
@@ -173,9 +175,18 @@ class TheiaAgent {
       return END;
     }
 
+    // NEW: Self-Correction Path
+    // If the plan failed, send it back to the Planner to fix it.
+    if (plan && plan.status === 'failed') {
+      console.log('[Governor] Failure detected. Rerouting to Planner for repair.');
+      return "planner";
+    }
+
+    // Standard Loop
     if (plan && plan.status === 'executing' && plan.activeStepIndex < plan.steps.length) {
       return "executor"; // Loop back
     }
+
     return END; // Done
   }
 
@@ -210,15 +221,15 @@ class TheiaAgent {
   }
 
   /**
-   * Node: Planner (The "Architect" - Phase 12.2)
+   * Node: Planner (The "Architect" - Phase 12.2 + Phase 13.2 Repair Mode)
    * Analyzes user request and creates a step-by-step plan.
-   * Does NOT execute the steps yet.
+   * In REPAIR MODE: Generates a fix-oriented plan based on the last error.
    */
   private async plannerNode(state: AgentState) {
-    const { context, prData } = state;
+    const { context, prData, plan, lastError } = state;
     const userMsg = state.messages[state.messages.length - 1];
 
-    console.log('[Agent] Planning...');
+    console.log('[Agent] Planner Active.');
 
     // Safety check
     if (!userMsg || !userMsg.content) {
@@ -226,30 +237,57 @@ class TheiaAgent {
       return { plan: undefined };
     }
 
-    // 1. Initialize Planner Session (separate from Executor)
+    // DETECT MODE: Standard vs. Repair
+    const isRepairMode = plan && plan.status === 'failed';
+
+    let systemInstruction = `You are Theia's Planner (Level 5 Architect).
+Your job is to analyze the user request and break it down into atomic, executable steps.
+DO NOT execute the steps. Just plan them.
+Available Tools: run_terminal_command, navigate_to_code, change_tab.
+Context: File: ${context?.activeFile}, Repo: ${prData?.title}`;
+
+    let prompt = userMsg.content;
+
+    // INJECT REPAIR CONTEXT
+    if (isRepairMode) {
+      console.log('[Planner] Entering REPAIR MODE.');
+
+      systemInstruction += `
+
+CRITICAL UPDATE: REPAIR MODE
+The previous plan FAILED.
+Failed Step: "${plan.steps[plan.activeStepIndex]?.description || 'Unknown'}"
+Error Output: "${lastError}"
+
+YOUR TASK:
+1. Analyze the error.
+2. Create a NEW plan that fixes the error and achieves the original goal.
+3. The first step of the new plan should likely be a diagnostic or a fix.`;
+
+      // Override the prompt to focus the LLM on the fix
+      prompt = `The previous plan failed with this error: ${lastError}. Please make a new plan to fix this and achieve the goal: "${plan.goal}".`;
+    }
+
+    // 1. Initialize Planner Session
     const planningSession = this.ai.chats.create({
       model: this.model,
       config: {
-        systemInstruction: `You are Theia's Planner (Level 5 Architect).
-Your job is to analyze the user request and break it down into atomic, executable steps.
-DO NOT execute the steps. Just plan them.
-Available Tools for the Executor: run_terminal_command, navigate_to_code, change_tab.
-Context: File: ${context?.activeFile}, Repo: ${prData?.title}`,
+        systemInstruction,
         tools: [{ functionDeclarations: plannerTools }]
       }
     });
 
     // 2. Ask for the Plan
-    const response = await planningSession.sendMessage({ message: userMsg.content });
+    const response = await planningSession.sendMessage({ message: prompt });
 
     // 3. Extract the Plan (Function Call)
     const functionCalls = response?.functionCalls || [];
-    let plan: AgentPlan | undefined;
+    let newPlan: AgentPlan | undefined;
 
     if (functionCalls.length > 0 && functionCalls[0].name === 'submit_plan') {
       const args = functionCalls[0].args as any;
-      plan = {
-        id: `plan-${Date.now()}`,
+      newPlan = {
+        id: `plan-${Date.now()}`, // New ID
         goal: args.goal,
         steps: args.steps.map((s: any, i: number): PlanStep => ({
           id: `step-${i}`,
@@ -257,24 +295,28 @@ Context: File: ${context?.activeFile}, Repo: ${prData?.title}`,
           tool: s.tool,
           status: 'pending'
         })),
-        activeStepIndex: 0,
-        status: 'planning',
+        activeStepIndex: 0, // Reset pointer
+        status: 'executing', // Ready to run immediately
         generatedAt: Date.now()
       };
 
       // Broadcast the thought
       eventBus.emit({
         type: 'AGENT_PLAN_CREATED',
-        payload: { plan }
+        payload: { plan: newPlan }
       });
 
-      // Also Speak it (UX feedback)
+      // UX feedback (context-aware)
+      const speakText = isRepairMode
+        ? `Plan failed. I have created a new repair plan: ${newPlan.goal}`
+        : `I have created a plan with ${newPlan.steps.length} steps: ${newPlan.goal}`;
+
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: `I have created a plan with ${plan.steps.length} steps: ${plan.goal}` }
+        payload: { text: speakText }
       });
 
-      console.log('[Agent] Plan created:', plan);
+      console.log('[Agent] Plan created:', newPlan);
     } else {
       // LLM returned text instead of a plan - fallback
       const text = response?.text || '';
@@ -286,11 +328,8 @@ Context: File: ${context?.activeFile}, Repo: ${prData?.title}`,
       }
     }
 
-    // Return state update with status set to 'executing' to trigger the loop
-    if (plan) {
-      plan.status = 'executing';
-    }
-    return { plan };
+    // Return state update (overwrite the old plan, clear error after replanning)
+    return { plan: newPlan, lastError: undefined };
   }
 
   /**
@@ -400,10 +439,24 @@ FORCE: Output a Function Call.`,
         nextStatus = 'completed';
       }
     } else {
-      // Failure: STOP IMMEDIATELY
-      console.warn(`[Executor] Step ${plan.activeStepIndex + 1} Failed with Exit Code ${exitCode}. Stopping.`);
+      // Failure: Capture the error instead of just logging
+      console.warn(`[Executor] Step ${plan.activeStepIndex + 1} Failed. Capturing error.`);
+
       nextStatus = 'failed';
       // We do NOT increment nextIndex, so the plan freezes at the failure point
+
+      // Phase 13: Return the error to state for self-correction
+      const updatedPlan: AgentPlan = {
+        ...plan,
+        steps: newSteps,
+        activeStepIndex: nextIndex,
+        status: nextStatus
+      };
+
+      return {
+        plan: updatedPlan,
+        lastError: stepResult // Pass the terminal output (which contains the error) to state
+      };
     }
 
     const updatedPlan: AgentPlan = {
