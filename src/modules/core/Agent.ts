@@ -8,6 +8,7 @@ import { StateGraph, START, END } from "@langchain/langgraph";
 import { GoogleGenAI, FunctionDeclaration, Type } from "@google/genai";
 import { eventBus } from "./EventBus";
 import { AgentPlan, PlanStep } from "../planner/types";
+import { searchService } from '../search';
 
 // --- Types ---
 
@@ -95,8 +96,36 @@ const uiTools: FunctionDeclaration[] = [
   }
 ];
 
+// --- Knowledge Tools (The Librarian - Phase 14) ---
+const knowledgeTools: FunctionDeclaration[] = [
+  // Tool 1: Surface Search (MiniSearch) - Finds files by name
+  {
+    name: "find_file",
+    description: "Find a file by its name. Use this to locate files when you know part of the filename.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        name: { type: Type.STRING, description: "The filename fragment (e.g., 'Agent', 'Service')" }
+      },
+      required: ["name"]
+    }
+  },
+  // Tool 2: Deep Search (Grep) - Searches file content
+  {
+    name: "search_text",
+    description: "Search for a text string or symbol inside ALL files. Use this to find where a class, function, or variable is defined.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        query: { type: Type.STRING, description: "The exact string to search for (e.g., 'interface AgentState', 'function run')" }
+      },
+      required: ["query"]
+    }
+  }
+];
+
 // Combined Tools for Executor (The Full Toolset)
-const executorTools = [...uiTools];
+const executorTools = [...uiTools, ...knowledgeTools];
 
 class TheiaAgent {
   private ai: GoogleGenAI;
@@ -243,7 +272,14 @@ class TheiaAgent {
     let systemInstruction = `You are Theia's Planner (Level 5 Architect).
 Your job is to analyze the user request and break it down into atomic, executable steps.
 DO NOT execute the steps. Just plan them.
-Available Tools: run_terminal_command, navigate_to_code, change_tab.
+
+Available Tools:
+- find_file: Use when you need to open a specific file (e.g., "Open the Agent class").
+- search_text: Use when you need to find a Code Symbol (e.g., "Where is AgentState defined?").
+- run_terminal_command: Use for general shell tasks (e.g., "npm install", "npm test").
+- navigate_to_code: Use to navigate to a specific file and line number.
+- change_tab: Use to switch sidebar tabs.
+
 Context: File: ${context?.activeFile}, Repo: ${prData?.title}`;
 
     let prompt = userMsg.content;
@@ -653,6 +689,53 @@ Selection: ${context?.activeSelection || 'None'}
     // 1. Runtime Tools (Async/Observed)
     if (name === 'run_terminal_command') {
       return this.executeCommandAndWait(args.command, args.args || []);
+    }
+
+    // 2. Knowledge Tools (The Librarian - Phase 14)
+
+    // Layer 1 (Surface Search): find_file -> Uses MiniSearch (UI) to find filenames
+    if (name === 'find_file') {
+      // Map 'name' arg to 'query' for searchService
+      const results = searchService.search(args.name);
+
+      if (results.length === 0) {
+        return "No files found with that name.";
+      }
+
+      return `Found files:\n` + results.map(r => `- ${r.id}`).join('\n');
+    }
+
+    // Layer 2 (Deep Search): search_text -> Uses Node.js (Runtime) to find code symbols
+    // Note: WebContainer's jsh doesn't have grep, so we use a Node.js script instead
+    if (name === 'search_text') {
+      // Escape special characters for the search query
+      const escapedQuery = args.query.replace(/['"\\]/g, '\\$&');
+
+      // Node.js one-liner that recursively searches for text in files
+      // Works in WebContainer where grep is not available
+      const nodeScript = `
+        const fs=require('fs'),path=require('path');
+        const q='${escapedQuery}';
+        function search(dir){
+          try{
+            fs.readdirSync(dir).forEach(f=>{
+              const p=path.join(dir,f);
+              try{
+                const s=fs.statSync(p);
+                if(s.isDirectory()&&!f.startsWith('.')&&f!=='node_modules')search(p);
+                else if(s.isFile()&&/\\.(ts|js|tsx|jsx|json|md)$/.test(f)){
+                  const lines=fs.readFileSync(p,'utf8').split('\\n');
+                  lines.forEach((l,i)=>{if(l.includes(q))console.log(p+':'+(i+1)+': '+l.trim())});
+                }
+              }catch(e){}
+            });
+          }catch(e){}
+        }
+        search('.');
+      `.replace(/\n/g, '');
+
+      const command = `node -e "${nodeScript}"`;
+      return this.executeCommandAndWait(command, []);
     }
 
     // 2. UI Tools (Sync/Fire-and-Forget)
