@@ -154,6 +154,14 @@ export interface AgentRequestApprovalEvent {
     };
 }
 
+// Phase 16: The Memory Palace - Session Restoration
+export interface AgentSessionRestoredEvent {
+    type: 'AGENT_SESSION_RESTORED';
+    payload: {
+        state: any; // The restored AgentState
+    };
+}
+
 export type AgentAction =
     | AgentSpeakEvent
     | AgentNavigateEvent
@@ -162,7 +170,8 @@ export type AgentAction =
     | AgentDiffModeEvent
     | AgentExecCmdEvent
     | AgentPlanCreatedEvent
-    | AgentRequestApprovalEvent;
+    | AgentRequestApprovalEvent
+    | AgentSessionRestoredEvent;
 
 // ============================================================================
 // SYSTEM EVENTS (Runtime / Infrastructure)
@@ -212,7 +221,7 @@ export function isUserIntent(event: TheiaEvent): event is UserIntent {
 }
 
 export function isAgentAction(event: TheiaEvent): event is AgentAction {
-    return ['AGENT_SPEAK', 'AGENT_NAVIGATE', 'AGENT_THINKING', 'AGENT_TAB_SWITCH', 'AGENT_DIFF_MODE', 'AGENT_EXEC_CMD', 'AGENT_PLAN_CREATED', 'AGENT_REQUEST_APPROVAL'].includes(event.type);
+    return ['AGENT_SPEAK', 'AGENT_NAVIGATE', 'AGENT_THINKING', 'AGENT_TAB_SWITCH', 'AGENT_DIFF_MODE', 'AGENT_EXEC_CMD', 'AGENT_PLAN_CREATED', 'AGENT_REQUEST_APPROVAL', 'AGENT_SESSION_RESTORED'].includes(event.type);
 }
 
 export function isSystemEvent(event: TheiaEvent): event is SystemEvent {

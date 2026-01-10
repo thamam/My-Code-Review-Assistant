@@ -9,6 +9,7 @@ import { GoogleGenAI, FunctionDeclaration, Type } from "@google/genai";
 import { eventBus } from "./EventBus";
 import { AgentPlan, PlanStep } from "../planner/types";
 import { searchService } from '../search';
+import { storageService } from '../persistence';
 
 // --- Types ---
 
@@ -19,7 +20,7 @@ export interface PendingAction {
   rationale: string; // "I need to edit this file to fix the bug..."
 }
 
-interface AgentState {
+export interface AgentState {
   messages: { role: string; content: string }[];
   context: any; // The UserContextState passed from UI
   prData: any;  // PR metadata
@@ -287,6 +288,9 @@ class TheiaAgent {
       // Phase 15.2: Capture state for resumption
       this.state = finalState;
 
+      // Phase 16: PERSIST STATE TO LOCALSTORAGE
+      storageService.saveState(this.state);
+
     } catch (error: any) {
       console.error("[Agent] Graph Execution Failed:", error);
       eventBus.emit({
@@ -400,6 +404,36 @@ class TheiaAgent {
         pendingAction: undefined,
         lastError: 'User explicitly blocked this action.'
       });
+    }
+  }
+
+  /**
+   * Phase 16.2: Load Session (The Resurrection)
+   * Attempts to restore the Agent's state from localStorage.
+   * Emits AGENT_SESSION_RESTORED to notify UI to repaint.
+   */
+  public async loadSession() {
+    console.log('[Agent] Attempting to restore session...');
+    const saved = storageService.loadState();
+
+    if (saved) {
+      // 1. Restore Internal State
+      this.state = saved as AgentState;
+
+      // 2. Notify the UI to repaint
+      // We send the whole state so the UI can populate messages, plan, and pending actions
+      eventBus.emit({
+        type: 'AGENT_SESSION_RESTORED',
+        payload: { state: this.state }
+      });
+
+      console.log(`[Agent] Session restored. ${this.state.messages?.length || 0} messages recovered.`);
+
+      // 3. Resume Pending Actions (Optional Polish)
+      // If we were paused waiting for approval, we just leave it in 'pendingAction'
+      // The UI will see it and re-render the modal automatically.
+    } else {
+      console.log('[Agent] No saved session found. Starting fresh.');
     }
   }
 
