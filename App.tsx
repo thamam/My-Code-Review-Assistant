@@ -16,6 +16,7 @@ import { SpecPanel } from './components/Specs/SpecPanel';
 import { DiagramPanel } from './components/Diagrams/DiagramPanel';
 import { DiagramViewer } from './components/Diagrams/DiagramViewer';
 import { RuntimePanel } from './components/RuntimePanel';
+import { ApprovalRequest } from './components/ApprovalRequest';
 import { Layout, MessageSquare, ArrowLeft, Mic, Loader2, BookMarked, FolderTree, RotateCcw, Link, Pause, FileUp, Target, Workflow, Eye, BrainCircuit, FileText, Terminal } from 'lucide-react';
 import clsx from 'clsx';
 import { parseWalkthroughFile } from './services/walkthroughParser';
@@ -343,6 +344,7 @@ const App = () => (
                 <LiveProvider>
                     <UserContextMonitor />
                     <MainLayout />
+                    <ApprovalRequest /> {/* Phase 15.3: The Gatekeeper UI */}
                 </LiveProvider>
             </ChatProvider>
         </PRProvider>
