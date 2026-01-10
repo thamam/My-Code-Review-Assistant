@@ -62,7 +62,16 @@ export interface CodeChangeEvent {
     };
 }
 
-export type UserIntent = UserMessageEvent | UIInteractionEvent | CodeChangeEvent;
+// Phase 15.2: Human-in-the-Loop - User approval/rejection of pending action
+export interface UserApprovalEvent {
+    type: 'USER_APPROVAL';
+    payload: {
+        approved: boolean; // true = execute, false = reject
+        timestamp?: number;
+    };
+}
+
+export type UserIntent = UserMessageEvent | UIInteractionEvent | CodeChangeEvent | UserApprovalEvent;
 
 // ============================================================================
 // OUTPUT SIGNALS (AgentAction) - Agent -> UI
@@ -136,6 +145,23 @@ export interface AgentPlanCreatedEvent {
     };
 }
 
+// Phase 15: Human-in-the-Loop - Agent requests user approval for sensitive actions
+export interface AgentRequestApprovalEvent {
+    type: 'AGENT_REQUEST_APPROVAL';
+    payload: {
+        tool: string; // The tool requiring approval (e.g., 'run_terminal_command')
+        args: Record<string, unknown>; // The arguments for the tool
+    };
+}
+
+// Phase 16: The Memory Palace - Session Restoration
+export interface AgentSessionRestoredEvent {
+    type: 'AGENT_SESSION_RESTORED';
+    payload: {
+        state: any; // The restored AgentState
+    };
+}
+
 export type AgentAction =
     | AgentSpeakEvent
     | AgentNavigateEvent
@@ -143,7 +169,9 @@ export type AgentAction =
     | AgentTabSwitchEvent
     | AgentDiffModeEvent
     | AgentExecCmdEvent
-    | AgentPlanCreatedEvent;
+    | AgentPlanCreatedEvent
+    | AgentRequestApprovalEvent
+    | AgentSessionRestoredEvent;
 
 // ============================================================================
 // SYSTEM EVENTS (Runtime / Infrastructure)
@@ -189,11 +217,11 @@ export type TheiaEvent = UserIntent | AgentAction | SystemEvent;
 
 // Type guard helpers
 export function isUserIntent(event: TheiaEvent): event is UserIntent {
-    return ['USER_MESSAGE', 'UI_INTERACTION', 'CODE_CHANGE'].includes(event.type);
+    return ['USER_MESSAGE', 'UI_INTERACTION', 'CODE_CHANGE', 'USER_APPROVAL'].includes(event.type);
 }
 
 export function isAgentAction(event: TheiaEvent): event is AgentAction {
-    return ['AGENT_SPEAK', 'AGENT_NAVIGATE', 'AGENT_THINKING', 'AGENT_TAB_SWITCH', 'AGENT_DIFF_MODE', 'AGENT_EXEC_CMD', 'AGENT_PLAN_CREATED'].includes(event.type);
+    return ['AGENT_SPEAK', 'AGENT_NAVIGATE', 'AGENT_THINKING', 'AGENT_TAB_SWITCH', 'AGENT_DIFF_MODE', 'AGENT_EXEC_CMD', 'AGENT_PLAN_CREATED', 'AGENT_REQUEST_APPROVAL', 'AGENT_SESSION_RESTORED'].includes(event.type);
 }
 
 export function isSystemEvent(event: TheiaEvent): event is SystemEvent {

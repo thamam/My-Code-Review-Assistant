@@ -125,7 +125,32 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // Optional: Add system message to show plan in UI
         // addLocalMessage({ id: `plan-${Date.now()}`, role: 'system', content: `Plan: ${event.payload.plan.goal}`, timestamp: Date.now() });
       }
+
+      // 7. Phase 16.2: Session Restoration (The Resurrection)
+      if (event.type === 'AGENT_SESSION_RESTORED') {
+        const { state } = event.payload;
+        console.log('[ChatContext] Session restored from storage');
+
+        // Restore Chat History
+        if (state.messages && state.messages.length > 0) {
+          // Convert AgentState messages { role, content } to ChatMessage format
+          const restoredMessages: ChatMessage[] = state.messages.map((msg: any, i: number) => ({
+            id: `restored-${i}-${Date.now()}`,
+            role: msg.role === 'user' ? 'user' : 'assistant',
+            content: msg.content,
+            timestamp: Date.now()
+          }));
+          setMessages(restoredMessages);
+        }
+
+        // Note: Plan restoration is handled separately if PlanContext exists
+        // The pendingAction will automatically re-trigger the approval modal
+        // because the Agent's internal state already has it.
+      }
     });
+
+    // Phase 16.2: Trigger Session Restoration on Mount
+    agent.loadSession();
 
     return unsubscribe;
   }, [navigateToCode, setLeftTab, setIsDiffMode]);

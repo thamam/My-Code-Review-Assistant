@@ -7,6 +7,7 @@
 import { GitHubService } from '../../../services/github';
 import { NavigationState, RepoNode, LazyFile } from './types';
 import { eventBus } from '../core/EventBus';
+import { searchService } from '../search';
 
 class NavigationService {
     // Initial State
@@ -59,6 +60,16 @@ class NavigationService {
                 const tree = await this.github.fetchRepoTree(owner, repo, headSha);
                 this.setState({ repoTree: tree });
                 console.log(`[NavigationService] Loaded repo tree: ${tree.length} items`);
+
+                // Feed the Librarian (Phase 14)
+                const fileList = tree
+                    .filter((node: RepoNode) => node.type === 'blob')
+                    .map((node: RepoNode) => ({
+                        path: node.path,
+                        content: '' // Content is empty initially (Ghost Mode)
+                    }));
+                searchService.indexFiles(fileList);
+                console.log(`[NavigationService] Indexed ${fileList.length} files.`);
                 // Toggle only on success
                 this.setState({ isFullRepoMode: true });
             } catch (e) {

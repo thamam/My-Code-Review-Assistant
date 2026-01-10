@@ -1,21 +1,32 @@
 /**
  * src/modules/core/Agent.ts
  * The Control Plane: LangGraph State Machine.
- * Phase 12.2: The Planner - Deliberative Reasoning.
+ * Phase 15: The Collaborator - Human-in-the-Loop.
  */
 
 import { StateGraph, START, END } from "@langchain/langgraph";
 import { GoogleGenAI, FunctionDeclaration, Type } from "@google/genai";
 import { eventBus } from "./EventBus";
 import { AgentPlan, PlanStep } from "../planner/types";
+import { searchService } from '../search';
+import { storageService } from '../persistence';
 
 // --- Types ---
 
-interface AgentState {
+// Phase 15: Define the structure of an action waiting for approval
+export interface PendingAction {
+  tool: string;
+  args: any;
+  rationale: string; // "I need to edit this file to fix the bug..."
+}
+
+export interface AgentState {
   messages: { role: string; content: string }[];
   context: any; // The UserContextState passed from UI
   prData: any;  // PR metadata
   plan?: AgentPlan; // The Cortex - Deliberative Reasoning
+  lastError?: string; // Phase 13: The reason for failure (Trauma Memory)
+  pendingAction?: PendingAction; // Phase 15: The "Held" action awaiting approval
 }
 
 // --- Planner Tools (Forces Structured Output) ---
@@ -91,11 +102,54 @@ const uiTools: FunctionDeclaration[] = [
       },
       required: ["command"]
     }
+  },
+  {
+    name: "write_file",
+    description: "Create or overwrite a file with the specified content. Use this to create new files or modify existing ones.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        path: { type: Type.STRING, description: "The file path relative to the project root (e.g., 'src/test.txt')" },
+        content: { type: Type.STRING, description: "The content to write to the file" }
+      },
+      required: ["path", "content"]
+    }
+  }
+];
+
+// --- Knowledge Tools (The Librarian - Phase 14) ---
+const knowledgeTools: FunctionDeclaration[] = [
+  // Tool 1: Surface Search (MiniSearch) - Finds files by name
+  {
+    name: "find_file",
+    description: "Find a file by its name. Use this to locate files when you know part of the filename.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        name: { type: Type.STRING, description: "The filename fragment (e.g., 'Agent', 'Service')" }
+      },
+      required: ["name"]
+    }
+  },
+  // Tool 2: Deep Search (Grep) - Searches file content
+  {
+    name: "search_text",
+    description: "Search for a text string or symbol inside ALL files. Use this to find where a class, function, or variable is defined.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        query: { type: Type.STRING, description: "The exact string to search for (e.g., 'interface AgentState', 'function run')" }
+      },
+      required: ["query"]
+    }
   }
 ];
 
 // Combined Tools for Executor (The Full Toolset)
-const executorTools = [...uiTools];
+const executorTools = [...uiTools, ...knowledgeTools];
+
+// Phase 15: The Gatekeeper - Sensitive tools require human approval
+const SENSITIVE_TOOLS = ['run_terminal_command', 'write_file'];
 
 class TheiaAgent {
   private ai: GoogleGenAI;
@@ -103,6 +157,7 @@ class TheiaAgent {
   private chatSession: any = null;
   private workflow: any;
   private unsubscribeTemp: (() => void) | null = null;
+  private state: AgentState | null = null; // Phase 15.2: Persisted state for resumption
 
   constructor() {
     this.ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
@@ -113,7 +168,9 @@ class TheiaAgent {
         messages: { reducer: (x: any, y: any) => x.concat(y) },
         context: { reducer: (x: any, y: any) => y }, // Latest wins
         prData: { reducer: (x: any, y: any) => y },
-        plan: { reducer: (x: any, y: any) => y || x } // Simple overwrite
+        plan: { reducer: (x: any, y: any) => y || x }, // Simple overwrite
+        lastError: { reducer: (x: any, y: any) => y }, // Phase 13: Overwrite with latest error
+        pendingAction: { reducer: (x: any, y: any) => y } // Phase 15: Overwrite logic
       }
     });
 
@@ -125,12 +182,13 @@ class TheiaAgent {
     (graph as any).addEdge(START, "planner");
     (graph as any).addEdge("planner", "executor"); // Pass plan to executor
 
-    // The Loop: Executor decides whether to repeat or finish
+    // The Loop: Executor decides whether to repeat, replan, or finish
     (graph as any).addConditionalEdges(
       "executor",
       this.routePlan.bind(this),
       {
         executor: "executor",
+        planner: "planner", // Phase 13.2: Self-correction path
         [END]: END
       }
     );
@@ -147,24 +205,41 @@ class TheiaAgent {
       }
     });
 
-    console.log('[TheiaAgent] Initialized with Planner + Executor Loop. Phase 12.3 Active.');
+    // Phase 15.2: Subscribe to User Approval events
+    eventBus.subscribe('USER_APPROVAL', async (envelope) => {
+      const event = envelope.event;
+      if (event.type === 'USER_APPROVAL') {
+        await this.resolvePendingAction(event.payload.approved);
+      }
+    });
+
+    console.log('[TheiaAgent] Initialized with Planner + Executor Loop. Phase 15 (Collaborator) Active.');
   }
 
   /**
    * Conditional Edge: Route Plan
-   * Decides whether to loop back to executor or end.
+   * Decides whether to loop back to executor, reroute to planner for repair, or end.
+   * Phase 13.2: Self-Correction Path
    */
   private routePlan(state: AgentState): string {
-    const { plan } = state;
+    const { plan, pendingAction } = state;
+
+    // Phase 15: Pause execution if awaiting user approval
+    if (pendingAction) {
+      console.log('[Governor] Pending action awaiting approval. Pausing execution.');
+      eventBus.emit({
+        type: 'AGENT_THINKING',
+        payload: { stage: 'completed', timestamp: Date.now() }
+      });
+      return END;
+    }
 
     // Safety Rail (The Governor): Prevent infinite loops
-    // Hard-stop after 15 steps to prevent API credit drain
-    const MAX_STEPS = 15;
-    if (plan && plan.activeStepIndex > MAX_STEPS) {
-      console.warn(`[Governor] Max steps (${MAX_STEPS}) exceeded. Aborting to prevent runaway.`);
+    if (plan && plan.activeStepIndex > 15) {
+      console.warn('[Governor] Max steps exceeded. Aborting.');
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: `Safety limit reached: Maximum ${MAX_STEPS} steps exceeded. Stopping execution.` }
+        payload: { text: 'Safety limit reached: Maximum steps exceeded. Stopping execution.' }
       });
       eventBus.emit({
         type: 'AGENT_THINKING',
@@ -173,16 +248,25 @@ class TheiaAgent {
       return END;
     }
 
+    // NEW: Self-Correction Path
+    // If the plan failed, send it back to the Planner to fix it.
+    if (plan && plan.status === 'failed') {
+      console.log('[Governor] Failure detected. Rerouting to Planner for repair.');
+      return "planner";
+    }
+
+    // Standard Loop
     if (plan && plan.status === 'executing' && plan.activeStepIndex < plan.steps.length) {
       return "executor"; // Loop back
     }
+
     return END; // Done
   }
 
   /**
    * Main Entry Point
    */
-  private async process(input: string, context: any, prData: any) {
+  private async process(input: string, context: any, prData: any, stateOverrides?: Partial<AgentState>) {
     // Emit "Thinking" Signal
     eventBus.emit({
       type: 'AGENT_THINKING',
@@ -190,12 +274,23 @@ class TheiaAgent {
     });
 
     try {
-      // Execute Graph
-      await this.workflow.invoke({
+      // Build initial state (with optional overrides for resumption)
+      const initialState: AgentState = {
         messages: [{ role: 'user', content: input }],
         context,
-        prData
-      });
+        prData,
+        ...stateOverrides
+      };
+
+      // Execute Graph
+      const finalState = await this.workflow.invoke(initialState);
+
+      // Phase 15.2: Capture state for resumption
+      this.state = finalState;
+
+      // Phase 16: PERSIST STATE TO LOCALSTORAGE
+      storageService.saveState(this.state);
+
     } catch (error: any) {
       console.error("[Agent] Graph Execution Failed:", error);
       eventBus.emit({
@@ -210,15 +305,148 @@ class TheiaAgent {
   }
 
   /**
-   * Node: Planner (The "Architect" - Phase 12.2)
+   * Phase 15.2: Resolve Pending Action (Human-in-the-Loop Handshake)
+   * Called when user approves or rejects a pending sensitive action.
+   */
+  public async resolvePendingAction(approved: boolean) {
+    const state = this.state;
+    if (!state?.pendingAction || !state?.plan) {
+      console.warn('[Agent] No pending action to resolve.');
+      return;
+    }
+
+    const { plan, pendingAction, context, prData, messages } = state;
+    const lastUserMsg = messages[messages.length - 1]?.content || '';
+
+    if (approved) {
+      // === APPROVED: Execute the tool ===
+      console.log(`[Agent] Executing approved tool: ${pendingAction.tool}`);
+
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text: `Executing ${pendingAction.tool}...` }
+      });
+
+      let stepResult: string;
+      try {
+        stepResult = await this.executeTool(pendingAction.tool, pendingAction.args);
+      } catch (err: any) {
+        stepResult = `Error: ${err.message}`;
+      }
+
+      // Analyze result (replicate "The Judge" logic)
+      const exitCodeMatch = stepResult.match(/\[Exit Code: (\d+)\]/);
+      const exitCode = exitCodeMatch ? parseInt(exitCodeMatch[1], 10) : 0;
+      const isSuccess = exitCode === 0;
+
+      // Update Plan
+      const currentStep = plan.steps[plan.activeStepIndex];
+      const newSteps = [...plan.steps];
+      newSteps[plan.activeStepIndex] = {
+        ...currentStep,
+        status: isSuccess ? 'completed' : 'failed',
+        result: stepResult
+      };
+
+      const nextIndex = isSuccess ? plan.activeStepIndex + 1 : plan.activeStepIndex;
+      let nextStatus: typeof plan.status = isSuccess ? 'executing' : 'failed';
+
+      // Check if plan is complete
+      if (isSuccess && nextIndex >= plan.steps.length) {
+        nextStatus = 'completed';
+      }
+
+      const nextPlan = {
+        ...plan,
+        steps: newSteps,
+        activeStepIndex: nextIndex,
+        status: nextStatus
+      };
+
+      // UX: Report result
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text: `Step ${plan.activeStepIndex + 1}: ${stepResult.substring(0, 200)}` }
+      });
+
+      // Resume graph with updated state (clear pendingAction)
+      await this.process(lastUserMsg, context, prData, {
+        plan: nextPlan,
+        pendingAction: undefined,
+        lastError: isSuccess ? undefined : stepResult
+      });
+
+    } else {
+      // === REJECTED: Mark step as failed, route to planner ===
+      console.log('[Agent] Action Rejected by User.');
+
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text: 'Action rejected. Finding alternative approach...' }
+      });
+
+      const newSteps = [...plan.steps];
+      newSteps[plan.activeStepIndex] = {
+        ...plan.steps[plan.activeStepIndex],
+        status: 'failed',
+        result: 'User rejected the action.'
+      };
+
+      const nextPlan = {
+        ...plan,
+        steps: newSteps,
+        status: 'failed' as const
+      };
+
+      // Resume graph -> Will route to Planner (Repair Mode)
+      await this.process(lastUserMsg, context, prData, {
+        plan: nextPlan,
+        pendingAction: undefined,
+        lastError: 'User explicitly blocked this action.'
+      });
+    }
+  }
+
+  /**
+   * Phase 16.2: Load Session (The Resurrection)
+   * Attempts to restore the Agent's state from localStorage.
+   * Emits AGENT_SESSION_RESTORED to notify UI to repaint.
+   */
+  public async loadSession() {
+    console.log('[Agent] Attempting to restore session...');
+    const saved = storageService.loadState();
+
+    if (saved) {
+      // 1. Restore Internal State
+      this.state = saved as AgentState;
+
+      // 2. Notify the UI to repaint
+      // We send the whole state so the UI can populate messages, plan, and pending actions
+      eventBus.emit({
+        type: 'AGENT_SESSION_RESTORED',
+        payload: { state: this.state }
+      });
+
+      console.log(`[Agent] Session restored. ${this.state.messages?.length || 0} messages recovered.`);
+
+      // 3. Resume Pending Actions (Optional Polish)
+      // If we were paused waiting for approval, we just leave it in 'pendingAction'
+      // The UI will see it and re-render the modal automatically.
+    } else {
+      console.log('[Agent] No saved session found. Starting fresh.');
+    }
+  }
+
+  /**
+   * Node: Planner (The "Architect" - Phase 12.2 + Phase 13.2 Repair Mode)
    * Analyzes user request and creates a step-by-step plan.
-   * Does NOT execute the steps yet.
+   * In REPAIR MODE: Generates a fix-oriented plan based on the last error.
    */
   private async plannerNode(state: AgentState) {
-    const { context, prData } = state;
+    const { context, prData, plan, lastError } = state;
     const userMsg = state.messages[state.messages.length - 1];
 
-    console.log('[Agent] Planning...');
+    console.log('[Agent] Planner Active.');
 
     // Safety check
     if (!userMsg || !userMsg.content) {
@@ -226,30 +454,64 @@ class TheiaAgent {
       return { plan: undefined };
     }
 
-    // 1. Initialize Planner Session (separate from Executor)
+    // DETECT MODE: Standard vs. Repair
+    const isRepairMode = plan && plan.status === 'failed';
+
+    let systemInstruction = `You are Theia's Planner (Level 5 Architect).
+Your job is to analyze the user request and break it down into atomic, executable steps.
+DO NOT execute the steps. Just plan them.
+
+Available Tools:
+- find_file: Use when you need to open a specific file (e.g., "Open the Agent class").
+- search_text: Use when you need to find a Code Symbol (e.g., "Where is AgentState defined?").
+- run_terminal_command: Use for general shell tasks (e.g., "npm install", "npm test").
+- navigate_to_code: Use to navigate to a specific file and line number.
+- change_tab: Use to switch sidebar tabs.
+
+Context: File: ${context?.activeFile}, Repo: ${prData?.title}`;
+
+    let prompt = userMsg.content;
+
+    // INJECT REPAIR CONTEXT
+    if (isRepairMode) {
+      console.log('[Planner] Entering REPAIR MODE.');
+
+      systemInstruction += `
+
+CRITICAL UPDATE: REPAIR MODE
+The previous plan FAILED.
+Failed Step: "${plan.steps[plan.activeStepIndex]?.description || 'Unknown'}"
+Error Output: "${lastError}"
+
+YOUR TASK:
+1. Analyze the error.
+2. Create a NEW plan that fixes the error and achieves the original goal.
+3. The first step of the new plan should likely be a diagnostic or a fix.`;
+
+      // Override the prompt to focus the LLM on the fix
+      prompt = `The previous plan failed with this error: ${lastError}. Please make a new plan to fix this and achieve the goal: "${plan.goal}".`;
+    }
+
+    // 1. Initialize Planner Session
     const planningSession = this.ai.chats.create({
       model: this.model,
       config: {
-        systemInstruction: `You are Theia's Planner (Level 5 Architect).
-Your job is to analyze the user request and break it down into atomic, executable steps.
-DO NOT execute the steps. Just plan them.
-Available Tools for the Executor: run_terminal_command, navigate_to_code, change_tab.
-Context: File: ${context?.activeFile}, Repo: ${prData?.title}`,
+        systemInstruction,
         tools: [{ functionDeclarations: plannerTools }]
       }
     });
 
     // 2. Ask for the Plan
-    const response = await planningSession.sendMessage({ message: userMsg.content });
+    const response = await planningSession.sendMessage({ message: prompt });
 
     // 3. Extract the Plan (Function Call)
     const functionCalls = response?.functionCalls || [];
-    let plan: AgentPlan | undefined;
+    let newPlan: AgentPlan | undefined;
 
     if (functionCalls.length > 0 && functionCalls[0].name === 'submit_plan') {
       const args = functionCalls[0].args as any;
-      plan = {
-        id: `plan-${Date.now()}`,
+      newPlan = {
+        id: `plan-${Date.now()}`, // New ID
         goal: args.goal,
         steps: args.steps.map((s: any, i: number): PlanStep => ({
           id: `step-${i}`,
@@ -257,24 +519,28 @@ Context: File: ${context?.activeFile}, Repo: ${prData?.title}`,
           tool: s.tool,
           status: 'pending'
         })),
-        activeStepIndex: 0,
-        status: 'planning',
+        activeStepIndex: 0, // Reset pointer
+        status: 'executing', // Ready to run immediately
         generatedAt: Date.now()
       };
 
       // Broadcast the thought
       eventBus.emit({
         type: 'AGENT_PLAN_CREATED',
-        payload: { plan }
+        payload: { plan: newPlan }
       });
 
-      // Also Speak it (UX feedback)
+      // UX feedback (context-aware)
+      const speakText = isRepairMode
+        ? `Plan failed. I have created a new repair plan: ${newPlan.goal}`
+        : `I have created a plan with ${newPlan.steps.length} steps: ${newPlan.goal}`;
+
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: `I have created a plan with ${plan.steps.length} steps: ${plan.goal}` }
+        payload: { text: speakText }
       });
 
-      console.log('[Agent] Plan created:', plan);
+      console.log('[Agent] Plan created:', newPlan);
     } else {
       // LLM returned text instead of a plan - fallback
       const text = response?.text || '';
@@ -286,11 +552,8 @@ Context: File: ${context?.activeFile}, Repo: ${prData?.title}`,
       }
     }
 
-    // Return state update with status set to 'executing' to trigger the loop
-    if (plan) {
-      plan.status = 'executing';
-    }
-    return { plan };
+    // Return state update (overwrite the old plan, clear error after replanning)
+    return { plan: newPlan, lastError: undefined };
   }
 
   /**
@@ -308,79 +571,150 @@ Context: File: ${context?.activeFile}, Repo: ${prData?.title}`,
 
     const currentStep = plan.steps[plan.activeStepIndex];
 
-    // 1. Verify Tool Binding (Debug)
-    console.log('[Executor] Available Tools:', executorTools.map(t => t.name));
-    if (executorTools.length === 0) {
-      console.error('[CRITICAL] Executor has no tools!');
+    let response;
+    try {
+      // 1. Create Execution Session
+      console.log('[Executor] Creating chat session...');
+      console.log('[Executor] Tools:', executorTools.map(t => t.name));
+
+      const chat = this.ai.chats.create({
+        model: this.model,
+        config: {
+          systemInstruction: `You are Theia's Executor.
+Your Goal: Complete the current step of the plan.
+Plan Goal: "${plan.goal}"
+Current Step (${plan.activeStepIndex + 1}/${plan.steps.length}): "${currentStep.description}"
+Suggested Tool: ${currentStep.tool || 'Decide best tool'}
+Context: ${context?.activeFile}
+
+FORCE: You MUST call a tool. DO NOT reply with text.`,
+          tools: [{ functionDeclarations: executorTools }]
+        }
+      });
+
+      console.log('[Executor] Chat session created. Calling Gemini API...');
+
+      // 2. Trigger the LLM with timeout protection
+      const timeoutMs = 30000;
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`API call timed out after ${timeoutMs}ms`)), timeoutMs)
+      );
+
+      response = await Promise.race([
+        chat.sendMessage({ message: "EXECUTE_NOW" }),
+        timeoutPromise
+      ]) as any;
+    } catch (error: any) {
+      // SCENARIO A: API EXPLOSION (Quota, Net, Auth)
+      console.error('[Executor] API Error:', error);
+
+      eventBus.emit({
+        type: 'AGENT_SPEAK',
+        payload: { text: `API Error: ${error.message}` }
+      });
+      eventBus.emit({
+        type: 'AGENT_THINKING',
+        payload: { stage: 'completed', timestamp: Date.now() }
+      });
+
+      return {
+        plan: {
+          ...plan,
+          status: 'failed' as const,
+          // Mark current step as failed with the API error message
+          steps: plan.steps.map((s, i) => i === plan.activeStepIndex ?
+            { ...s, status: 'failed' as const, result: `API Error: ${error.message}` } : s)
+        },
+        lastError: `Critical API Failure: ${error.message}`
+      };
     }
 
-    // 2. Create Execution Session with RIGID Directive
-    const chat = this.ai.chats.create({
-      model: this.model,
-      config: {
-        systemInstruction: `You are Theia's Execution Engine.
-Your SOLE purpose is to call the function required to complete the current step.
-DO NOT provide explanations. DO NOT apologize. DO NOT chat.
-IMMEDIATELY call the tool "${currentStep.tool || 'appropriate_tool'}" with the necessary arguments.
-
-Plan Context:
-- Goal: "${plan.goal}"
-- Current Step: "${currentStep.description}"
-- Context: ${context?.activeFile}
-
-FORCE: Output a Function Call.`,
-        tools: [{ functionDeclarations: executorTools }]
-      }
-    });
-
-    // 3. Trigger the LLM with forceful message
-    const response = await chat.sendMessage({ message: "EXECUTE_NOW" });
+    // 3. ANALYZE RESPONSE
+    const rawText = response?.text || '';
     const functionCalls = response?.functionCalls || [];
     const functionCall = functionCalls[0];
 
-    let stepResult = "No tool execution needed.";
+    console.log('[Executor Debug] Text:', rawText);
+    console.log('[Executor Debug] Tool:', functionCall?.name);
 
-    // 4. Execute Tool (if any) or handle fallback
-    if (functionCall) {
-      const { name, args } = functionCall;
-      console.log(`[Executor] Calling ${name} with`, args);
+    // SCENARIO B: MODEL HALLUCINATION (The "Chatty" Trap)
+    if (!functionCall) {
+      console.warn('[Executor] No tool call detected. Model chatted instead.');
 
-      // UX: Notify user we are starting
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: `Running: ${name}` }
+        payload: { text: `Executor failed: Model returned text instead of tool call` }
       });
-
-      // WAIT for the result (The Observer)
-      try {
-        const output = await this.executeTool(name, args);
-        stepResult = output; // Capture the real terminal output
-      } catch (err: any) {
-        stepResult = `Error: ${err.message}`;
-      }
-
-      // UX: Tell the user what we got
       eventBus.emit({
-        type: 'AGENT_SPEAK',
-        payload: { text: `Step ${plan.activeStepIndex + 1}: ${stepResult}` }
+        type: 'AGENT_THINKING',
+        payload: { stage: 'completed', timestamp: Date.now() }
       });
-    } else {
-      // Fallback: Model returned text instead of tool call
-      const textResponse = response?.text || '';
-      console.warn('[Executor] Model returned text instead of tool:', textResponse);
-      stepResult = `Failed to execute (model chatted): ${textResponse.substring(0, 100)}`;
+
+      return {
+        plan: {
+          ...plan,
+          status: 'failed' as const,
+          steps: plan.steps.map((s, i) => i === plan.activeStepIndex ?
+            { ...s, status: 'failed' as const, result: `Error: Model returned text instead of tool: ${rawText.substring(0, 100)}` } : s)
+        },
+        lastError: `Executor Expectation Failed. Model said: ${rawText.substring(0, 200)}`
+      };
     }
 
+    // SCENARIO C: SUCCESS (Proceed to Gatekeeper)
+    const { name, args } = functionCall;
+
+    // --- GATEKEEPER LOGIC (Phase 15) ---
+    if (SENSITIVE_TOOLS.includes(name)) {
+      console.log(`[Gatekeeper] Intercepting sensitive tool: ${name}`);
+
+      // Emit event to UI
+      eventBus.emit({
+        type: 'AGENT_REQUEST_APPROVAL',
+        payload: { tool: name, args }
+      });
+
+      // PAUSE EXECUTION
+      return {
+        pendingAction: {
+          tool: name,
+          args,
+          rationale: `Action requires user approval: ${currentStep.description}`
+        }
+      };
+    }
+    // -----------------------------------
+
+    let stepResult = "No tool execution needed.";
+
+    // 4. Execute Tool (if not sensitive or already approved)
+    console.log(`[Executor] Calling ${name} with`, args);
+
+    eventBus.emit({
+      type: 'AGENT_SPEAK',
+      payload: { text: `Running: ${name}` }
+    });
+
+    try {
+      const output = await this.executeTool(name, args);
+      stepResult = output;
+    } catch (err: any) {
+      stepResult = `Error: ${err.message}`;
+    }
+
+    // UX: Tell the user what we got
+    eventBus.emit({
+      type: 'AGENT_SPEAK',
+      payload: { text: `Step ${plan.activeStepIndex + 1}: ${stepResult.substring(0, 200)}` }
+    });
+
     // 5. Analyze Result (The Judge)
-    // We look for the [Exit Code: N] signature from executeCommandAndWait
     const exitCodeMatch = stepResult.match(/\[Exit Code: (\d+)\]/);
     const exitCode = exitCodeMatch ? parseInt(exitCodeMatch[1], 10) : 0;
 
-    // Determine Step Status
     const isSuccess = exitCode === 0;
     const stepStatus: PlanStep['status'] = isSuccess ? 'completed' : 'failed';
 
-    // 6. Update the Plan
     const newSteps = [...plan.steps];
     newSteps[plan.activeStepIndex] = {
       ...currentStep,
@@ -388,22 +722,17 @@ FORCE: Output a Function Call.`,
       result: stepResult
     };
 
-    // Critical Decision: Stop or Continue?
     let nextStatus: AgentPlan['status'] = plan.status;
     let nextIndex = plan.activeStepIndex;
 
     if (isSuccess) {
-      // Success: Advance pointer
       nextIndex++;
-      // If we ran out of steps, we are done
       if (nextIndex >= plan.steps.length) {
         nextStatus = 'completed';
       }
     } else {
-      // Failure: STOP IMMEDIATELY
       console.warn(`[Executor] Step ${plan.activeStepIndex + 1} Failed with Exit Code ${exitCode}. Stopping.`);
       nextStatus = 'failed';
-      // We do NOT increment nextIndex, so the plan freezes at the failure point
     }
 
     const updatedPlan: AgentPlan = {
@@ -413,11 +742,10 @@ FORCE: Output a Function Call.`,
       status: nextStatus
     };
 
-    // UX: Speak the result
     if (!isSuccess) {
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: `Step Failed: ${stepResult}` }
+        payload: { text: `Step Failed: ${stepResult.substring(0, 200)}` }
       });
     }
 
@@ -435,8 +763,10 @@ FORCE: Output a Function Call.`,
       }
     }
 
-    // Return partial state update
-    return { plan: updatedPlan };
+    return {
+      plan: updatedPlan,
+      lastError: isSuccess ? undefined : stepResult // Capture error on failure
+    };
   }
 
   /**
@@ -600,6 +930,74 @@ Selection: ${context?.activeSelection || 'None'}
     // 1. Runtime Tools (Async/Observed)
     if (name === 'run_terminal_command') {
       return this.executeCommandAndWait(args.command, args.args || []);
+    }
+
+    // 2. Knowledge Tools (The Librarian - Phase 14)
+
+    // Layer 1 (Surface Search): find_file -> Uses MiniSearch (UI) to find filenames
+    if (name === 'find_file') {
+      // Map 'name' arg to 'query' for searchService
+      const results = searchService.search(args.name);
+
+      if (results.length === 0) {
+        return "No files found with that name.";
+      }
+
+      return `Found files:\n` + results.map(r => `- ${r.id}`).join('\n');
+    }
+
+    // Layer 2 (Deep Search): search_text -> Uses Node.js (Runtime) to find code symbols
+    // Note: WebContainer's jsh doesn't have grep, so we use a Node.js script instead
+    if (name === 'search_text') {
+      // Escape special characters for the search query
+      const escapedQuery = args.query.replace(/['"\\]/g, '\\$&');
+
+      // Node.js one-liner that recursively searches for text in files
+      // Works in WebContainer where grep is not available
+      const nodeScript = `
+        const fs=require('fs'),path=require('path');
+        const q='${escapedQuery}';
+        function search(dir){
+          try{
+            fs.readdirSync(dir).forEach(f=>{
+              const p=path.join(dir,f);
+              try{
+                const s=fs.statSync(p);
+                if(s.isDirectory()&&!f.startsWith('.')&&f!=='node_modules')search(p);
+                else if(s.isFile()&&/\\.(ts|js|tsx|jsx|json|md)$/.test(f)){
+                  const lines=fs.readFileSync(p,'utf8').split('\\n');
+                  lines.forEach((l,i)=>{if(l.includes(q))console.log(p+':'+(i+1)+': '+l.trim())});
+                }
+              }catch(e){}
+            });
+          }catch(e){}
+        }
+        search('.');
+      `.replace(/\n/g, '');
+
+      const command = `node -e "${nodeScript}"`;
+      return this.executeCommandAndWait(command, []);
+    }
+
+    // Phase 15: write_file tool - Creates/overwrites files via Node.js
+    if (name === 'write_file') {
+      const escapedPath = args.path.replace(/'/g, "\\'");
+      const escapedContent = args.content.replace(/'/g, "\\'").replace(/\n/g, '\\n');
+
+      const nodeScript = `
+        const fs=require('fs'),path=require('path');
+        const targetPath='${escapedPath}';
+        const content='${escapedContent}'.replace(/\\\\n/g,'\\n');
+        const dir=path.dirname(targetPath);
+        if(dir && dir!=='.' && !fs.existsSync(dir)){
+          fs.mkdirSync(dir,{recursive:true});
+        }
+        fs.writeFileSync(targetPath,content);
+        console.log('File written: '+targetPath);
+      `.replace(/\n/g, '');
+
+      const command = `node -e "${nodeScript}"`;
+      return this.executeCommandAndWait(command, []);
     }
 
     // 2. UI Tools (Sync/Fire-and-Forget)
