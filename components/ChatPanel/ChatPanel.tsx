@@ -97,11 +97,13 @@ export const ChatPanel: React.FC = () => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask for a professional review..."
+            data-testid="chat-input"
             className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg pl-3 pr-10 py-2 text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 placeholder-gray-500"
           />
           <button
             type="submit"
             disabled={!input.trim() || isTyping}
+            data-testid="send-button"
             className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white disabled:opacity-50"
           >
             <Send size={16} />

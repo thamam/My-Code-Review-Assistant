@@ -34,8 +34,8 @@ export const ApprovalRequest: React.FC = () => {
     if (!request) return null;
 
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
-            <div className="bg-gray-900 border border-red-500/30 p-6 rounded-lg shadow-2xl max-w-lg w-full mx-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm" data-testid="permission-modal-overlay">
+            <div className="bg-gray-900 border border-red-500/30 p-6 rounded-lg shadow-2xl max-w-lg w-full mx-4" data-testid="permission-modal">
                 <div className="flex items-center gap-3 mb-4">
                     <div className="w-3 h-3 rounded-full bg-yellow-500 animate-pulse" />
                     <h2 className="text-xl font-mono font-bold text-white">
@@ -57,12 +57,14 @@ export const ApprovalRequest: React.FC = () => {
                     <button
                         onClick={() => handleDecision(false)}
                         className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded font-mono border border-gray-600 transition-colors"
+                        data-testid="deny-button"
                     >
                         DENY
                     </button>
                     <button
                         onClick={() => handleDecision(true)}
                         className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded font-mono font-bold shadow-lg shadow-red-900/20 transition-colors"
+                        data-testid="authorize-button"
                     >
                         AUTHORIZE
                     </button>

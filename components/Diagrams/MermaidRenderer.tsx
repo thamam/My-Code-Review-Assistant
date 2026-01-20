@@ -133,6 +133,7 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id 
             ref={contentRef}
             className="transition-transform duration-200 ease-out origin-top"
             style={{ transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})` }}
+            data-testid="mermaid-diagram"
             dangerouslySetInnerHTML={{ __html: svgContent }}
           />
         )}

@@ -71,7 +71,17 @@ export interface UserApprovalEvent {
     };
 }
 
-export type UserIntent = UserMessageEvent | UIInteractionEvent | CodeChangeEvent | UserApprovalEvent;
+// Phase 17: User Activity Tracking (FR-041/FR-042)
+// Tracks user micro-actions to prevent Agent from stealing focus
+export interface UserActivityEvent {
+    type: 'USER_ACTIVITY';
+    payload: {
+        timestamp: number;
+        action?: 'typing' | 'scrolling' | 'clicking';
+    };
+}
+
+export type UserIntent = UserMessageEvent | UIInteractionEvent | CodeChangeEvent | UserApprovalEvent | UserActivityEvent;
 
 // ============================================================================
 // OUTPUT SIGNALS (AgentAction) - Agent -> UI
@@ -217,7 +227,7 @@ export type TheiaEvent = UserIntent | AgentAction | SystemEvent;
 
 // Type guard helpers
 export function isUserIntent(event: TheiaEvent): event is UserIntent {
-    return ['USER_MESSAGE', 'UI_INTERACTION', 'CODE_CHANGE', 'USER_APPROVAL'].includes(event.type);
+    return ['USER_MESSAGE', 'UI_INTERACTION', 'CODE_CHANGE', 'USER_APPROVAL', 'USER_ACTIVITY'].includes(event.type);
 }
 
 export function isAgentAction(event: TheiaEvent): event is AgentAction {
