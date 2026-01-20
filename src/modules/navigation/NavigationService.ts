@@ -87,12 +87,15 @@ class NavigationService {
 
     /**
      * Fetches content for a "Ghost" file (one that exists in the tree but not in the PR).
+     * Instrumented for NFR-006 (Latency < 2s) and NFR-007 (Caching).
      */
     public async loadGhostFile(owner: string, repo: string, path: string, headSha: string): Promise<LazyFile | null> {
-        // 1. Cache Hit Check
+        // 1. Cache Hit Check (NFR-007: Caching)
         if (this.state.lazyFiles.has(path)) {
+            console.log(`[NavigationService] ⚡ CACHE HIT: ${path} (instant)`);
             return this.state.lazyFiles.get(path)!;
         }
+        console.log(`[NavigationService] 🔄 CACHE MISS: ${path} - fetching from API...`);
 
         // 2. Existence Check in Tree
         const node = this.state.repoTree.find(n => n.path === path && n.type === 'blob');
@@ -101,9 +104,18 @@ class NavigationService {
             return null;
         }
 
+        // Log file size constraint (NFR-006: < 1MB)
+        const fileSizeKB = (node.size || 0) / 1024;
+        console.log(`[NavigationService] 📦 File size: ${fileSizeKB.toFixed(2)} KB (limit: 1024 KB)`);
+        if (fileSizeKB > 1024) {
+            console.warn(`[NavigationService] ⚠️ File exceeds 1MB limit: ${path}`);
+        }
+
         try {
-            // 3. Fetch Content
+            // 3. Fetch Content with timing (NFR-006: Latency < 2s)
+            console.time('GhostFetch');
             const content = await this.github.fetchFileContent(owner, repo, path, headSha);
+            console.timeEnd('GhostFetch');
 
             const lazyFile: LazyFile = {
                 path,

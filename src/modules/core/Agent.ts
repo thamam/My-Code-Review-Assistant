@@ -158,6 +158,7 @@ class TheiaAgent {
   private workflow: any;
   private unsubscribeTemp: (() => void) | null = null;
   private state: AgentState | null = null; // Phase 15.2: Persisted state for resumption
+  private lastUserInteraction: number = 0; // Phase 17: User Activity Tracker (FR-041/FR-042)
 
   constructor() {
     this.ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
@@ -213,7 +214,16 @@ class TheiaAgent {
       }
     });
 
-    console.log('[TheiaAgent] Initialized with Planner + Executor Loop. Phase 15 (Collaborator) Active.');
+    // Phase 17: User Activity Tracking (FR-041/FR-042)
+    eventBus.subscribe('USER_ACTIVITY', (envelope) => {
+      const event = envelope.event;
+      if (event.type === 'USER_ACTIVITY') {
+        this.lastUserInteraction = event.payload.timestamp;
+        console.log('[Activity Tracker] User active at', event.payload.timestamp);
+      }
+    });
+
+    console.log('[TheiaAgent] Initialized with Planner + Executor Loop. Phase 17 (Shadow Partner) Active.');
   }
 
   /**
@@ -472,24 +482,59 @@ Context: File: ${context?.activeFile}, Repo: ${prData?.title}`;
 
     let prompt = userMsg.content;
 
-    // INJECT REPAIR CONTEXT
+    // INJECT REPAIR CONTEXT (FR-009: Improved Repair Mode)
     if (isRepairMode) {
       console.log('[Planner] Entering REPAIR MODE.');
 
+      // Extract failed step details for context
+      const failedStep = plan.steps[plan.activeStepIndex];
+      const failedTool = failedStep?.tool || 'Unknown';
+      const failedDescription = failedStep?.description || 'Unknown';
+
       systemInstruction += `
 
-CRITICAL UPDATE: REPAIR MODE
-The previous plan FAILED.
-Failed Step: "${plan.steps[plan.activeStepIndex]?.description || 'Unknown'}"
-Error Output: "${lastError}"
+╔══════════════════════════════════════════════════════════════╗
+║                    🔴 REPAIR MODE ACTIVE 🔴                    ║
+╚══════════════════════════════════════════════════════════════╝
 
-YOUR TASK:
-1. Analyze the error.
-2. Create a NEW plan that fixes the error and achieves the original goal.
-3. The first step of the new plan should likely be a diagnostic or a fix.`;
+The previous plan FAILED and you must create a RECOVERY PLAN.
+
+━━━━━━━━━━━━━━━━━━ FAILURE ANALYSIS ━━━━━━━━━━━━━━━━━━
+Failed Step: "${failedDescription}"
+Failed Tool: ${failedTool}
+Error Output:
+"""
+${lastError}
+"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ CRITICAL CONSTRAINTS:
+1. You MUST NOT repeat the exact same tool with the same arguments that caused the error.
+2. You MUST analyze WHY the step failed before attempting a fix.
+3. The first step of your new plan MUST be a DIAGNOSTIC action.
+
+💡 RECOVERY STRATEGIES:
+- If "File Not Found": Use \`run_terminal_command\` with "ls -la" or "ls -R" to discover actual file paths.
+- If "Command Failed": Check if required dependencies exist first (e.g., "npm install").
+- If "Permission Denied": Try an alternative approach or report the limitation.
+- If "Timeout": Break the operation into smaller steps.
+
+YOUR MISSION:
+1. Analyze the error message above.
+2. Identify the root cause (wrong path? missing file? syntax error?).
+3. Create a NEW plan with diagnostic/fix steps FIRST.
+4. Achieve the original goal: "${plan.goal}"`;
 
       // Override the prompt to focus the LLM on the fix
-      prompt = `The previous plan failed with this error: ${lastError}. Please make a new plan to fix this and achieve the goal: "${plan.goal}".`;
+      prompt = `REPAIR REQUIRED: The previous plan failed.
+
+Original Goal: "${plan.goal}"
+Failed Step: "${failedDescription}"
+Error: ${lastError}
+
+Create a RECOVERY PLAN that:
+1. First diagnoses the issue (e.g., list files to find correct paths)
+2. Then attempts to achieve the goal using a DIFFERENT strategy`;
     }
 
     // 1. Initialize Planner Session
@@ -542,13 +587,73 @@ YOUR TASK:
 
       console.log('[Agent] Plan created:', newPlan);
     } else {
-      // LLM returned text instead of a plan - fallback
+      // LLM returned text instead of a plan - attempt "Greedy" parse
       const text = response?.text || '';
-      if (text) {
+      console.log('[Planner] Raw Output:', text); // Log this to see what the model actually said
+
+      let planData: any;
+
+      try {
+        // STRATEGY 1: Clean Markdown wrappers
+        const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        planData = JSON.parse(cleanText);
+      } catch (e) {
+        // STRATEGY 2: "Greedy" Regex Search (Find the largest JSON object)
+        console.warn('[Planner] Standard parse failed, attempting greedy search...');
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            planData = JSON.parse(jsonMatch[0]);
+          } catch (e2) {
+            console.error('[Planner] Failed to parse Plan JSON even with greedy search.');
+            // Fall back to just speaking the text
+            if (text) {
+              eventBus.emit({
+                type: 'AGENT_SPEAK',
+                payload: { text }
+              });
+            }
+          }
+        } else {
+          console.error('[Planner] No JSON object found in response.');
+          if (text) {
+            eventBus.emit({
+              type: 'AGENT_SPEAK',
+              payload: { text }
+            });
+          }
+        }
+      }
+
+      // Validate and build plan if we successfully parsed the JSON
+      if (planData && planData.steps && Array.isArray(planData.steps)) {
+        console.log('[Planner] Greedy parse succeeded! Building plan from raw text.');
+        newPlan = {
+          id: `plan-${Date.now()}`,
+          goal: planData.goal || 'User Request',
+          steps: planData.steps.map((s: any, i: number): PlanStep => ({
+            id: `step-${i}`,
+            description: s.description,
+            tool: s.tool,
+            status: 'pending'
+          })),
+          activeStepIndex: 0,
+          status: 'executing',
+          generatedAt: Date.now()
+        };
+
+        // Broadcast the thought
+        eventBus.emit({
+          type: 'AGENT_PLAN_CREATED',
+          payload: { plan: newPlan }
+        });
+
         eventBus.emit({
           type: 'AGENT_SPEAK',
-          payload: { text }
+          payload: { text: `I have created a plan with ${newPlan.steps.length} steps: ${newPlan.goal}` }
         });
+
+        console.log('[Agent] Plan created via greedy parse:', newPlan);
       }
     }
 
@@ -820,6 +925,17 @@ Selection: ${context?.activeSelection || 'None'}
 
     while (iteration < maxIterations) {
       iteration++;
+
+      // FR-041: Barge-In Detection - Yield control if user becomes active
+      if (Date.now() - this.lastUserInteraction < 1000) {
+        console.log('[Barge-In] User became active. Yielding control.');
+        eventBus.emit({
+          type: 'AGENT_THINKING',
+          payload: { stage: 'completed', message: 'Paused: User activity detected', timestamp: Date.now() }
+        });
+        break; // Exit loop early, let user take over
+      }
+
       // Access functionCalls - SDK uses getter property, not method
       const functionCalls = response?.functionCalls || [];
 
@@ -948,61 +1064,40 @@ Selection: ${context?.activeSelection || 'None'}
 
     // Layer 2 (Deep Search): search_text -> Uses Node.js (Runtime) to find code symbols
     // Note: WebContainer's jsh doesn't have grep, so we use a Node.js script instead
+    // FIX (FR-016): Use base64 encoding to safely pass query without shell interpretation
     if (name === 'search_text') {
-      // Escape special characters for the search query
-      const escapedQuery = args.query.replace(/['"\\]/g, '\\$&');
+      // Encode query as base64 to avoid shell quoting issues
+      const encodedQuery = Buffer.from(args.query).toString('base64');
 
       // Node.js one-liner that recursively searches for text in files
       // Works in WebContainer where grep is not available
-      const nodeScript = `
-        const fs=require('fs'),path=require('path');
-        const q='${escapedQuery}';
-        function search(dir){
-          try{
-            fs.readdirSync(dir).forEach(f=>{
-              const p=path.join(dir,f);
-              try{
-                const s=fs.statSync(p);
-                if(s.isDirectory()&&!f.startsWith('.')&&f!=='node_modules')search(p);
-                else if(s.isFile()&&/\\.(ts|js|tsx|jsx|json|md)$/.test(f)){
-                  const lines=fs.readFileSync(p,'utf8').split('\\n');
-                  lines.forEach((l,i)=>{if(l.includes(q))console.log(p+':'+(i+1)+': '+l.trim())});
-                }
-              }catch(e){}
-            });
-          }catch(e){}
-        }
-        search('.');
-      `.replace(/\n/g, '');
+      const nodeScript = `const fs=require('fs'),path=require('path');const q=Buffer.from('${encodedQuery}','base64').toString();function search(dir){try{fs.readdirSync(dir).forEach(f=>{const p=path.join(dir,f);try{const s=fs.statSync(p);if(s.isDirectory()&&!f.startsWith('.')&&f!=='node_modules')search(p);else if(s.isFile()&&/\\.(ts|js|tsx|jsx|json|md)$/.test(f)){const lines=fs.readFileSync(p,'utf8').split('\\n');lines.forEach((l,i)=>{if(l.includes(q))console.log(p+':'+(i+1)+': '+l.trim())});}}catch(e){}});}catch(e){}}search('.');`;
 
-      const command = `node -e "${nodeScript}"`;
-      return this.executeCommandAndWait(command, []);
+      // Pass script as argument to node -e, avoiding shell interpretation of content
+      return this.executeCommandAndWait('node', ['-e', nodeScript]);
     }
 
     // Phase 15: write_file tool - Creates/overwrites files via Node.js
+    // FIX (FR-015): Use base64 encoding to safely pass content without shell interpretation
     if (name === 'write_file') {
-      const escapedPath = args.path.replace(/'/g, "\\'");
-      const escapedContent = args.content.replace(/'/g, "\\'").replace(/\n/g, '\\n');
+      // Encode both path and content as base64 to avoid shell quoting issues
+      const encodedPath = Buffer.from(args.path).toString('base64');
+      const encodedContent = Buffer.from(args.content).toString('base64');
 
-      const nodeScript = `
-        const fs=require('fs'),path=require('path');
-        const targetPath='${escapedPath}';
-        const content='${escapedContent}'.replace(/\\\\n/g,'\\n');
-        const dir=path.dirname(targetPath);
-        if(dir && dir!=='.' && !fs.existsSync(dir)){
-          fs.mkdirSync(dir,{recursive:true});
-        }
-        fs.writeFileSync(targetPath,content);
-        console.log('File written: '+targetPath);
-      `.replace(/\n/g, '');
+      const nodeScript = `const fs=require('fs'),path=require('path');const targetPath=Buffer.from('${encodedPath}','base64').toString();const content=Buffer.from('${encodedContent}','base64').toString();const dir=path.dirname(targetPath);if(dir&&dir!=='.'&&!fs.existsSync(dir)){fs.mkdirSync(dir,{recursive:true});}fs.writeFileSync(targetPath,content);console.log('File written: '+targetPath);`;
 
-      const command = `node -e "${nodeScript}"`;
-      return this.executeCommandAndWait(command, []);
+      // Pass script as argument to node -e, avoiding shell interpretation of content
+      return this.executeCommandAndWait('node', ['-e', nodeScript]);
     }
 
     // 2. UI Tools (Sync/Fire-and-Forget)
     switch (name) {
       case 'navigate_to_code':
+        // FR-042: Focus Lock - Don't steal focus if user was active in last 3 seconds
+        if (Date.now() - this.lastUserInteraction < 3000) {
+          console.log('[Focus Lock] Navigation skipped - user is active');
+          return 'Navigation skipped (Focus Locked by User)';
+        }
         eventBus.emit({
           type: 'AGENT_NAVIGATE',
           payload: {
