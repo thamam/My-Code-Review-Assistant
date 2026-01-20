@@ -29,6 +29,35 @@ export interface AgentState {
   pendingAction?: PendingAction; // Phase 15: The "Held" action awaiting approval
 }
 
+// --- FR-038: Dual-Track Protocol (Voice-First) ---
+// The "News Anchor" pattern: voice track for TTS, screen track for UI
+export interface DualTrackResponse {
+  voice: string;  // Spoken summary - NO code, NO markdown, natural English only
+  screen: string; // Visual detail - Markdown, Code, Mermaid diagrams
+}
+
+/**
+ * Helper: Formats a message into Dual-Track JSON format.
+ * Voice track is sanitized for TTS (no code, no special chars).
+ * Screen track retains full markdown/code formatting.
+ */
+function formatDualTrack(voice: string, screen?: string): string {
+  // Sanitize voice for TTS: remove markdown, code blocks, special chars
+  const cleanVoice = voice
+    .replace(/```[\s\S]*?```/g, '') // Remove code blocks
+    .replace(/`[^`]+`/g, '')        // Remove inline code
+    .replace(/[#*_~\[\]()]/g, '')   // Remove markdown syntax
+    .replace(/\n+/g, ' ')           // Flatten newlines
+    .trim()
+    .substring(0, 200);             // Max 2 sentences (~200 chars)
+
+  const response: DualTrackResponse = {
+    voice: cleanVoice || 'Action completed.',
+    screen: screen || voice
+  };
+  return JSON.stringify(response);
+}
+
 // --- Planner Tools (Forces Structured Output) ---
 const plannerTools: FunctionDeclaration[] = [
   {
@@ -249,7 +278,7 @@ class TheiaAgent {
       console.warn('[Governor] Max steps exceeded. Aborting.');
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: 'Safety limit reached: Maximum steps exceeded. Stopping execution.' }
+        payload: { text: formatDualTrack('Safety limit reached. Maximum steps exceeded.', 'Safety limit reached: Maximum steps exceeded. Stopping execution.') }
       });
       eventBus.emit({
         type: 'AGENT_THINKING',
@@ -305,7 +334,7 @@ class TheiaAgent {
       console.error("[Agent] Graph Execution Failed:", error);
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: `System Error: ${error.message}` }
+        payload: { text: formatDualTrack('A system error occurred.', `System Error: ${error.message}`) }
       });
       eventBus.emit({
         type: 'AGENT_THINKING',
@@ -334,7 +363,7 @@ class TheiaAgent {
 
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: `Executing ${pendingAction.tool}...` }
+        payload: { text: formatDualTrack('Executing the approved action now.', `Executing \`${pendingAction.tool}\`...`) }
       });
 
       let stepResult: string;
@@ -376,7 +405,7 @@ class TheiaAgent {
       // UX: Report result
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: `Step ${plan.activeStepIndex + 1}: ${stepResult.substring(0, 200)}` }
+        payload: { text: formatDualTrack(`Step ${plan.activeStepIndex + 1} completed.`, `**Step ${plan.activeStepIndex + 1}:** ${stepResult.substring(0, 200)}`) }
       });
 
       // Resume graph with updated state (clear pendingAction)
@@ -392,7 +421,7 @@ class TheiaAgent {
 
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: 'Action rejected. Finding alternative approach...' }
+        payload: { text: formatDualTrack('Action rejected. Finding an alternative approach.', 'Action rejected. Finding alternative approach...') }
       });
 
       const newSteps = [...plan.steps];
@@ -582,7 +611,7 @@ Create a RECOVERY PLAN that:
 
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: speakText }
+        payload: { text: formatDualTrack(speakText, `**Plan Created:** ${newPlan.goal}\n\n**Steps:** ${newPlan.steps.length}`) }
       });
 
       console.log('[Agent] Plan created:', newPlan);
@@ -610,7 +639,7 @@ Create a RECOVERY PLAN that:
             if (text) {
               eventBus.emit({
                 type: 'AGENT_SPEAK',
-                payload: { text }
+                payload: { text: formatDualTrack('I have a response for you.', text) }
               });
             }
           }
@@ -619,7 +648,7 @@ Create a RECOVERY PLAN that:
           if (text) {
             eventBus.emit({
               type: 'AGENT_SPEAK',
-              payload: { text }
+              payload: { text: formatDualTrack('I have a response for you.', text) }
             });
           }
         }
@@ -650,7 +679,7 @@ Create a RECOVERY PLAN that:
 
         eventBus.emit({
           type: 'AGENT_SPEAK',
-          payload: { text: `I have created a plan with ${newPlan.steps.length} steps: ${newPlan.goal}` }
+          payload: { text: formatDualTrack(`I have created a plan with ${newPlan.steps.length} steps.`, `**Plan Created:** ${newPlan.goal}\n\n**Steps:** ${newPlan.steps.length}`) }
         });
 
         console.log('[Agent] Plan created via greedy parse:', newPlan);
@@ -715,7 +744,7 @@ FORCE: You MUST call a tool. DO NOT reply with text.`,
 
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: `API Error: ${error.message}` }
+        payload: { text: formatDualTrack('An API error occurred.', `**API Error:** ${error.message}`) }
       });
       eventBus.emit({
         type: 'AGENT_THINKING',
@@ -748,7 +777,7 @@ FORCE: You MUST call a tool. DO NOT reply with text.`,
 
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: `Executor failed: Model returned text instead of tool call` }
+        payload: { text: formatDualTrack('The executor encountered an issue.', 'Executor failed: Model returned text instead of tool call') }
       });
       eventBus.emit({
         type: 'AGENT_THINKING',
@@ -797,7 +826,7 @@ FORCE: You MUST call a tool. DO NOT reply with text.`,
 
     eventBus.emit({
       type: 'AGENT_SPEAK',
-      payload: { text: `Running: ${name}` }
+      payload: { text: formatDualTrack(`Running ${name}.`, `Running: \`${name}\``) }
     });
 
     try {
@@ -810,7 +839,7 @@ FORCE: You MUST call a tool. DO NOT reply with text.`,
     // UX: Tell the user what we got
     eventBus.emit({
       type: 'AGENT_SPEAK',
-      payload: { text: `Step ${plan.activeStepIndex + 1}: ${stepResult.substring(0, 200)}` }
+      payload: { text: formatDualTrack(`Step ${plan.activeStepIndex + 1} result received.`, `**Step ${plan.activeStepIndex + 1}:** ${stepResult.substring(0, 200)}`) }
     });
 
     // 5. Analyze Result (The Judge)
@@ -850,7 +879,7 @@ FORCE: You MUST call a tool. DO NOT reply with text.`,
     if (!isSuccess) {
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: `Step Failed: ${stepResult.substring(0, 200)}` }
+        payload: { text: formatDualTrack('This step failed.', `**Step Failed:** ${stepResult.substring(0, 200)}`) }
       });
     }
 
@@ -863,7 +892,7 @@ FORCE: You MUST call a tool. DO NOT reply with text.`,
       if (updatedPlan.status === 'completed') {
         eventBus.emit({
           type: 'AGENT_SPEAK',
-          payload: { text: `Plan completed: ${plan.goal}` }
+          payload: { text: formatDualTrack('The plan has been completed successfully.', `**Plan Completed:** ${plan.goal}`) }
         });
       }
     }
@@ -976,7 +1005,7 @@ Selection: ${context?.activeSelection || 'None'}
     if (text) {
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text }
+        payload: { text: formatDualTrack(text, text) }
       });
     }
 

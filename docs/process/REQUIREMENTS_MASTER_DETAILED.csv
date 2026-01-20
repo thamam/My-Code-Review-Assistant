@@ -25,3 +25,8 @@ NFR-003,Security,No destructive action without consent,2,9,READY,Blocked until a
 NFR-006,Performance,Lazy load latency < 2s,3,9,READY,Instrumented with console.time/timeEnd and file size logging
 NFR-007,Performance,Ghost File Caching,3,9,READY,lazyFiles Map caches fetched files; cache hit/miss logged
 NFR-009,Performance,Context Debounce,5,8,BETA,Rapid clicks ignored
+FR-043,Core,Repository Mode: System initializes session with only a Git URL (no PR) treating all files as Ghost Nodes,6,9,READY,Implemented dual boot with parseRepoUrl detectUrlType fetchRepoMode and auto-trigger
+FR-038,Voice,Dual-Track Protocol: Agent outputs structured { voice screen } JSON for TTS separation,7,10,RELEASED,formatDualTrack helper transforms all AGENT_SPEAK payloads
+FR-027,Voice,Voice Synthesis: VoiceService with Web Speech API integration,7,10,RELEASED,Subscribes to AGENT_SPEAK with Dual-Track parsing extractVoiceTrack
+NFR-008,Voice,Voice-Code Separation: TTS never reads code or markdown syntax,7,10,RELEASED,Voice track sanitized before speak; screen track preserved for UI
+FR-044,Voice,Dual-Track UI Rendering: ChatMessage parses JSON and displays screen track with speaker indicator,7,10,RELEASED,ChatMessage.tsx extracts screen content and shows Volume2 badge for voiced messages

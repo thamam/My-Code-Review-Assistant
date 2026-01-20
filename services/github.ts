@@ -65,6 +65,80 @@ export class GitHubService {
     return { owner: match[1], repo: match[2], number: parseInt(match[3]) };
   }
 
+  /**
+   * FR-043: Parse a Repository URL (without PR number).
+   * Matches https://github.com/owner/repo
+   */
+  parseRepoUrl(url: string): { owner: string; repo: string } | null {
+    // Clean up URL: remove trailing slash, .git, etc.
+    const cleanUrl = url.replace(/\.git$/, '').replace(/\/$/, '');
+    const regex = /github\.com\/([^\/]+)\/([^\/\?#]+)/;
+    const match = cleanUrl.match(regex);
+    if (!match) return null;
+    return { owner: match[1], repo: match[2] };
+  }
+
+  /**
+   * FR-043: Detects if a URL is a PR or Repo URL.
+   * Returns 'pr' | 'repo' | 'invalid'
+   */
+  detectUrlType(url: string): 'pr' | 'repo' | 'invalid' {
+    if (/github\.com\/[^\/]+\/[^\/]+\/pull\/\d+/.test(url)) return 'pr';
+    if (/github\.com\/[^\/]+\/[^\/]+/.test(url)) return 'repo';
+    return 'invalid';
+  }
+
+  /**
+   * FR-043: Fetch the default branch HEAD SHA for a repository.
+   */
+  async fetchDefaultBranchSha(owner: string, repo: string): Promise<{ branch: string; sha: string }> {
+    const url = `https://api.github.com/repos/${owner}/${repo}`;
+    const response = await fetch(url, { headers: this.getHeaders() });
+
+    if (response.status === 403) throw new Error("GitHub API Rate Limit Exceeded. Please provide an Access Token.");
+    if (response.status === 404) throw new Error("Repository not found. If this is a private repo, please provide an Access Token.");
+    if (!response.ok) throw new Error(`Failed to fetch repository: ${response.statusText}`);
+
+    const data = await response.json();
+    const defaultBranch = data.default_branch || 'main';
+
+    // Fetch the branch to get HEAD SHA
+    const branchUrl = `https://api.github.com/repos/${owner}/${repo}/branches/${defaultBranch}`;
+    const branchResponse = await fetch(branchUrl, { headers: this.getHeaders() });
+
+    if (!branchResponse.ok) throw new Error(`Failed to fetch branch: ${branchResponse.statusText}`);
+
+    const branchData = await branchResponse.json();
+    return { branch: defaultBranch, sha: branchData.commit.sha };
+  }
+
+  /**
+   * FR-043: Initialize Repo Mode - creates minimal PRData for repository exploration.
+   * All files are treated as Ghost Nodes (empty files array).
+   */
+  async fetchRepoMode(url: string): Promise<PRData> {
+    const parsed = this.parseRepoUrl(url);
+    if (!parsed) throw new Error("Invalid Repository URL");
+
+    const { owner, repo } = parsed;
+    const { branch, sha } = await this.fetchDefaultBranchSha(owner, repo);
+
+    console.log(`[GitHubService] Repo Mode: ${owner}/${repo} @ ${branch} (${sha.substring(0, 7)})`);
+
+    return {
+      id: 'repo-mode',
+      title: `Repository: ${owner}/${repo}`,
+      description: `Exploring ${owner}/${repo} on branch ${branch}. All files are available as Ghost Nodes.`,
+      author: owner,
+      baseRef: branch,
+      headRef: branch,
+      files: [], // Empty - all files are Ghost Nodes
+      owner,
+      repo,
+      headSha: sha
+    };
+  }
+
   async fetchPR(url: string): Promise<PRData> {
     const { owner, repo, number } = await this.parsePRUrl(url);
     const headers = this.getHeaders();

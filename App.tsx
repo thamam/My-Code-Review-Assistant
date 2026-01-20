@@ -20,6 +20,20 @@ import { ApprovalRequest } from './components/ApprovalRequest';
 import { Layout, MessageSquare, ArrowLeft, Mic, Loader2, BookMarked, FolderTree, RotateCcw, Link, Pause, FileUp, Target, Workflow, Eye, BrainCircuit, FileText, Terminal } from 'lucide-react';
 import clsx from 'clsx';
 import { parseWalkthroughFile } from './services/walkthroughParser';
+import { voiceService } from './src/services/VoiceService';
+
+// Phase 2: Voice Service Initialization Component
+const VoiceInit = () => {
+    useEffect(() => {
+        console.log('[App] Initializing VoiceService...');
+        voiceService.init();
+        return () => {
+            console.log('[App] Cleaning up VoiceService...');
+            voiceService.cleanup();
+        };
+    }, []);
+    return null;
+};
 
 const VoiceControls = () => {
     const { isActive, isConnecting, connect, disconnect, error, volume, mode, setMode } = useLive();
@@ -229,7 +243,9 @@ const MainLayout = () => {
                     <div className="overflow-hidden min-w-0">
                         <h1 className="text-sm font-bold flex items-center gap-2 truncate">
                             {prData.title}
-                            <span className="text-xs font-normal text-gray-500">#{prData.id}</span>
+                            {prData.id !== 'repo-mode' && (
+                                <span className="text-xs font-normal text-gray-500">#{prData.id}</span>
+                            )}
                         </h1>
                     </div>
                 </div>
@@ -342,6 +358,7 @@ const App = () => (
         <PRProvider>
             <ChatProvider>
                 <LiveProvider>
+                    <VoiceInit /> {/* Phase 2: TTS with Dual-Track parsing */}
                     <UserContextMonitor />
                     <MainLayout />
                     <ApprovalRequest /> {/* Phase 15.3: The Gatekeeper UI */}

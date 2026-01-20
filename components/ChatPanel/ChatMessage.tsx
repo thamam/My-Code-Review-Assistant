@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ChatMessage as ChatMessageType } from '../../types';
 import clsx from 'clsx';
-import { Bot, User, Copy, Check } from 'lucide-react';
+import { Bot, User, Copy, Check, Volume2 } from 'lucide-react';
 import { MermaidRenderer } from '../Diagrams/MermaidRenderer';
 
 const CodeBlock: React.FC<{ content: string }> = ({ content }) => {
@@ -33,6 +33,22 @@ const CodeBlock: React.FC<{ content: string }> = ({ content }) => {
 
 export const ChatMessage: React.FC<{ message: ChatMessageType }> = ({ message }) => {
   const isUser = message.role === 'user';
+
+  // Dual-Track JSON parsing: extract screen content and detect voice presence
+  let displayContent = message.content;
+  let hasVoice = false;
+
+  if (!isUser) {
+    try {
+      const parsed = JSON.parse(message.content);
+      if (parsed.voice && parsed.screen) {
+        displayContent = parsed.screen;
+        hasVoice = true;
+      }
+    } catch (e) {
+      // Not JSON, treat as legacy plain text
+    }
+  }
 
   // Simple parser to detect code blocks
   // Simple parser to detect code blocks
@@ -83,18 +99,28 @@ export const ChatMessage: React.FC<{ message: ChatMessageType }> = ({ message })
 
   return (
     <div className={clsx("flex gap-3 mb-4", isUser ? "flex-row-reverse" : "flex-row")}>
-      <div className={clsx(
-        "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0",
-        isUser ? "bg-blue-600" : "bg-purple-600"
-      )}>
-        {isUser ? <User size={16} /> : <Bot size={16} />}
+      <div className="relative">
+        <div className={clsx(
+          "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0",
+          isUser ? "bg-blue-600" : "bg-purple-600"
+        )}>
+          {isUser ? <User size={16} /> : <Bot size={16} />}
+        </div>
+        {hasVoice && (
+          <div
+            className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-green-500 flex items-center justify-center"
+            title="This message was spoken"
+          >
+            <Volume2 size={10} className="text-white" />
+          </div>
+        )}
       </div>
 
       <div className={clsx(
         "max-w-[85%] rounded-lg p-3 text-sm leading-relaxed",
         isUser ? "bg-blue-600/10 text-blue-100" : "bg-gray-800 text-gray-200"
       )}>
-        <div>{renderContent(message.content)}</div>
+        <div>{renderContent(displayContent)}</div>
         {message.context && !isUser && (
           <div className="mt-2 text-xs text-gray-500 border-t border-gray-700 pt-2">
             Reference: {message.context.file}

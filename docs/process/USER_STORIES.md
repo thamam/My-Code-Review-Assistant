@@ -155,6 +155,35 @@ This document defines the key user stories for the Theia system. Each story foll
 
 ---
 
+## Story 6: The Code Oracle
+
+**Persona:** Developer onboarding to the project
+
+### User Story
+**As a** Developer new to the codebase,  
+**I want to** paste a Repository URL (without a PR),  
+**So that** I can explore and ask questions about the architecture from day one.
+
+### Scenario
+| Step | Action | System Response |
+|------|--------|-----------------|
+| 1 | User enters `https://github.com/owner/repo` and clicks "Connect" | **FR-043** initializes Repo Mode |
+| 2 | UI loads the File Tree. All files are "Ghost Nodes" (grey) | **FR-033** (Hybrid State) |
+| 3 | User types: *"How does the auth flow work?"* | Message received |
+| 4 | Agent (Planner) identifies missing info and uses `search_text("auth")` | **FR-016** activated |
+| 5 | Agent reads `src/auth/Service.ts` to inspect logic | **FR-010** activated |
+| 6 | Agent explains the flow citing the specific file | **FR-007** |
+
+### Traceability Matrix
+| Requirement | Description | Validation |
+|-------------|-------------|------------|
+| **FR-043** | Repo Mode Init | Session starts without PR ID |
+| **FR-033** | Ghost Nodes | Tree renders full repo structure |
+| **FR-016** | Search Codebase | Finds relevant files (Search) |
+| **FR-010** | Read File Content | Agent reads file to explain logic |
+
+---
+
 ## Summary: Requirement Coverage
 
 ```mermaid
@@ -178,9 +207,14 @@ graph LR
     subgraph "S5: Shadow Partner"
         S5[FR-039, FR-040, FR-041, FR-042, NFR-009]
     end
+
+    subgraph "S6: Code Oracle"
+        S6[FR-007, FR-010, FR-016, FR-033, FR-043]
+    end
     
-    S1 --> Coverage[24 Requirements Covered]
+    S1 --> Coverage[28 Requirements Covered]
     S2 --> Coverage
     S3 --> Coverage
     S4 --> Coverage
     S5 --> Coverage
+    S6 --> Coverage

@@ -186,12 +186,24 @@ export const WelcomeScreen: React.FC = () => {
         return;
       }
       const service = new GitHubService(token.trim() || undefined);
-      const data = await service.fetchPR(url);
+
+      // FR-043: Detect URL type and use appropriate fetch method
+      const urlType = service.detectUrlType(url);
+      let data: PRData;
+
+      if (urlType === 'pr') {
+        data = await service.fetchPR(url);
+      } else if (urlType === 'repo') {
+        data = await service.fetchRepoMode(url);
+      } else {
+        throw new Error("Invalid URL. Please enter a GitHub repository or PR URL.");
+      }
+
       saveToCache(data, url);
       saveToHistory(data, url);
       processDataLoad(data);
     } catch (err: any) {
-      setError(err.message || "Failed to load PR.");
+      setError(err.message || "Failed to load.");
     } finally {
       setIsLoading(false);
     }
@@ -219,13 +231,13 @@ export const WelcomeScreen: React.FC = () => {
           <form onSubmit={(e) => handleLoad(e, false)} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                GitHub PR URL
+                GitHub URL
               </label>
               <input
                 type="text"
                 value={url}
                 onChange={handleUrlChange}
-                placeholder="https://github.com/owner/repo/pull/123"
+                placeholder="https://github.com/owner/repo or .../pull/123"
                 className="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                 disabled={isLoading}
               />

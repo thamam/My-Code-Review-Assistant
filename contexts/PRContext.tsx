@@ -106,6 +106,14 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     }
   }, [isDiffMode, leftTab, selectedFile, isCodeViewerReady]);
 
+  // FR-043: Auto-trigger Full Repo Mode when in Repo Mode (no PR files)
+  useEffect(() => {
+    if (prData && prData.files.length === 0 && prData.owner && prData.repo && prData.headSha) {
+      console.log('[PRContext] Repo Mode detected - auto-enabling Full Repo Mode');
+      navModule.service.toggleFullRepoMode(prData.owner, prData.repo, prData.headSha);
+    }
+  }, [prData, navModule.service]);
+
   const selectFile = (file: FileChange) => {
     setSelectedFile(file);
     setViewportState({ file: file.path, startLine: 0, endLine: 0 });
