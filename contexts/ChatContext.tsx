@@ -12,6 +12,7 @@ import { usePR } from './PRContext';
 import { eventBus } from '../src/modules/core/EventBus';
 import { agent } from '../src/modules/core/Agent'; // Force instantiation (Polyfill enabled)
 import { runtime } from '../src/modules/runtime'; // Force runtime instantiation (Phase 11)
+import { storageService } from '../src/modules/persistence'; // For clearing persisted state
 
 // Force side-effect execution (prevent tree-shaking)
 void agent;
@@ -152,6 +153,9 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (event.type === 'SESSION_RESET') {
         const { repoName } = event.payload;
         console.log(`[ChatContext] SESSION_RESET received - clearing chat for: ${repoName}`);
+
+        // Clear persisted session from localStorage
+        storageService.clearState();
 
         // Clear previous messages
         setMessages([]);
