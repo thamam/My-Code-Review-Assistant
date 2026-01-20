@@ -1,0 +1,27 @@
+ID,Category,Description,Story,Maturity,Status,Notes
+FR-004,Agent,Self-Correction: Failure triggers re-planning,4,7,BETA,Router logic verified but needs edge case testing
+FR-005,Agent,Router Logic: Loop back to Executor,4,7,BETA,Works for simple cases
+FR-007,Agent,Agent can search codebase,1,8,BETA,search_text tool implemented
+FR-009,Agent,Repair Mode: Planner gets error context,4,9,READY,Aggressive repair prompts with constraints and recovery strategies
+FR-010,Agent,Agent can read file contents,1,9,READY,Content parsing works correctly
+FR-011,Gatekeeper,Gatekeeper intercepts sensitive tools,2,10,RELEASED,SENSITIVE_TOOLS array configured
+FR-012,Gatekeeper,User can approve/reject actions,2,9,READY,Modal workflow complete
+FR-015,Runtime,Agent can execute file operations,2,9,READY,write_file tool fixed with base64 encoding
+FR-016,Runtime,search_text tool shell syntax,1,9,READY,search_text tool fixed with base64 encoding
+FR-018,Navigation,Navigate to specific file and line,1,9,READY,AGENT_NAVIGATE event works
+FR-026,UI,Permission Modal renders,2,9,READY,ApprovalRequest component complete
+FR-029,Parser,Diagram Parser (Mermaid),1,10,RELEASED,Valid syntax produced
+FR-030,UI,UI renders interactive diagrams,1,10,RELEASED,Mermaid rendering works
+FR-031,UI,Diagram nodes are clickable,1,10,RELEASED,Click triggers navigation but edge cases exist
+FR-032,Navigation,Hybrid State (Hot + Ghost),3,9,READY,Both types visible in tree
+FR-033,UI,Ghost Nodes visually distinguished,3,9,READY,Dimmed styling applied
+FR-035,Navigation,Ghost Node click triggers lazy load,3,9,READY,Single file fetched on demand
+FR-036,UI,Read-Only Mode for Ghost files,3,8,BETA,Lock icon visible
+FR-039,Context,Live Context Stream,5,8,BETA,Context updates silently
+FR-040,Context,Smart Context Snapshot,5,8,BETA,History included in prompt
+FR-041,UX,Barge-In Handling,5,9,READY,Agent yields control when user becomes active during reasoning
+FR-042,UX,Focus Locking,5,9,READY,Navigation skipped if user active in last 3 seconds
+NFR-003,Security,No destructive action without consent,2,9,READY,Blocked until approval
+NFR-006,Performance,Lazy load latency < 2s,3,9,READY,Instrumented with console.time/timeEnd and file size logging
+NFR-007,Performance,Ghost File Caching,3,9,READY,lazyFiles Map caches fetched files; cache hit/miss logged
+NFR-009,Performance,Context Debounce,5,8,BETA,Rapid clicks ignored
