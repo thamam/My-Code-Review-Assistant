@@ -147,6 +147,24 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // The pendingAction will automatically re-trigger the approval modal
         // because the Agent's internal state already has it.
       }
+
+      // 8. Session Reset (Clear leftovers when loading new repo/PR)
+      if (event.type === 'SESSION_RESET') {
+        const { repoName } = event.payload;
+        console.log(`[ChatContext] SESSION_RESET received - clearing chat for: ${repoName}`);
+
+        // Clear previous messages
+        setMessages([]);
+
+        // Add contextual welcome message
+        const welcomeMsg: ChatMessage = {
+          id: `welcome-${Date.now()}`,
+          role: 'assistant',
+          content: `Welcome to **${repoName}**. I'm Theia, your AI code review assistant. How can I help you explore this codebase?`,
+          timestamp: Date.now()
+        };
+        setMessages([welcomeMsg]);
+      }
     });
 
     // Phase 16.2: Trigger Session Restoration on Mount

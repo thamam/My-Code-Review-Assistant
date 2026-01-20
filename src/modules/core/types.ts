@@ -217,7 +217,15 @@ export interface SystemFileSyncEvent {
     };
 }
 
-export type SystemEvent = RuntimeOutputEvent | RuntimeReadyEvent | RuntimeExitEvent | SystemFileSyncEvent;
+export interface SessionResetEvent {
+    type: 'SESSION_RESET';
+    payload: {
+        reason: 'new_session' | 'user_reset';
+        repoName?: string;
+    };
+}
+
+export type SystemEvent = RuntimeOutputEvent | RuntimeReadyEvent | RuntimeExitEvent | SystemFileSyncEvent | SessionResetEvent;
 
 // ============================================================================
 // UNIFIED EVENT TYPE
@@ -235,7 +243,7 @@ export function isAgentAction(event: TheiaEvent): event is AgentAction {
 }
 
 export function isSystemEvent(event: TheiaEvent): event is SystemEvent {
-    return ['RUNTIME_OUTPUT', 'RUNTIME_READY', 'RUNTIME_EXIT', 'SYSTEM_FILE_SYNC'].includes(event.type);
+    return ['RUNTIME_OUTPUT', 'RUNTIME_READY', 'RUNTIME_EXIT', 'SYSTEM_FILE_SYNC', 'SESSION_RESET'].includes(event.type);
 }
 
 // ============================================================================

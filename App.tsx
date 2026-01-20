@@ -243,7 +243,9 @@ const MainLayout = () => {
                     <div className="overflow-hidden min-w-0">
                         <h1 className="text-sm font-bold flex items-center gap-2 truncate">
                             {prData.title}
-                            {prData.id !== 'repo-mode' && (
+                            {prData.id === 'repo-mode' ? (
+                                <span className="text-[10px] font-medium text-emerald-400 bg-emerald-900/30 px-1.5 py-0.5 rounded">Codebase Exploration</span>
+                            ) : (
                                 <span className="text-xs font-normal text-gray-500">#{prData.id}</span>
                             )}
                         </h1>

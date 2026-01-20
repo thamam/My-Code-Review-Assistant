@@ -7,6 +7,7 @@ import { SAMPLE_PR, SAMPLE_WALKTHROUGH } from '../mock/samplePR';
 import { PRData, Walkthrough, PRHistoryItem } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 import { parseWalkthroughFile, parseWalkthroughFromText } from '../services/walkthroughParser';
+import { eventBus } from '../src/modules/core/EventBus';
 
 const USER_CONFIG = {
   GITHUB_TOKEN: import.meta.env.VITE_GITHUB_TOKEN || '',
@@ -163,6 +164,9 @@ export const WelcomeScreen: React.FC = () => {
   };
 
   const processDataLoad = (data: PRData) => {
+    // Clear previous session's chat history before loading new data
+    eventBus.emit({ type: 'SESSION_RESET', payload: { reason: 'new_session', repoName: data.title } });
+
     setPRData(data);
     if (walkthroughFile) {
       loadWalkthrough(walkthroughFile);
@@ -231,7 +235,7 @@ export const WelcomeScreen: React.FC = () => {
           <form onSubmit={(e) => handleLoad(e, false)} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                GitHub URL
+                GitHub Repository or PR URL
               </label>
               <input
                 type="text"
@@ -241,6 +245,9 @@ export const WelcomeScreen: React.FC = () => {
                 className="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                 disabled={isLoading}
               />
+              <p className="text-[10px] text-gray-500 mt-1.5">
+                Paste a Repo URL (e.g., github.com/owner/repo) to explore the codebase without a PR.
+              </p>
             </div>
 
             <div>
@@ -303,7 +310,7 @@ export const WelcomeScreen: React.FC = () => {
                 </>
               ) : (
                 <button type="submit" disabled={isLoading || !url} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50">
-                  {isLoading ? <><Loader2 size={18} className="animate-spin" /> Loading Data...</> : "Visualize PR"}
+                  {isLoading ? <><Loader2 size={18} className="animate-spin" /> Loading Data...</> : "Explore"}
                 </button>
               )}
             </div>
@@ -313,7 +320,7 @@ export const WelcomeScreen: React.FC = () => {
             <div className="pt-4 border-t border-gray-800">
               <div className="flex items-center gap-2 mb-3 text-gray-500">
                 <History size={14} />
-                <span className="text-xs font-semibold uppercase tracking-wider">Recent PRs</span>
+                <span className="text-xs font-semibold uppercase tracking-wider">Recent</span>
               </div>
               <div className="space-y-2">
                 {history.map((item, idx) => (
