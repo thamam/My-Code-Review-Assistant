@@ -94,6 +94,7 @@ npx playwright show-report
 | Diagrams | Mermaid.js |
 
 See [docs/architecture/system_handover_v0.3.0.md](docs/architecture/system_handover_v0.3.0.md) for detailed architecture.
+See [docs/specs/](docs/specs/) for detailed Requirements and User Stories.
 
 ---
 

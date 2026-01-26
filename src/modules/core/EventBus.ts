@@ -156,6 +156,21 @@ class EventBus {
         });
         return counts;
     }
+
+    /**
+     * Prints the event history table to console for debugging.
+     */
+    public dumpToConsole(count: number = 20): void {
+        const events = this.getRecentEvents(count);
+        console.groupCollapsed(`[EventBus] History Dump (${events.length} events)`);
+        console.table(events.map(e => ({
+            Time: new Date(e.timestamp).toISOString().split('T')[1],
+            Source: e.source,
+            Type: e.event.type,
+            Payload: JSON.stringify(e.event.payload).substring(0, 50) + '...'
+        })));
+        console.groupEnd();
+    }
 }
 
 // Export Singleton

@@ -28,3 +28,4 @@ Theia is an AI-powered code review assistant that bridges the gap between **Requ
 3.  **Director** (Gemini 3) analyzes request + current code + linked spec.
 4.  **Director** returns JSON action: `{ "speak": "It misses the error handling...", "highlight": [12, 15] }`.
 5.  **Voice UI** plays audio and highlights code lines 12-15.
+

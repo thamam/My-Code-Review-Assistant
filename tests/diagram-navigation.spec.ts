@@ -66,7 +66,7 @@ const mockDiagram = {
 test.describe('Diagram Navigation', () => {
     test.beforeEach(async ({ page }) => {
         // Navigate to local instance
-        await page.goto('http://localhost:3000');
+        await page.goto('/');
 
         // Wait for app to load
         await page.waitForSelector('#root', { state: 'attached' });

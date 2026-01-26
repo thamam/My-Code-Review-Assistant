@@ -17,7 +17,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Phase 8+9 Integration: Diagram to Ghost File', () => {
     test.beforeEach(async ({ page }) => {
         // Navigate to local instance
-        await page.goto('http://localhost:3000');
+        await page.goto('/');
 
         // Load Sample PR to get the app into a working state
         await page.waitForSelector('text=Load Sample PR', { state: 'visible', timeout: 5000 });

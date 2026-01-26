@@ -10,6 +10,9 @@ import { eventBus } from "./EventBus";
 import { AgentPlan, PlanStep } from "../planner/types";
 import { searchService } from '../search';
 import { storageService } from '../persistence';
+import { sanitizeForVoice } from "../../utils/VoiceUtils";
+import { formatSearchCommand, formatWriteFileCommand } from "../runtime/ToolUtils";
+import { DiagramAgent } from "../../../services/diagramAgent";
 
 // --- Types ---
 
@@ -42,14 +45,7 @@ export interface DualTrackResponse {
  * Screen track retains full markdown/code formatting.
  */
 function formatDualTrack(voice: string, screen?: string): string {
-  // Sanitize voice for TTS: remove markdown, code blocks, special chars
-  const cleanVoice = voice
-    .replace(/```[\s\S]*?```/g, '') // Remove code blocks
-    .replace(/`[^`]+`/g, '')        // Remove inline code
-    .replace(/[#*_~\[\]()]/g, '')   // Remove markdown syntax
-    .replace(/\n+/g, ' ')           // Flatten newlines
-    .trim()
-    .substring(0, 200);             // Max 2 sentences (~200 chars)
+  const cleanVoice = sanitizeForVoice(voice).substring(0, 200); // Max 2 sentences (~200 chars)
 
   const response: DualTrackResponse = {
     voice: cleanVoice || 'Action completed.',
@@ -171,6 +167,17 @@ const knowledgeTools: FunctionDeclaration[] = [
       },
       required: ["query"]
     }
+  },
+  // Tool 3: Diagram Generation (Phase 8)
+  {
+    name: "propose_diagrams",
+    description: "Generate high-value Mermaid.js diagrams for the current PR or codebase. Use this when the user asks for architecture, flow, or visualization.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        prompt: { type: Type.STRING, description: "Specific instructions for the diagram (optional)" }
+      }
+    }
   }
 ];
 
@@ -180,14 +187,15 @@ const executorTools = [...uiTools, ...knowledgeTools];
 // Phase 15: The Gatekeeper - Sensitive tools require human approval
 const SENSITIVE_TOOLS = ['run_terminal_command', 'write_file'];
 
-class TheiaAgent {
+export class TheiaAgent {
   private ai: GoogleGenAI;
-  private model: string = 'gemini-2.0-flash-exp';
+  private model: string = 'gemini-3-pro-preview';
   private chatSession: any = null;
   private workflow: any;
   private unsubscribeTemp: (() => void) | null = null;
   private state: AgentState | null = null; // Phase 15.2: Persisted state for resumption
   private lastUserInteraction: number = 0; // Phase 17: User Activity Tracker (FR-041/FR-042)
+  private isBusy: boolean = false;
 
   constructor() {
     this.ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
@@ -209,8 +217,17 @@ class TheiaAgent {
     graph.addNode("executor", this.executorNode.bind(this));
 
     // Define Edges
-    (graph as any).addEdge(START, "planner");
-    (graph as any).addEdge("planner", "executor"); // Pass plan to executor
+    (graph as any).addConditionalEdges(
+      START,
+      this.routeEntry.bind(this),
+      {
+        planner: "planner",
+        executor: "executor",
+        [END]: END
+      }
+    );
+
+    (graph as any).addEdge("planner", "executor");
 
     // The Loop: Executor decides whether to repeat, replan, or finish
     (graph as any).addConditionalEdges(
@@ -218,7 +235,7 @@ class TheiaAgent {
       this.routePlan.bind(this),
       {
         executor: "executor",
-        planner: "planner", // Phase 13.2: Self-correction path
+        planner: "planner", 
         [END]: END
       }
     );
@@ -231,7 +248,12 @@ class TheiaAgent {
       const event = envelope.event;
       if (event.type === 'USER_MESSAGE') {
         const { content, text, context, prData } = event.payload;
-        await this.process(content || text || '', context, prData);
+        console.log('[AGENT_PROBE] Raw Payload:', event.payload);
+
+        // FR-039: Context Middleware - Inject "Ground Truth"
+        const rawMessage = content || text || '';
+        const envelopedMessage = this.buildContextEnvelope(rawMessage, context);
+        await this.process(envelopedMessage, context, prData);
       }
     });
 
@@ -239,6 +261,7 @@ class TheiaAgent {
     eventBus.subscribe('USER_APPROVAL', async (envelope) => {
       const event = envelope.event;
       if (event.type === 'USER_APPROVAL') {
+        console.log(`[Agent] Received USER_APPROVAL: approved=${event.payload.approved}`);
         await this.resolvePendingAction(event.payload.approved);
       }
     });
@@ -248,11 +271,51 @@ class TheiaAgent {
       const event = envelope.event;
       if (event.type === 'USER_ACTIVITY') {
         this.lastUserInteraction = event.payload.timestamp;
-        console.log('[Activity Tracker] User active at', event.payload.timestamp);
+        
+        // FR-041: Proactive Barge-In
+        if (this.isBusy) {
+          console.log('[Barge-In] User activity detected while busy. Preparing to yield.');
+          eventBus.emit({
+            type: 'AGENT_YIELD',
+            payload: { reason: 'user_activity', timestamp: Date.now() }
+          });
+        }
       }
     });
 
     console.log('[TheiaAgent] Initialized with Planner + Executor Loop. Phase 17 (Shadow Partner) Active.');
+  }
+
+  /**
+   * Phase 12.5: State Exposure (Operation Glass Box)
+   * Returns a snapshot of the current Agent state.
+   */
+  public getState(): AgentState | null {
+    return this.state;
+  }
+
+  /**
+   * Entry Router: Decides where to start the graph
+   */
+  private routeEntry(state: AgentState): string {
+    const { plan, pendingAction } = state;
+
+    // 1. If we are waiting for human approval, STOP and END the graph iteration.
+    // The graph will be restarted via this.process() when USER_APPROVAL is received.
+    if (pendingAction) {
+      console.log('[EntryRouter] Pending action detected. Stopping graph.');
+      return END;
+    }
+
+    // 2. If we have an existing plan that is still executing, go straight to executor.
+    if (plan && plan.status === 'executing') {
+      console.log('[EntryRouter] Resuming existing plan.');
+      return 'executor';
+    }
+
+    // 3. Default: Need to create a new plan
+    console.log('[EntryRouter] Routing to planner.');
+    return 'planner';
   }
 
   /**
@@ -263,13 +326,19 @@ class TheiaAgent {
   private routePlan(state: AgentState): string {
     const { plan, pendingAction } = state;
 
+    // FR-041: Barge-In Detection - Yield control if user became active recently
+    if (Date.now() - this.lastUserInteraction < 1000) {
+      console.log('[Governor] Barge-in detected. Yielding control.');
+      eventBus.emit({
+        type: 'AGENT_YIELD',
+        payload: { reason: 'user_activity', timestamp: Date.now() }
+      });
+      return END;
+    }
+
     // Phase 15: Pause execution if awaiting user approval
     if (pendingAction) {
       console.log('[Governor] Pending action awaiting approval. Pausing execution.');
-      eventBus.emit({
-        type: 'AGENT_THINKING',
-        payload: { stage: 'completed', timestamp: Date.now() }
-      });
       return END;
     }
 
@@ -279,10 +348,6 @@ class TheiaAgent {
       eventBus.emit({
         type: 'AGENT_SPEAK',
         payload: { text: formatDualTrack('Safety limit reached. Maximum steps exceeded.', 'Safety limit reached: Maximum steps exceeded. Stopping execution.') }
-      });
-      eventBus.emit({
-        type: 'AGENT_THINKING',
-        payload: { stage: 'completed', timestamp: Date.now() }
       });
       return END;
     }
@@ -306,6 +371,7 @@ class TheiaAgent {
    * Main Entry Point
    */
   private async process(input: string, context: any, prData: any, stateOverrides?: Partial<AgentState>) {
+    this.isBusy = true;
     // Emit "Thinking" Signal
     eventBus.emit({
       type: 'AGENT_THINKING',
@@ -336,6 +402,8 @@ class TheiaAgent {
         type: 'AGENT_SPEAK',
         payload: { text: formatDualTrack('A system error occurred.', `System Error: ${error.message}`) }
       });
+    } finally {
+      this.isBusy = false;
       eventBus.emit({
         type: 'AGENT_THINKING',
         payload: { stage: 'completed', timestamp: Date.now() }
@@ -368,7 +436,7 @@ class TheiaAgent {
 
       let stepResult: string;
       try {
-        stepResult = await this.executeTool(pendingAction.tool, pendingAction.args);
+        stepResult = await this.executeTool(pendingAction.tool, pendingAction.args, prData);
       } catch (err: any) {
         stepResult = `Error: ${err.message}`;
       }
@@ -405,7 +473,7 @@ class TheiaAgent {
       // UX: Report result
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: formatDualTrack(`Step ${plan.activeStepIndex + 1} completed.`, `**Step ${plan.activeStepIndex + 1}:** ${stepResult.substring(0, 200)}`) }
+        payload: { text: formatDualTrack(`Step ${plan.activeStepIndex + 1} completed.`, `**Step ${plan.activeStepIndex + 1}:**\n${stepResult}`) }
       });
 
       // Resume graph with updated state (clear pendingAction)
@@ -507,6 +575,10 @@ Available Tools:
 - navigate_to_code: Use to navigate to a specific file and line number.
 - change_tab: Use to switch sidebar tabs.
 
+CRITICAL: You will receive a [SYSTEM_CONTEXT] block. This is the GROUND TRUTH.
+If User says 'this file', refer to ACTIVE_FILE.
+NEVER guess filenames. Use the context.
+
 Context: File: ${context?.activeFile}, Repo: ${prData?.title}`;
 
     let prompt = userMsg.content;
@@ -514,6 +586,11 @@ Context: File: ${context?.activeFile}, Repo: ${prData?.title}`;
     // INJECT REPAIR CONTEXT (FR-009: Improved Repair Mode)
     if (isRepairMode) {
       console.log('[Planner] Entering REPAIR MODE.');
+
+      eventBus.emit({
+        type: 'REPAIR_MODE',
+        payload: { originalGoal: plan.goal, lastError, timestamp: Date.now() }
+      });
 
       // Extract failed step details for context
       const failedStep = plan.steps[plan.activeStepIndex];
@@ -566,24 +643,37 @@ Create a RECOVERY PLAN that:
 2. Then attempts to achieve the goal using a DIFFERENT strategy`;
     }
 
-    // 1. Initialize Planner Session
-    const planningSession = this.ai.chats.create({
+    // 1. Ask for the Plan using models.generateContent (standard project pattern)
+    const response = await this.ai.models.generateContent({
       model: this.model,
       config: {
         systemInstruction,
         tools: [{ functionDeclarations: plannerTools }]
-      }
+      },
+      contents: [{ role: 'user', parts: [{ text: prompt }] }]
     });
 
-    // 2. Ask for the Plan
-    const response = await planningSession.sendMessage({ message: prompt });
+    if (!response) {
+      console.error('[Planner] No response received from model');
+      return { plan: undefined, lastError: 'No response from AI model' };
+    }
 
     // 3. Extract the Plan (Function Call)
-    const functionCalls = response?.functionCalls || [];
+    // Check all parts for a function call named 'submit_plan'
+    let submitPlanCall = null;
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    
+    for (const part of parts) {
+      if (part.functionCall && part.functionCall.name === 'submit_plan') {
+        submitPlanCall = part.functionCall;
+        break;
+      }
+    }
+
     let newPlan: AgentPlan | undefined;
 
-    if (functionCalls.length > 0 && functionCalls[0].name === 'submit_plan') {
-      const args = functionCalls[0].args as any;
+    if (submitPlanCall) {
+      const args = submitPlanCall.args as any;
       newPlan = {
         id: `plan-${Date.now()}`, // New ID
         goal: args.goal,
@@ -617,7 +707,10 @@ Create a RECOVERY PLAN that:
       console.log('[Agent] Plan created:', newPlan);
     } else {
       // LLM returned text instead of a plan - attempt "Greedy" parse
-      const text = response?.text || '';
+      let text = '';
+      for (const part of parts) {
+        if (part.text) text += part.text;
+      }
       console.log('[Planner] Raw Output:', text); // Log this to see what the model actually said
 
       let planData: any;
@@ -707,35 +800,31 @@ Create a RECOVERY PLAN that:
 
     let response;
     try {
-      // 1. Create Execution Session
-      console.log('[Executor] Creating chat session...');
-      console.log('[Executor] Tools:', executorTools.map(t => t.name));
-
-      const chat = this.ai.chats.create({
-        model: this.model,
-        config: {
-          systemInstruction: `You are Theia's Executor.
-Your Goal: Complete the current step of the plan.
-Plan Goal: "${plan.goal}"
-Current Step (${plan.activeStepIndex + 1}/${plan.steps.length}): "${currentStep.description}"
-Suggested Tool: ${currentStep.tool || 'Decide best tool'}
-Context: ${context?.activeFile}
-
-FORCE: You MUST call a tool. DO NOT reply with text.`,
-          tools: [{ functionDeclarations: executorTools }]
-        }
-      });
-
-      console.log('[Executor] Chat session created. Calling Gemini API...');
-
-      // 2. Trigger the LLM with timeout protection
+      // 1. Create Execution Session using models.generateContent (standard project pattern)
+      console.log('[Executor] Calling Gemini API for tool selection...');
+      
       const timeoutMs = 30000;
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error(`API call timed out after ${timeoutMs}ms`)), timeoutMs)
       );
 
       response = await Promise.race([
-        chat.sendMessage({ message: "EXECUTE_NOW" }),
+        this.ai.models.generateContent({
+          model: this.model,
+          config: {
+            systemInstruction: `You are Theia's Executor.
+Your Goal: Complete the current step of the plan.
+Plan Goal: "${plan.goal}"
+Current Step (${plan.activeStepIndex + 1}/${plan.steps.length}): "${currentStep.description}"
+Suggested Tool: ${currentStep.tool || 'Decide best tool'}
+Context: ${context?.activeFile}
+
+FORCE: You MUST call a tool. DO NOT reply with text.
+PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_code) over run_terminal_command when possible.`,
+            tools: [{ functionDeclarations: executorTools }]
+          },
+          contents: [{ role: 'user', parts: [{ text: "EXECUTE_NOW" }] }]
+        }),
         timeoutPromise
       ]) as any;
     } catch (error: any) {
@@ -763,13 +852,34 @@ FORCE: You MUST call a tool. DO NOT reply with text.`,
       };
     }
 
-    // 3. ANALYZE RESPONSE
-    const rawText = response?.text || '';
-    const functionCalls = response?.functionCalls || [];
-    const functionCall = functionCalls[0];
+    if (!response) {
+      console.error('[Executor] No response received from model');
+      return { 
+        plan: { ...plan, status: 'failed' as const }, 
+        lastError: 'No response from AI model during execution' 
+      };
+    }
 
-    console.log('[Executor Debug] Text:', rawText);
-    console.log('[Executor Debug] Tool:', functionCall?.name);
+    // 3. ANALYZE RESPONSE
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    let functionCall = null;
+    let rawText = '';
+
+    for (const part of parts) {
+      if (part.functionCall) {
+        functionCall = part.functionCall;
+      }
+      if (part.text) {
+        rawText += part.text;
+      }
+    }
+
+    console.log('[Executor Debug] Raw Model Text:', rawText);
+    if (functionCall) {
+      console.log('[Executor Debug] Tool Detected:', functionCall.name, 'Args:', JSON.stringify(functionCall.args));
+    } else {
+      console.warn('[Executor Debug] NO TOOL CALL DETECTED. Model outputted text instead.');
+    }
 
     // SCENARIO B: MODEL HALLUCINATION (The "Chatty" Trap)
     if (!functionCall) {
@@ -796,10 +906,18 @@ FORCE: You MUST call a tool. DO NOT reply with text.`,
     }
 
     // SCENARIO C: SUCCESS (Proceed to Gatekeeper)
-    const { name, args } = functionCall;
+    const name = currentStep.tool;
+    const args = currentStep.args || {};
 
-    // --- GATEKEEPER LOGIC (Phase 15) ---
-    if (SENSITIVE_TOOLS.includes(name)) {
+    // Phase 15: The Gatekeeper - Sensitive tools require human approval
+    // FR-011: Interception Logic
+    // Optimization: Read-only commands are SAFE
+    const isReadOnlyCommand = name === 'run_terminal_command' && 
+      (args.command === 'ls' || args.command === 'find' || args.command === 'grep' || args.command === 'cat');
+    
+    const isSensitive = SENSITIVE_TOOLS.includes(name) && !isReadOnlyCommand;
+
+    if (isSensitive) {
       console.log(`[Gatekeeper] Intercepting sensitive tool: ${name}`);
 
       // Emit event to UI
@@ -830,7 +948,7 @@ FORCE: You MUST call a tool. DO NOT reply with text.`,
     });
 
     try {
-      const output = await this.executeTool(name, args);
+      const output = await this.executeTool(name, args, prData);
       stepResult = output;
     } catch (err: any) {
       stepResult = `Error: ${err.message}`;
@@ -839,7 +957,7 @@ FORCE: You MUST call a tool. DO NOT reply with text.`,
     // UX: Tell the user what we got
     eventBus.emit({
       type: 'AGENT_SPEAK',
-      payload: { text: formatDualTrack(`Step ${plan.activeStepIndex + 1} result received.`, `**Step ${plan.activeStepIndex + 1}:** ${stepResult.substring(0, 200)}`) }
+      payload: { text: formatDualTrack(`Step ${plan.activeStepIndex + 1} result received.`, `**Step ${plan.activeStepIndex + 1}:**\n${stepResult}`) }
     });
 
     // 5. Analyze Result (The Judge)
@@ -848,6 +966,19 @@ FORCE: You MUST call a tool. DO NOT reply with text.`,
 
     const isSuccess = exitCode === 0;
     const stepStatus: PlanStep['status'] = isSuccess ? 'completed' : 'failed';
+
+    if (!isSuccess) {
+      console.log(`[Executor] Step failed with exit code ${exitCode}. Emitting tool_error.`);
+      eventBus.emit({
+        type: 'AGENT_THINKING',
+        payload: { 
+          stage: 'tool_error', 
+          message: `Step failed (Exit Code: ${exitCode}).`, 
+          timestamp: Date.now(),
+          error: stepResult 
+        }
+      });
+    }
 
     const newSteps = [...plan.steps];
     newSteps[plan.activeStepIndex] = {
@@ -878,8 +1009,12 @@ FORCE: You MUST call a tool. DO NOT reply with text.`,
 
     if (!isSuccess) {
       eventBus.emit({
+        type: 'AGENT_THINKING',
+        payload: { stage: 'tool_error', message: 'Step failed. Analyzing error...', timestamp: Date.now(), error: stepResult }
+      });
+      eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: formatDualTrack('This step failed.', `**Step Failed:** ${stepResult.substring(0, 200)}`) }
+        payload: { text: formatDualTrack('This step failed.', `**Step Failed:**\n${stepResult}`) }
       });
     }
 
@@ -983,7 +1118,7 @@ Selection: ${context?.activeSelection || 'None'}
         console.log(`[TheiaAgent] Executing tool: ${fc.name}`, fc.args);
 
         // Emit the corresponding event based on function name
-        this.executeTool(fc.name, fc.args);
+        this.executeTool(fc.name, fc.args, prData);
 
         // Build function response part
         functionResponseParts.push({
@@ -1023,8 +1158,11 @@ Selection: ${context?.activeSelection || 'None'}
    * Captures stdout/stderr into a single string.
    */
   private async executeCommandAndWait(command: string, args: string[]): Promise<string> {
+    const TIMEOUT_MS = 15000; // 15s timeout for any shell command
+
     return new Promise((resolve) => {
       let outputBuffer = '';
+      let timer: any;
 
       // Definition of handlers
       const onOutput = (envelope: any) => {
@@ -1046,6 +1184,7 @@ Selection: ${context?.activeSelection || 'None'}
       // Cleanup to prevent memory leaks
       const cleanup = () => {
         this.unsubscribeTemp?.();
+        clearTimeout(timer);
       };
 
       // Subscribe to EventBus (using wildcard to catch all events)
@@ -1056,6 +1195,13 @@ Selection: ${context?.activeSelection || 'None'}
         unsubOutput();
         unsubExit();
       };
+
+      // Safety Timeout
+      timer = setTimeout(() => {
+        console.warn(`[Agent] Command timed out: ${command} ${args.join(' ')}`);
+        cleanup();
+        resolve(outputBuffer + `\n[Error: Command timed out after ${TIMEOUT_MS}ms]`);
+      }, TIMEOUT_MS);
 
       // Trigger the Nervous System
       eventBus.emit({
@@ -1069,7 +1215,7 @@ Selection: ${context?.activeSelection || 'None'}
    * Execute a tool by emitting the corresponding event
    * Returns a Promise<string> for async tools like terminal commands
    */
-  private async executeTool(name: string, args: any): Promise<string> {
+  private async executeTool(name: string, args: any, prData?: any): Promise<string> {
     const timestamp = Date.now();
 
     // 1. Runtime Tools (Async/Observed)
@@ -1092,30 +1238,36 @@ Selection: ${context?.activeSelection || 'None'}
     }
 
     // Layer 2 (Deep Search): search_text -> Uses Node.js (Runtime) to find code symbols
-    // Note: WebContainer's jsh doesn't have grep, so we use a Node.js script instead
-    // FIX (FR-016): Use base64 encoding to safely pass query without shell interpretation
     if (name === 'search_text') {
-      // Encode query as base64 to avoid shell quoting issues
-      const encodedQuery = Buffer.from(args.query).toString('base64');
-
-      // Node.js one-liner that recursively searches for text in files
-      // Works in WebContainer where grep is not available
-      const nodeScript = `const fs=require('fs'),path=require('path');const q=Buffer.from('${encodedQuery}','base64').toString();function search(dir){try{fs.readdirSync(dir).forEach(f=>{const p=path.join(dir,f);try{const s=fs.statSync(p);if(s.isDirectory()&&!f.startsWith('.')&&f!=='node_modules')search(p);else if(s.isFile()&&/\\.(ts|js|tsx|jsx|json|md)$/.test(f)){const lines=fs.readFileSync(p,'utf8').split('\\n');lines.forEach((l,i)=>{if(l.includes(q))console.log(p+':'+(i+1)+': '+l.trim())});}}catch(e){}});}catch(e){}}search('.');`;
-
-      // Pass script as argument to node -e, avoiding shell interpretation of content
+      const nodeScript = formatSearchCommand(args.query);
       return this.executeCommandAndWait('node', ['-e', nodeScript]);
     }
 
+    // Tool 3: Diagram Generation (Phase 8)
+    if (name === 'propose_diagrams') {
+      const diagramAgent = new DiagramAgent();
+      try {
+        const targetPR = prData || this.state?.prData;
+        if (!targetPR) return "Error: No PR data available for diagram generation.";
+        
+        let diagrams = [];
+        if (args.prompt) {
+          const custom = await diagramAgent.generateCustomDiagram(targetPR, args.prompt);
+          diagrams = [custom];
+        } else {
+          diagrams = await diagramAgent.proposeDiagrams(targetPR);
+        }
+
+        const mermaidBlocks = diagrams.map(d => `### ${d.title}\n${d.description}\n\n\`\`\`mermaid\n${d.mermaidCode}\n\`\`\``).join('\n\n');
+        return `Generated ${diagrams.length} diagrams:\n\n${mermaidBlocks}`;
+      } catch (e: any) {
+        return `Diagram generation failed: ${e.message}`;
+      }
+    }
+
     // Phase 15: write_file tool - Creates/overwrites files via Node.js
-    // FIX (FR-015): Use base64 encoding to safely pass content without shell interpretation
     if (name === 'write_file') {
-      // Encode both path and content as base64 to avoid shell quoting issues
-      const encodedPath = Buffer.from(args.path).toString('base64');
-      const encodedContent = Buffer.from(args.content).toString('base64');
-
-      const nodeScript = `const fs=require('fs'),path=require('path');const targetPath=Buffer.from('${encodedPath}','base64').toString();const content=Buffer.from('${encodedContent}','base64').toString();const dir=path.dirname(targetPath);if(dir&&dir!=='.'&&!fs.existsSync(dir)){fs.mkdirSync(dir,{recursive:true});}fs.writeFileSync(targetPath,content);console.log('File written: '+targetPath);`;
-
-      // Pass script as argument to node -e, avoiding shell interpretation of content
+      const nodeScript = formatWriteFileCommand(args.path, args.content);
       return this.executeCommandAndWait('node', ['-e', nodeScript]);
     }
 
@@ -1170,6 +1322,33 @@ Selection: ${context?.activeSelection || 'None'}
     }
   }
 
+  /**
+   * FR-039: Context Middleware - Constructs the "Ground Truth" envelope
+   * This ensures the Agent always knows the user's active context.
+   */
+  private buildContextEnvelope(message: string, context: any): string {
+    const activeFile = context?.activeFile || 'None';
+    const activeTab = context?.activeTab || 'files';
+    const selection = context?.activeSelection ? `\nACTIVE_SELECTION: ${context.activeSelection}` : '';
+
+    const warning = activeFile === 'None' 
+      ? '\nWARNING: No active file detected. If the user asks about "this file", ASK THEM to open it first. DO NOT GUESS filenames.' 
+      : '';
+
+    const contextHeader = context ? `
+[SYSTEM_CONTEXT]
+ACTIVE_FILE: ${activeFile}
+ACTIVE_TAB: ${activeTab}${selection}${warning}
+[/SYSTEM_CONTEXT]
+` : '';
+
+    console.log('[MIDDLEWARE_PROBE] Final Prompt Injection:', contextHeader);
+
+    return `${contextHeader}
+
+USER_QUERY: ${message}`;
+  }
+
   private buildSystemPrompt(context: any, prData: any): string {
     return `You are Theia, a Senior Staff Software Engineer reviewing code.
 PR: "${prData?.title || 'Unknown'}"
@@ -1185,4 +1364,11 @@ Current Tab: ${context?.activeTab || 'files'}`;
   }
 }
 
+import { TraceService } from "./TraceService";
+import { LocalFlightRecorder } from "./FlightRecorder";
+
 export const agent = new TheiaAgent();
+
+// --- Operation Glass Box: Activate Flight Recorder ---
+const flightRecorder = LocalFlightRecorder.loadFromDisk();
+new TraceService(agent, flightRecorder);

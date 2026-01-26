@@ -50,37 +50,32 @@ export const ChatMessage: React.FC<{ message: ChatMessageType }> = ({ message })
     }
   }
 
-  // Simple parser to detect code blocks
+  console.log('[ChatMessage] displayContent:', displayContent);
+
   // Simple parser to detect code blocks
   const renderContent = (text: string) => {
-    // Split by tripple backticks, capturing the optional language tag
-    const parts = text.split(/```(\w+)?\n([\s\S]*?)```/g);
+    console.log('[ChatMessage] Parsing content length:', text.length);
+    // Split by triple backticks, capturing the optional language tag
+    // More flexible regex: allows optional whitespace after backticks
+    const parts = text.split(/```(\w+)?\s*\n?([\s\S]*?)```/g);
 
-    // If we don't have enough parts (1 split = 3 parts: pre, lang, content, post...), 
-    // fallback to legacy simple split or just text
     if (parts.length === 1) return <span className="whitespace-pre-wrap">{text}</span>;
 
+    console.log('[ChatMessage] Split into parts:', parts.length);
     const results = [];
     let i = 0;
 
     while (i < parts.length) {
-      // Even indices are regular text (0, 3, 6...)
-      // With capture groups: [text, lang, content, text, lang, content...]
-      // 0: text before
-      // 1: lang
-      // 2: content
-      // 3: text after
-
       if (parts[i]) {
         results.push(<span key={`text-${i}`} className="whitespace-pre-wrap">{parts[i]}</span>);
       }
 
-      // Check if we have a code block next
       if (i + 2 < parts.length) {
-        const lang = parts[i + 1] || 'text';
+        const lang = (parts[i + 1] || 'text').trim().toLowerCase();
         const content = parts[i + 2];
+        console.log(`[ChatMessage] Detected code block: lang=${lang}, content length=${content.length}`);
 
-        if (lang.trim().toLowerCase() === 'mermaid') {
+        if (lang === 'mermaid') {
           results.push(
             <div key={`mermaid-${i}`} className="my-4 h-64 border border-gray-700 rounded-lg overflow-hidden bg-gray-950">
               <MermaidRenderer code={content} id={`chat-diagram-${i}`} />
@@ -89,7 +84,7 @@ export const ChatMessage: React.FC<{ message: ChatMessageType }> = ({ message })
         } else {
           results.push(<CodeBlock key={`code-${i}`} content={content} />);
         }
-        i += 3; // Advance past lang and content
+        i += 3;
       } else {
         i++;
       }

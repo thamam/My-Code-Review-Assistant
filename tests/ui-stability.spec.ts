@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test.describe('UI Stability & Interaction Polish', () => {
     test.beforeEach(async ({ page }) => {
         // Setup similar to context-awareness spec
-        await page.goto('http://localhost:3000');
+        await page.goto('/');
         await page.waitForSelector('text=Load Sample PR', { state: 'visible' });
         await page.click('text=Load Sample PR');
         await page.waitForSelector('text=Feature: Implement Visual Code Review');

@@ -14,6 +14,11 @@ import { test, expect } from '@playwright/test';
 test.describe('Story 1: The Explorer - Diagram Navigation', () => {
 
     test.beforeEach(async ({ page }) => {
+        // Capture browser console logs for debugging
+        page.on('console', msg => {
+            console.log(`[Browser ${msg.type()}] ${msg.text()}`);
+        });
+
         // Navigate to the application
         await page.goto('/');
 
@@ -31,60 +36,82 @@ test.describe('Story 1: The Explorer - Diagram Navigation', () => {
         const chatInput = page.locator('[data-testid="chat-input"], .chat-input, textarea').first();
         await expect(chatInput).toBeVisible({ timeout: 5000 });
 
-        // Step 2: Type an explicit Mermaid diagram request (tests rendering engine, not Agent IQ)
-        await chatInput.fill('Generate a simple Mermaid diagram with 3 nodes: A-->B-->C. Wrap it in a mermaid code block.');
+        // Mock the Agent response to bypass LLM latency and Gatekeeper
+        await page.evaluate(() => {
+            const bus = (window as any).__THEIA_EVENT_BUS__;
+            if (bus) {
+                const dualTrack = JSON.stringify({
+                    voice: "Here is the architecture diagram.",
+                    screen: "Here is the diagram:\n\n```mermaid\ngraph TD\n    A[App] -->|Render| B(DiffView)\n    B -->|Click| C{Agent}\n```"
+                });
+                bus.emit({
+                    type: 'AGENT_SPEAK',
+                    payload: {
+                        text: dualTrack
+                    }
+                });
+            } else {
+                console.error('__THEIA_EVENT_BUS__ not found');
+            }
+        });
 
-        // Step 3: Click send button
-        const sendButton = page.locator('[data-testid="send-button"], button:has-text("Send"), button[type="submit"]').first();
-        await sendButton.click();
-
-        // Step 4: Wait for Mermaid SVG to appear (Kill Criterion 1) - 45s for LLM response
+        // Step 4: Wait for Mermaid SVG to appear (Kill Criterion 1)
         const mermaidSvg = page.locator('.mermaid svg, [data-testid="mermaid-diagram"] svg');
-        await expect(mermaidSvg).toBeVisible({ timeout: 45000 });
+        await expect(mermaidSvg).toBeVisible({ timeout: 10000 });
 
         console.log('✅ Kill Criterion 1 PASSED: Mermaid SVG appeared');
     });
 
     test('should navigate to code when clicking diagram node', async ({ page }) => {
-        // Setup: Request explicit Mermaid diagram
+        // Ensure chat is ready
         const chatInput = page.locator('[data-testid="chat-input"]').first();
-        await chatInput.fill('Generate a simple Mermaid diagram with 3 nodes: A-->B-->C. Wrap it in a mermaid code block.');
+        await expect(chatInput).toBeVisible();
 
-        const sendButton = page.locator('[data-testid="send-button"], button:has-text("Send"), button[type="submit"]').first();
-        await sendButton.click();
+        // Mock Agent response with a diagram containing a VALID FILE REFERENCE
+        await page.evaluate(() => {
+            const bus = (window as any).__THEIA_EVENT_BUS__;
+            if (bus) {
+                // Simulate user asking (to clear state if needed)
+                // Then immediately simulate agent response
+                const dualTrack = JSON.stringify({
+                    voice: "Here is the detailed flow.",
+                    screen: "Flow with links:\n\n```mermaid\ngraph TD\n    A[Start] -->|Go§src/modules/core/Agent.ts:10| B(End)\n```"
+                });
+                bus.emit({
+                    type: 'AGENT_SPEAK',
+                    payload: {
+                        text: dualTrack
+                    }
+                });
+            }
+        });
 
-        // Wait for diagram to render - 45s for LLM response
+        // Wait for diagram to render
         const mermaidSvg = page.locator('.mermaid svg, [data-testid="mermaid-diagram"] svg');
-        await expect(mermaidSvg).toBeVisible({ timeout: 45000 });
+        await expect(mermaidSvg).toBeVisible({ timeout: 10000 });
 
-        // Step 5: Click a clickable reference node (Kill Criterion 2)
-        const clickableNode = page.locator('.clickable-ref, [data-clickable="true"], .mermaid .node.clickable').first();
+        // Find the clickable message/edge
+        const clickableNode = page.locator('.clickable-ref').first();
+        
+        // Wait for it to be attached
+        await expect(clickableNode).toBeVisible({ timeout: 10000 });
 
-        // Check if clickable nodes exist
-        const nodeCount = await clickableNode.count();
+        // Capture initial active tab (likely 'README.md' or similar)
+        const initialTab = await page.locator('[data-testid="active-file-tab"], .file-tab.active').textContent().catch(() => '');
+        console.log(`Initial Tab: ${initialTab}`);
 
-        if (nodeCount > 0) {
-            // Monitor for navigation event - check editor file change
-            const editorBefore = await page.locator('[data-testid="active-file"], .editor-active-file, .monaco-editor').textContent().catch(() => '');
+        // Click the node
+        await clickableNode.click({ force: true });
 
-            await clickableNode.click();
+        // Wait for navigation update
+        await page.waitForTimeout(1000);
 
-            // Wait for navigation (file change in editor)
-            await page.waitForTimeout(1000);
+        // Verify tab changed to Agent.ts
+        const currentTab = await page.locator('[data-testid="active-file-tab"], .file-tab.active').textContent().catch(() => '');
+        console.log(`Current Tab: ${currentTab}`);
 
-            // Verify the editor shows Agent.ts or the file changed
-            const editorPanel = page.locator('[data-testid="code-viewer"], .monaco-editor, .code-panel');
-            await expect(editorPanel).toBeVisible({ timeout: 5000 });
-
-            // Check if file path contains "Agent" or changed from before
-            const currentFile = await page.locator('[data-testid="active-file"], .file-tab.active, .editor-title').textContent().catch(() => '');
-
-            console.log(`Editor file after click: ${currentFile}`);
-            console.log('✅ Kill Criterion 2 PASSED: Diagram node click triggered navigation');
-        } else {
-            console.log('⚠️ No clickable-ref nodes found in diagram - test inconclusive');
-            test.skip();
-        }
+        expect(currentTab).toContain('Agent.ts');
+        console.log('✅ Kill Criterion 2 PASSED: Diagram node click triggered navigation');
     });
 
 });

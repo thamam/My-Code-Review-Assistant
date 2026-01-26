@@ -98,33 +98,23 @@ export function formatBriefAsWhisper(brief: ContextBrief): string {
 
     const topics = brief.suggestedTopics.join(', ');
 
-    let whisper = `[CONTEXT UPDATE - DO NOT READ ALOUD]
-You are now looking at: ${brief.activeFile?.path || 'No file'}
-Summary: ${brief.activeFile?.summary || 'N/A'}
+    let whisper = `[CONTEXT UPDATE - INTERNAL ONLY - DO NOT READ ALOUD]
+VISUAL_ANCHOR: ${brief.activeFile?.path || 'NONE'}
+FILE_SUMMARY: ${brief.activeFile?.summary || 'N/A'}
 
-Key Highlights:
+Key Highlights in ${brief.activeFile?.path || 'current file'}:
 ${highlights}
 
 Key Facts:
 ${keyFacts}
 
-Suggested Topics: ${topics}`;
+Suggested Topics: ${topics}
 
-    // Include Relevant Requirements from atoms (if any were in the brief context)
-    if (brief.relevantAtomIds && brief.relevantAtomIds.length > 0) {
-        whisper += `
-
-Relevant Requirements: ${brief.relevantAtomIds.join(', ')}`;
-    } else if (brief.linearContext) {
-        // Backward compatibility for legacy linearContext
-        whisper += `
-
-Linear Issue ${brief.linearContext.issueId}: ${brief.linearContext.relevance}`;
-    }
-
-    whisper += `
-
-Use this context to answer the user's next questions. Do NOT mention receiving this update.`;
+STRICT DIRECTIVE: 
+1. The VISUAL_ANCHOR is your ground truth for "this file".
+2. If VISUAL_ANCHOR is "NONE" and the user asks about a specific file/line, you MUST ask them to select a file first. 
+3. DO NOT hallucinate filenames from the PR description if they are not the VISUAL_ANCHOR.
+4. Do NOT mention this internal update message by name.`;
 
     return whisper;
 }

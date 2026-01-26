@@ -34,15 +34,16 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id 
     let isMounted = true;
     const render = async () => {
       try {
+        console.log(`[MermaidRenderer] Rendering diagram ${id} with code:`, code.substring(0, 50) + '...');
         const sanitizedId = `mermaid-${id.replace(/\W/g, '')}-${Date.now()}`;
-        // Note: We render the "Clean Code" from the agent. 
-        // We DO NOT inject text bindings here; we use SVG post-processing.
         const { svg } = await mermaid.render(sanitizedId, code);
+        console.log(`[MermaidRenderer] Render successful for ${id}, SVG length: ${svg.length}`);
         if (isMounted) {
           setSvgContent(svg);
           setError(null);
         }
       } catch (err: any) {
+        console.error(`[MermaidRenderer] Render FAILED for ${id}:`, err);
         if (isMounted) setError(err.message || "Mermaid Render Error");
       }
     };
@@ -56,8 +57,9 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id 
 
     // A. Message Lines (Arrows)
     // Mermaid renders sequence messages as .messageLine0, .messageLine1, etc.
+    // Flowcharts use .edgePath .path
     // We map them by INDEX to the references array.
-    const messagePaths = svgEl.querySelectorAll('[class^="messageLine"]');
+    const messagePaths = svgEl.querySelectorAll('[class^="messageLine"], .edgePath .path');
 
     messagePaths.forEach((path, index) => {
       // Safety check: ensure we have a reference for this arrow
@@ -107,7 +109,8 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id 
       const svgEl = contentRef.current.querySelector('svg');
       if (svgEl) {
         svgEl.setAttribute('width', '100%');
-        svgEl.setAttribute('height', 'auto');
+        // Remove invalid height="auto" - let aspect ratio handle it
+        svgEl.removeAttribute('height'); 
         svgEl.style.maxWidth = 'none';
         // Trigger the enhancement
         enhanceClickableAreas(svgEl);

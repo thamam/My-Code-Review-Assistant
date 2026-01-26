@@ -18,7 +18,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Phase 10: The Neural Loop', () => {
     test.beforeEach(async ({ page }) => {
         // Navigate to local instance
-        await page.goto('http://localhost:3000');
+        await page.goto('/');
 
         // Load Sample PR to initialize the system
         await page.waitForSelector('text=Load Sample PR', { state: 'visible' });

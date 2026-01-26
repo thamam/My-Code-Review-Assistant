@@ -1,0 +1,89 @@
+# Workflow Status Template
+
+# This tracks progress through BMM methodology Analysis, Planning, and Solutioning phases.
+# Implementation phase is tracked separately in sprint-status.yaml
+
+# STATUS DEFINITIONS:
+# ==================
+# Initial Status (before completion):
+#   - required: Must be completed to progress
+#   - optional: Can be completed but not required
+#   - recommended: Strongly suggested but not required
+#   - conditional: Required only if certain conditions met (e.g., if_has_ui)
+#
+# Completion Status:
+#   - {file-path}: File created/found (e.g., "docs/product-brief.md")
+#   - skipped: Optional/conditional workflow that was skipped
+
+generated: "2026-01-23"
+project: "My-Code-Review-Assistant"
+project_type: "brownfield"
+selected_track: "bmad-method"
+field_type: "brownfield"
+workflow_path: "{project-root}/_bmad/bmm/workflows/workflow-status/paths/method-brownfield.yaml"
+workflow_status:
+  - phase: 0
+    name: "Documentation"
+    status: "required"
+    workflows:
+      - id: "document-project"
+        status: "required"
+        agent: "analyst"
+        command: "/bmad:bmm:workflows:document-project"
+        description: "Comprehensive project documentation"
+  - phase: 1
+    name: "Analysis"
+    status: "active"
+    workflows:
+      - id: "research"
+        status: "required"
+        agent: "analyst"
+        command: "/bmad:bmm:workflows:research"
+        description: "Domain analysis"
+  - phase: 2
+    name: "Planning"
+    status: "pending"
+    workflows:
+      - id: "prd"
+        status: "required"
+        agent: "pm"
+        command: "/bmad:bmm:workflows:create-prd"
+        description: "Product Requirements Document"
+      - id: "create-ux-design"
+        status: "conditional"
+        agent: "ux-designer"
+        command: "/bmad:bmm:workflows:create-ux-design"
+        description: "UX Design"
+  - phase: 3
+    name: "Solutioning"
+    status: "pending"
+    workflows:
+      - id: "create-architecture"
+        status: "required"
+        agent: "architect"
+        command: "/bmad:bmm:workflows:create-architecture"
+        description: "System architecture document"
+      - id: "create-epics-and-stories"
+        status: "required"
+        agent: "pm"
+        command: "/bmad:bmm:workflows:create-epics-and-stories"
+        description: "Break down PRD into implementable epics and stories"
+      - id: "test-design"
+        status: "optional"
+        agent: "tea"
+        command: "/bmad:bmm:workflows:test-design"
+        description: "System-level testability review"
+      - id: "implementation-readiness"
+        status: "required"
+        agent: "architect"
+        command: "/bmad:bmm:workflows:implementation-readiness"
+        description: "Validates PRD + Architecture + Epics + UX (optional)"
+  - phase: 4
+    name: "Implementation"
+    status: "pending"
+    workflows:
+      - id: "sprint-planning"
+        status: "required"
+        agent: "sm"
+        command: "/bmad:bmm:workflows:sprint-planning"
+        description: "Creates sprint plan"

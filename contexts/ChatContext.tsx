@@ -50,13 +50,19 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     prData,
     navigateToCode,
     setLeftTab,
-    setIsDiffMode
+    setIsDiffMode,
+    selectedFile,
+    viewportState,
+    focusedLocation // NEW: Import focusedLocation (Source of Truth for Navigation)
   } = usePR();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [currentModel, setModel] = useState('gemini-2.0-flash-exp');
   const [language, setLanguage] = useState<LanguagePreference>('Auto');
+
+  // Phase 17: Focus Lock Tracker (FR-042)
+  const lastUserInteractionRef = useRef<number>(0);
 
   // Keep context ref for "Snapshot" capability
   const userContextRef = useRef<UserContextState>({
@@ -79,12 +85,22 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const unsubscribe = eventBus.subscribe('*', (envelope) => {
       const event = envelope.event; // Extract event from envelope
 
+      // Phase 17: Track User Activity for Focus Locking
+      if (event.type === 'USER_ACTIVITY') {
+        lastUserInteractionRef.current = event.payload.timestamp;
+      }
+
       // 1. Agent Speaks (Output)
       if (event.type === 'AGENT_SPEAK') {
+        const content = event.payload.text || event.payload.content || '';
+        console.log(`[ChatContext] AGENT_SPEAK received. Content length: ${content.length}`);
+        if (content.includes('```mermaid')) {
+          console.log('[ChatContext] Mermaid block detected in incoming message!');
+        }
         const msg: ChatMessage = {
-          id: `ai-${envelope.timestamp}`,
+          id: `ai-${envelope.id}-${envelope.timestamp}`,
           role: 'assistant',
-          content: event.payload.text || event.payload.content || '',
+          content: content,
           timestamp: envelope.timestamp
         };
         setMessages(prev => [...prev, msg]);
@@ -97,6 +113,13 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // 3. Agent Navigate (The Hands - Navigation)
       if (event.type === 'AGENT_NAVIGATE') {
+        // FR-042: Focus Lock - Don't steal focus if user was active in last 3 seconds
+        const timeSinceActivity = Date.now() - lastUserInteractionRef.current;
+        if (timeSinceActivity < 3000) {
+          console.log(`[ChatContext] AGENT_NAVIGATE suppressed (Focus Lock active: ${timeSinceActivity}ms)`);
+          return;
+        }
+
         const { target, reason } = event.payload;
         console.log(`[ChatContext] AGENT_NAVIGATE received: ${target.file}:${target.line} - ${reason}`);
         navigateToCode({
@@ -108,6 +131,13 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // 4. Agent Tab Switch (The Hands - Tab Control)
       if (event.type === 'AGENT_TAB_SWITCH') {
+        // Apply focus lock here too? Requirement says "navigation", but tab switch is also jarring.
+        const timeSinceActivity = Date.now() - lastUserInteractionRef.current;
+        if (timeSinceActivity < 3000) {
+          console.log('[ChatContext] AGENT_TAB_SWITCH suppressed (Focus Lock active)');
+          return;
+        }
+
         const { tab } = event.payload;
         console.log(`[ChatContext] AGENT_TAB_SWITCH received: ${tab}`);
         setLeftTab(tab);
@@ -169,17 +199,42 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         };
         setMessages([welcomeMsg]);
       }
-    });
 
-    // Phase 16.2: Trigger Session Restoration on Mount
-    agent.loadSession();
+      // 9. Voice Input (The Vocal Sensor)
+      if (event.type === 'VOICE_INPUT') {
+        console.log('[ChatContext] VOICE_INPUT received:', event.payload.text);
+        sendMessage(event.payload.text); // Context is attached inside sendMessage
+      }
+    });
 
     return unsubscribe;
   }, [navigateToCode, setLeftTab, setIsDiffMode]);
 
+  // Phase 16.2: Trigger Session Restoration on Mount (Once)
+  useEffect(() => {
+    agent.loadSession();
+  }, []);
+
   // --- ACTIONS ---
 
-  const sendMessage = async (text: string) => {
+  // Create Refs for dynamic context to ensure sendMessage always sees the latest state
+  // without re-subscribing the EventBus listener (which caused loops/race conditions).
+  const selectedFileRef = useRef(selectedFile);
+  const focusedLocationRef = useRef(focusedLocation);
+  const viewportStateRef = useRef(viewportState);
+  const prDataRef = useRef(prData);
+
+  // Sync Refs with State
+  useEffect(() => {
+    selectedFileRef.current = selectedFile;
+    focusedLocationRef.current = focusedLocation;
+    viewportStateRef.current = viewportState;
+    prDataRef.current = prData;
+  }, [selectedFile, focusedLocation, viewportState, prData]);
+
+  // --- ACTIONS ---
+
+  const sendMessage = useCallback(async (text: string) => {
     // 1. Update Local UI immediately (Optimistic)
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -191,16 +246,33 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // 2. Emit Signal to Brain
     console.log('[ChatContext] Emitting USER_MESSAGE to EventBus');
+
+    // [UI_PROBE] Capturing Context (Using Refs to break closure staleness)
+    // Fallback chain: PR Selection -> File System Selection -> Navigation State
+    const currentSelectedFile = selectedFileRef.current;
+    const currentFocusedLocation = focusedLocationRef.current;
+    const realFile = currentSelectedFile?.path || currentFocusedLocation?.file || userContextRef.current.activeFile;
+
+    console.log('[UI_PROBE] Capturing Context:', {
+      file: realFile,
+      lines: viewportStateRef.current?.startLine,
+      source: currentSelectedFile ? 'PR Selection' : (currentFocusedLocation ? 'Focused Location' : 'Fallback')
+    });
+
     eventBus.emit({
       type: 'USER_MESSAGE',
       payload: {
         text,
         mode: 'text',
-        context: userContextRef.current, // Pass the view snapshot
-        prData: prData // Pass the data snapshot
+        context: {
+          ...userContextRef.current,
+          activeFile: realFile,
+          cursorLine: viewportStateRef.current?.startLine
+        }, // Pass the view snapshot with authoritative overrides
+        prData: prDataRef.current // Pass the data snapshot
       }
     });
-  };
+  }, []); // Stable reference - never changes
 
   const addLocalMessage = useCallback((message: ChatMessage) => {
     setMessages(prev => [...prev, message]);
@@ -220,6 +292,10 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const updateUserContext = useCallback((updates: Partial<UserContextState>) => {
     userContextRef.current = { ...userContextRef.current, ...updates };
+    // Expose for testing (Phase 10.4 Smoke Test Hook)
+    if (typeof window !== 'undefined') {
+      (window as any).__THEIA_CONTEXT_STATE__ = userContextRef.current;
+    }
   }, []);
 
   const resetChat = useCallback(() => {
@@ -227,11 +303,23 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   const exportSessionLogs = useCallback(() => {
+    // Phase 17: Include Flight Recorder traces (Theia Black Box)
+    let traces = [];
+    try {
+      const stored = localStorage.getItem('theia_flight_log');
+      if (stored) {
+        traces = JSON.parse(stored);
+      }
+    } catch (e) {
+      console.warn('Failed to load traces for export');
+    }
+
     const sessionData = {
       timestamp: new Date().toISOString(),
       pr: prData?.title || 'Unknown',
       messages: messages,
-      context: userContextRef.current
+      context: userContextRef.current,
+      traces: traces // Added traces to export
     };
 
     const blob = new Blob([JSON.stringify(sessionData, null, 2)], { type: 'application/json' });

@@ -9,6 +9,7 @@ export interface PlanStep {
     id: string;
     description: string; // e.g., "Run npm test to reproduce error"
     tool?: string;       // Suggested tool
+    args?: any;          // Arguments for the tool (Phase 15.2: Gatekeeper logic)
     status: StepStatus;
     result?: string;     // Output from execution
 }

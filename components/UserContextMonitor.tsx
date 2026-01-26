@@ -4,6 +4,7 @@ import { useChat } from '../contexts/ChatContext';
 import { useLive } from '../contexts/LiveContext';
 import { useSpec } from '../contexts/SpecContext';
 import { generateBrief, DirectorInput } from '../src/services/DirectorService';
+import { eventBus } from '../src/modules/core/EventBus';
 
 /**
  * Headless component that observes PRContext changes
@@ -12,15 +13,37 @@ import { generateBrief, DirectorInput } from '../src/services/DirectorService';
  * 
  * Phase 6: Also invokes the Director on file change to generate ContextBriefs
  * for injection into the Live voice session.
+ * 
+ * Phase 17: Added "Instant Anchor" for S2S low-latency grounding.
  */
 export const UserContextMonitor: React.FC = () => {
-    const { leftTab, selectedFile, selectionState, activeDiagram, prData } = usePR();
+    const { leftTab, selectedFile, selectionState, activeDiagram, prData, focusedLocation, lazyFiles } = usePR();
     const { updateUserContext } = useChat();
-    const { isActive: isLiveActive, injectBrief } = useLive();
+    const { isActive: isLiveActive, injectBrief, sendText: sendLiveText } = useLive();
     const { activeSpec } = useSpec(); // Get spec atoms
 
     // Track the current file path for race condition handling (latest-wins)
     const currentFileRef = useRef<string | null>(null);
+
+    // FR-041/FR-042: Global User Activity Tracker
+    useEffect(() => {
+        const handleActivity = () => {
+            eventBus.emit({
+                type: 'USER_ACTIVITY',
+                payload: { timestamp: Date.now() }
+            });
+        };
+
+        window.addEventListener('mousemove', handleActivity, { passive: true });
+        window.addEventListener('keydown', handleActivity, { passive: true });
+        window.addEventListener('mousedown', handleActivity, { passive: true });
+
+        return () => {
+            window.removeEventListener('mousemove', handleActivity);
+            window.removeEventListener('keydown', handleActivity);
+            window.removeEventListener('mousedown', handleActivity);
+        };
+    }, []);
 
     // Monitor Tab Changes
     useEffect(() => {
@@ -31,14 +54,23 @@ export const UserContextMonitor: React.FC = () => {
 
     // Monitor File Changes + Director Integration
     useEffect(() => {
-        const filePath = selectedFile?.path || null;
+        // Fallback chain: Explicit Selection -> Code Viewer Focus
+        const filePath = selectedFile?.path || focusedLocation?.file || null;
+        
         currentFileRef.current = filePath;
         updateUserContext({ activeFile: filePath });
 
-        // Skip Director if no file or no PR data
-        if (!filePath || !prData || !selectedFile) return;
+        // S2S Grounding: Send INSTANT Visual Anchor to the live session
+        // This bypasses the Director's analysis latency for immediate filename awareness.
+        if (filePath && isLiveActive) {
+            console.debug('[ShadowPartner] Sending Instant Anchor:', filePath);
+            sendLiveText(`[CONTEXT UPDATE] VISUAL_ANCHOR: ${filePath}`);
+        }
 
-        // Debounce 500ms before calling Director
+        // Skip Director if no file or no PR data
+        if (!filePath || !prData) return;
+
+        // Debounce 500ms before calling Director for deep analysis
         const timer = setTimeout(async () => {
             // Latest-wins: check if file is still the same
             if (currentFileRef.current !== filePath) {
@@ -46,15 +78,27 @@ export const UserContextMonitor: React.FC = () => {
                 return;
             }
 
-            // Get file content
-            const fileData = prData.files.find(f => f.path === filePath);
-            if (!fileData?.newContent) {
+            // Get file content (Support both PR files and Ghost/Lazy files)
+            let content = '';
+            const prFile = prData.files.find(f => f.path === filePath);
+            
+            if (prFile) {
+                content = prFile.newContent || '';
+            } else {
+                // Check Lazy Files (Repo Mode)
+                const ghostFile = lazyFiles.get(filePath);
+                if (ghostFile) {
+                    content = ghostFile.content || '';
+                }
+            }
+
+            if (!content) {
                 console.debug('[Director] No content for file:', filePath);
                 return;
             }
 
             const input: DirectorInput = {
-                fileContent: fileData.newContent,
+                fileContent: content,
                 filePath,
                 prTitle: prData.title,
                 prDescription: prData.description,
@@ -76,7 +120,7 @@ export const UserContextMonitor: React.FC = () => {
         }, 500);
 
         return () => clearTimeout(timer);
-    }, [selectedFile?.path, prData, activeSpec, isLiveActive, updateUserContext, injectBrief]);
+    }, [selectedFile?.path, focusedLocation?.file, prData, activeSpec, isLiveActive, updateUserContext, injectBrief, lazyFiles, sendLiveText]);
 
     // Monitor Selection Changes
     useEffect(() => {
@@ -86,15 +130,26 @@ export const UserContextMonitor: React.FC = () => {
                 ? `Lines ${selectionState.startLine}-${selectionState.endLine} in ${selectionState.file}`
                 : null;
             updateUserContext({ activeSelection: selectionSummary });
+
+            // S2S Grounding: Also update the Live session about the selection
+            if (selectionSummary && isLiveActive) {
+                console.debug('[ShadowPartner] Sending Selection Anchor:', selectionSummary);
+                sendLiveText(`[CONTEXT UPDATE] ACTIVE_SELECTION: ${selectionSummary}`);
+            }
         }, 500);
         return () => clearTimeout(timer);
-    }, [selectionState, updateUserContext]);
+    }, [selectionState, updateUserContext, isLiveActive, sendLiveText]);
 
     // Monitor Diagram State
     useEffect(() => {
-        updateUserContext({ activeDiagram: activeDiagram?.title || null });
-    }, [activeDiagram, updateUserContext]);
+        const diagramTitle = activeDiagram?.title || null;
+        updateUserContext({ activeDiagram: diagramTitle });
+
+        // S2S Grounding: Immediate diagram awareness
+        if (diagramTitle && isLiveActive) {
+            sendLiveText(`[CONTEXT UPDATE] ACTIVE_DIAGRAM: ${diagramTitle}`);
+        }
+    }, [activeDiagram, updateUserContext, isLiveActive, sendLiveText]);
 
     return null; // Headless component, renders nothing
 };
-

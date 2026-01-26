@@ -1,145 +1,47 @@
-# Architecture: Theia (v0.3.0)
-> *The Blueprint for Spec-Driven Autonomy.*
+# System Architecture - My-Code-Review-Assistant
 
-## 1. System Overview (L1)
-Theia acts as an intelligent layer between the Developer and the Codebase, facilitating a conversation grounded in specifications.
+## Executive Summary
+"Theia" is an interactive code review assistant designed to bridge the gap between static PR data and active architectural understanding. It utilizes an event-driven React frontend coupled with an AI orchestration layer (LangGraph/Gemini) to provide context-aware reviews, interactive diagrams, and voice-guided walkthroughs.
 
-```mermaid
-graph TD
-    User((User)) 
-    subgraph "Theia Client (React)"
-        VoiceUI["Voice/UI Layer"]
-        Orchestrator["Orchestrator (State)"]
-    end
-    
-    subgraph "Core Engines"
-        Director["Director (Gemini 3)"]
-        Actor["Actor (TTS)"]
-        TraceEngine["Traceability Engine"]
-    end
-    
-    subgraph "External Systems"
-        Git["Git Host (GitHub)"]
-        Linear["Issue Tracker (Linear)"]
-    end
+## Technology Stack
+- **Frontend:** React 18, Vite, TypeScript, Tailwind CSS.
+- **AI Orchestration:** LangGraph (State Machine), Google Gemini 3 Pro/2.0 Flash.
+- **Runtime Sandbox:** WebContainer API (executing code in-browser).
+- **Diagrams:** Mermaid.js.
+- **Testing:** Playwright (E2E), Vitest (Unit), Voice IQ (Custom verification).
 
-    User <--> VoiceUI
-    VoiceUI <--> Orchestrator
-    Orchestrator <--> Director
-    Orchestrator <--> TraceEngine
-    Director --> Actor
-    Orchestrator <--> Git
-    TraceEngine <--> Linear
-```
+## Core Architecture Patterns
 
-### Core Flow
-1.  **Input:** User speaks or clicks a diagram node.
-2.  **Orchestration:** The `PRContext` determines state (File, Spec, Layout).
-3.  **Reasoning:** The `Director` receives the Context + Intent.
-4.  **Feedback:** The System responds via Voice (`Actor`) or UI updates (Navigation/Highlighting).
+### 1. Event-Driven Nervous System
+The application uses a combination of React Contexts and a centralized `DirectorService` to manage state. Interaction flows are asynchronous and event-driven:
+- **Hot Context:** Real-time files loaded in the environment.
+- **Ghost Context:** Files referenced but not yet fetched, lazily loaded on demand (FR-032).
 
----
+### 2. Director-Actor Model
+The `DirectorService` acts as the orchestrator:
+- **Director:** High-level planning and reasoning (Gemini 3 Pro).
+- **Actor:** Tool execution and voice/screen track generation (Gemini 2.0 Flash).
+- **Gatekeeper:** Intercepts sensitive tool calls for user approval (FR-011, FR-012).
 
-## 2. The Agent: "Theia Core" (L2)
-The Agent is not just a chatbot; it is a context-aware **Director** that commands the UI.
+### 3. Dual-Track Voice Protocol (FR-038)
+To ensure accessibility and clarity, the agent separates output into:
+- **Voice Track:** Sanitized natural language for TTS (Web Speech API).
+- **Screen Track:** Rich Markdown/Code for UI rendering.
 
-### The Brain (Context Injection)
-Theia's intelligence comes from the **Context Engine**, which acts as an accumulator to build the "Prompt Object" for the LLM.
+## Key Functional Requirements (from REQUIREMENTS.csv)
+- **FR-009 (Repair Mode):** Planner receives error context and generates recovery strategies.
+- **FR-031 (Interactive Diagrams):** Mermaid nodes trigger navigation to source code locations.
+- **FR-041 (Barge-In):** Agent yields control immediately when user interaction is detected.
+- **FR-043 (Repository Mode):** System can initialize with just a Git URL, treating all files as Ghost Nodes.
 
-```mermaid
-graph LR
-    subgraph "Context Sources"
-        SI["System Instruction (Persona)"]
-        CH["Chat History (Short-term)"]
-        FC["File Context (Active Code)"]
-        LS["Linear Specs (Requirements)"]
-        DS["Diagram State (Visual Location)"]
-    end
-    
-    SI & CH & FC & LS & DS --> Accumulator
-    Accumulator --> |"Consolidated Context"| Director["Director (Gemini)"]
-```
+## Security & Performance (NFRs)
+- **NFR-003:** No destructive actions (e.g., `write_file`) without explicit user consent.
+- **NFR-006:** Ghost file lazy-loading latency target < 2s.
+- **NFR-008:** TTS sanitization to prevent reading code snippets aloud.
 
-#### Context Components
-1.  **System Instruction:** Defines the "Senior Staff Engineer" persona. Enforces brevity and strict adherence to provided tools.
-2.  **Chat History:** Last 10 turns of conversation (User <-> Agent).
-3.  **File Context:** The content of the file currently open in `SourceView`. *Crucial:* If the file is large, we only send the visible viewport +/- 50 lines (Context Window Optimization).
-4.  **Linear Specs:** The specific requirements (tickets) associated with the current PR or file.
-5.  **User State:** "User is selecting lines 12-15 in `AuthService.ts`".
-
-### The Director-Actor Handshake (Dual-Track)
-We separate **Reasoning (Director)** from **Speech (Actor)** to prevent the AI from reading code blocks aloud.
-
-**The Flow:**
-1.  **Input:** User Audio -> STT -> Text.
-2.  **Thinking (Director):** Gemini processes the *Consolidated Context*.
-3.  **Output (Director):** Returns a JSON object:
-    ```json
-    {
-      "voice": "The error handling is missing here.",
-      "screen": {
-        "action": "highlight_lines",
-        "payload": { "file": "auth.ts", "lines": [15, 16] }
-      }
-    }
-    ```
-4.  **Execution (Actor):**
-    *   **Voice Track:** Sends `voice` string to Google Cloud TTS -> Audio Stream.
-    *   **Screen Track:** Orchestrator executes `highlight_lines` -> UI updates immediately.
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Browser
-    participant Director
-    participant Actor
-
-    User->>Browser: "Does this handle the Auth Error?"
-    Browser->>Director: POST /api/chat (Context + Audio)
-    Director->>Director: Analyze Code vs Spec
-    Director->>Browser: JSON { "speak": "No...", "screen": { "action": "highlight" } }
-    par Voice Track
-        Browser->>Actor: POST /api/tts ("No...")
-        Actor->>Browser: Audio Stream
-    and Screen Track
-        Browser->>Browser: CodeViewer.highlight(15)
-    end
-    Browser->>User: Audio Playback + Visual Highlight
-```
-
-### Agent Capabilities (Tools)
-The Director has access to a specific toolset to manipulate the "World":
-*   `speak(text)`: Generate audio response.
-*   `navigate(file_path)`: Open a file in the code viewer.
-*   `highlight(lines)`: Visually emphasize code blocks.
-*   `query_repo(pattern)`: Lazy-fetch files from the git tree (for exploration).
-*   `verify_spec(atom_id)`: Mark a requirement as "Verified" in the Traceability Engine.
-
----
-
-## 3. The Traceability Engine (L2)
-This is the "Golden Thread" that justifies code existence by connecting it to requirements.
-
-### The Connectivity Triangle
-We verify correctness by triangulating three sources of truth.
-
-```mermaid
-graph TD
-    Spec["Requirements (Linear)"] <--> |"Justifies"| Code["Implementation (Files)"]
-    Spec <--> |"Defines"| Diagram["Architecture (Mermaid)"]
-    Diagram <--> |"Maps"| Code
-```
-
-### How Verification Works
-1.  **Selection:** User selects a block of code or a file.
-2.  **Fetch Requirement:** Theia looks up the linked Linear Ticket.
-3.  **Atomization:** The Requirement is broken down into "Spec Atoms" (Individual assertions).
-4.  **Verification:** The `Director` verifies: `Does Code X satisfy Spec Atom Y?`
-5.  **Result:** Pass/Fail with explanation.
-
----
-
-## 4. Key Technical Decisions
-*   **Lazy Graph:** We fetch the Repo Tree first, then fetch File Blobs *on-demand*. This supports massive repos without full cloning.
-*   **Hexagonal Specs:** The Spec Engine is an adapter. We can swap Linear for Jira or GitHub Issues without changing the verification logic.
-*   **Hybrid Diagrams:** We use static Mermaid for rendering speed but overlay unseen HTML click handlers to make the diagram interactive.
+## Data Flow
+1. **Fetch:** `github.ts` fetches PR/Repo metadata.
+2. **Initialize:** `SpecContext` parses `REQUIREMENTS.csv` into a searchable "Atom" map.
+3. **Reason:** User query triggers `DirectorService`.
+4. **Act:** Director selects tool → Gatekeeper validates → Runtime executes in WebContainer.
+5. **Report:** Result streamed back to UI via Dual-Track protocol.

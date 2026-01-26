@@ -24,6 +24,7 @@ export const ApprovalRequest: React.FC = () => {
     }, []);
 
     const handleDecision = (approved: boolean) => {
+        console.log(`[ApprovalRequest] User decided: ${approved ? 'APPROVED' : 'DENIED'}. Emitting USER_APPROVAL.`);
         eventBus.emit({
             type: 'USER_APPROVAL',
             payload: { approved, timestamp: Date.now() }

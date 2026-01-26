@@ -55,7 +55,10 @@ export const SAMPLE_PR: PRData = {
         oldContent: `export const MAX_RETRIES = 3;\nexport const TIMEOUT = 5000;\nexport const DEFAULT_THEME = 'dark';`,
         newContent: `export const MAX_RETRIES = 3;\nexport const TIMEOUT = 5000;\nexport const DEFAULT_THEME = 'dark';`
     }
-  ]
+  ],
+  owner: 'bmad-method',
+  repo: 'theia-poc',
+  headSha: 'mock-sha-123'
 };
 
 export const SAMPLE_WALKTHROUGH: Walkthrough = {

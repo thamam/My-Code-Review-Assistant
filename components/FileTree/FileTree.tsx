@@ -176,6 +176,7 @@ export const FileTree: React.FC = () => {
                 <button
                     onClick={toggleFullRepoMode}
                     disabled={isLoadingRepoTree}
+                    data-testid="full-repo-toggle"
                     className={clsx(
                         "mt-2 w-full flex items-center justify-center gap-2 py-1.5 px-3 rounded text-xs transition-colors",
                         isFullRepoMode

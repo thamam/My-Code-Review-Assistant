@@ -11,6 +11,9 @@ import { resolveFilePath } from '../utils/fileUtils';
 import { useNavigationModule } from '../src/modules/navigation/hooks';
 import { RepoNode, LazyFile } from '../src/modules/navigation/types';
 
+// Phase 9: Unify Selection Type
+export type SelectedFile = FileChange | LazyFile;
+
 interface FocusedLocation {
   file: string;
   line: number;
@@ -20,8 +23,8 @@ interface FocusedLocation {
 interface PRContextType {
   prData: PRData | null;
   setPRData: (data: PRData) => void;
-  selectedFile: FileChange | null;
-  selectFile: (file: FileChange) => void;
+  selectedFile: SelectedFile | null;
+  selectFile: (file: SelectedFile) => void;
   viewportState: ViewportState;
   updateViewport: (state: Partial<ViewportState>) => void;
   selectionState: SelectionState | null;
@@ -70,7 +73,7 @@ const PRContext = createContext<PRContextType | undefined>(undefined);
 
 export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [prData, setPrData] = useState<PRData | null>(null);
-  const [selectedFile, setSelectedFile] = useState<FileChange | null>(null);
+  const [selectedFile, setSelectedFile] = useState<SelectedFile | null>(null);
   const [walkthrough, setWalkthrough] = useState<Walkthrough | null>(null);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const [isDiffMode, setIsDiffMode] = useState(true);
@@ -114,19 +117,22 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     }
   }, [prData, navModule.service]);
 
-  const selectFile = (file: FileChange) => {
+  const selectFile = useCallback((file: SelectedFile) => {
     setSelectedFile(file);
     setViewportState({ file: file.path, startLine: 0, endLine: 0 });
     setSelectionState(null);
-  };
+  }, []);
 
-  const navigateToCode = async (target: NavigationTarget): Promise<boolean> => {
+  const navigateToCode = useCallback(async (target: NavigationTarget): Promise<boolean> => {
     if (!prData || isNavigating) return false;
 
     try {
       setIsNavigating(true);
 
       // Tab Management
+      // We can't easily check "leftTab" state inside callback without adding it towards deps
+      // triggering re-renders. We'll rely on the functional update or ref if needed.
+      // For now, we will add leftTab to deps as it is a UI state that changes rarely compared to mouse moves.
       if (leftTab !== 'files' && target.source !== 'tree') {
         setLeftTab('files');
         await new Promise(r => setTimeout(r, 0));
@@ -134,18 +140,37 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
       // Resolve Path
       const resolution = resolveFilePath(target.filepath, prData.files.map(f => f.path));
-      if (!resolution.resolved) {
-        console.warn(`[PRContext] Navigation failed: Could not resolve ${target.filepath}`);
-        return false;
+      // NOTE: If resolution fails in PR files, we should still try strictly if we have a full repo mode
+      const resolvedPath = resolution.resolved || target.filepath;
+
+      // 1. Try PR Files (Hot)
+      let fileToSelect: SelectedFile | undefined = prData.files.find(f => f.path === resolvedPath);
+
+      // 2. Try Ghost Files (Warm/Cold)
+      if (!fileToSelect) {
+        // Check if we have it in Lazy Files
+        const lazyFile = navModule.lazyFiles.get(resolvedPath);
+        if (lazyFile) {
+          fileToSelect = lazyFile;
+        } else if (prData.owner && prData.repo && prData.headSha) {
+          // Attempt Fetch
+          console.log(`[PRContext] Attempting to load Ghost File: ${resolvedPath}`);
+          const fetched = await navModule.service.loadGhostFile(prData.owner, prData.repo, resolvedPath, prData.headSha);
+          if (fetched) {
+            fileToSelect = fetched;
+          }
+        }
       }
 
-      const fileToSelect = prData.files.find(f => f.path === resolution.resolved);
-      if (!fileToSelect) return false;
+      if (!fileToSelect) {
+        console.warn(`[PRContext] Navigation failed: File not found in PR or Repo: ${resolvedPath}`);
+        return false;
+      }
 
       // Switch File
       if (selectedFile?.path !== fileToSelect.path) {
         setIsCodeViewerReady(false);
-        selectFile(fileToSelect);
+        selectFile(fileToSelect); // Recurse to our now-memoized selectFile
 
         let attempts = 0;
         while (!isCodeViewerReadyRef.current && attempts < 50) {
@@ -168,11 +193,11 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     } finally {
       setIsNavigating(false);
     }
-  };
+  }, [prData, isNavigating, leftTab, selectedFile, navModule.lazyFiles, navModule.service, selectFile]);
 
-  const scrollToLine = (file: string, line: number) => {
+  const scrollToLine = useCallback((file: string, line: number) => {
     navigateToCode({ filepath: file, line, source: 'annotation' });
-  };
+  }, [navigateToCode]);
 
   const toggleDiffMode = () => setIsDiffMode(prev => !prev);
   const addAnnotation = (file: string, line: number, type: 'marker' | 'label', text?: string) => {

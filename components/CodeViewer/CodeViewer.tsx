@@ -94,14 +94,18 @@ export const CodeViewer: React.FC = () => {
       </div>
       <div ref={containerRef} className="flex-1 overflow-auto custom-scrollbar relative">
         {isPreviewMode && selectedFile.path.endsWith('.md') ? (
-          <div className="p-8"><MarkdownRenderer content={selectedFile.newContent} /></div>
+          <div className="p-8"><MarkdownRenderer content={(selectedFile as any).newContent || (selectedFile as any).content || ''} /></div>
         ) : isSource ? (
-          <SourceView key={selectedFile.path} content={selectedFile.newContent || selectedFile.oldContent || ""} filePath={selectedFile.path} />
+          <SourceView 
+            key={selectedFile.path} 
+            content={(selectedFile as any).newContent || (selectedFile as any).content || (selectedFile as any).oldContent || ""} 
+            filePath={selectedFile.path} 
+          />
         ) : (
           <DiffView
             key={selectedFile.path}
-            oldContent={selectedFile.oldContent}
-            newContent={selectedFile.newContent}
+            oldContent={(selectedFile as any).oldContent || ""}
+            newContent={(selectedFile as any).newContent || (selectedFile as any).content || ""}
             filePath={selectedFile.path}
             onViewportChange={(f, s, e) => updateViewport({ file: f, startLine: s, endLine: e })}
           />

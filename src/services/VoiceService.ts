@@ -11,7 +11,7 @@
  */
 
 import { eventBus } from '../modules/core/EventBus';
-import { speakWithCloudTTS } from './TTSService';
+import { speakWithCloudTTS } from '../modules/voice/TTSService';
 
 // Voice state
 let isSpeaking = false;
@@ -20,6 +20,11 @@ let unsubscribe: (() => void) | null = null;
 
 // Speech synthesis instance for browser fallback
 const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
+
+// Speech recognition setup
+const SpeechRecognition = typeof window !== 'undefined' ?
+    ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition) : null;
+let recognition: any = null;
 
 /**
  * Speak text using Web Speech API (browser native).
@@ -223,6 +228,76 @@ export function getIsEnabled(): boolean {
     return isEnabled;
 }
 
+/**
+ * Start listening for voice commands.
+ * Emits VOICE_INPUT on success.
+ */
+export function startListening(): void {
+    if (!isEnabled) {
+        console.warn('[VoiceService] Cannot listen: Voice disabled');
+        return;
+    }
+
+    if (!SpeechRecognition) {
+        console.warn('[VoiceService] Speech recognition not supported in this browser');
+        return;
+    }
+
+    // Stop ensuring no conflicts
+    if (recognition) {
+        recognition.stop();
+    }
+
+    try {
+        recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.lang = 'en-US';
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+
+        recognition.onstart = () => {
+            console.log('[VoiceService] Listening started...');
+        };
+
+        recognition.onresult = (event: any) => {
+            const text = event.results[0][0].transcript;
+            console.log('[VoiceService] Recognized:', text);
+
+            // EMIT VOICE_INPUT (The Sensor)
+            eventBus.emit({
+                type: 'VOICE_INPUT',
+                payload: {
+                    text: text,
+                    timestamp: Date.now()
+                }
+            });
+        };
+
+        recognition.onerror = (event: any) => {
+            console.error('[VoiceService] Recognition error:', event.error);
+        };
+
+        recognition.onend = () => {
+            console.log('[VoiceService] Listening stopped');
+        };
+
+        recognition.start();
+
+    } catch (err) {
+        console.error('[VoiceService] Failed to start recognition:', err);
+    }
+}
+
+/**
+ * Stop listening.
+ */
+export function stopListening(): void {
+    if (recognition) {
+        recognition.stop();
+        console.log('[VoiceService] Manually stopped listening');
+    }
+}
+
 // Export as singleton-like module
 export const voiceService = {
     init,
@@ -231,5 +306,7 @@ export const voiceService = {
     stop,
     setEnabled,
     getIsSpeaking,
-    getIsEnabled
+    getIsEnabled,
+    startListening,
+    stopListening
 };

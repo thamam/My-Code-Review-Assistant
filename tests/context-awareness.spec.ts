@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Context Awareness System', () => {
     test.beforeEach(async ({ page }) => {
         // Navigate to local instance (Ensure npm start is running)
-        await page.goto('http://localhost:3000');
+        await page.goto('/');
 
         // Load the Sample PR to ensure we have a consistent UI state
         // We wait for the button to be visible to avoid race conditions

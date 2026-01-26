@@ -13,7 +13,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Director/Actor Architecture', () => {
     test.beforeEach(async ({ page }) => {
         // Navigate to local instance
-        await page.goto('http://localhost:3000');
+        await page.goto('/');
 
         // Load Sample PR
         await page.waitForSelector('text=Load Sample PR', { state: 'visible' });

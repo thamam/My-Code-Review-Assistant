@@ -6,7 +6,8 @@ import { useChat } from './ChatContext';
 import { useSpec } from './SpecContext';
 import { ContextBrief } from '../src/types/contextBrief';
 import { formatBriefAsWhisper, getBrainResponse, generatePrecisionResponse, PrecisionResponse } from '../src/services/DirectorService';
-import { speakWithCloudTTS } from '../src/services/TTSService';
+import { speakWithCloudTTS } from '../src/modules/voice/TTSService';
+import { voiceService } from '../src/services/VoiceService';
 
 interface LiveContextType {
   isActive: boolean;
@@ -235,10 +236,8 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     // Precision Mode Cleanup
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
-    }
+    voiceService.stopListening();
+    voiceService.stop(); // Stop speaking if needed
     window.speechSynthesis.cancel();
     isSpeakingRef.current = false;
 
@@ -276,179 +275,29 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isConnectingRef.current = true;
       setError(null);
 
-      // --- PRECISION MODE (Gemini 3 Pro + Browser STT/TTS) ---
+      // --- PRECISION MODE (Gemini 3 Pro + Browser STT via VoiceService) ---
       if (currentMode === 'precision') {
-        console.log('[Theia Precision] Entering Precision Mode branch...');
-        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-          throw new Error("Browser does not support Speech Recognition.");
-        }
+        console.log('[Theia Precision] Delegating to VoiceService (The Sensor)...');
 
-        const recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = false;
-        recognition.lang = language === 'Hebrew' ? 'he-IL' : 'en-US';
-
-        recognition.onstart = () => {
-          console.log('[Theia Precision] Recognition started');
+        try {
+          voiceService.startListening();
           setIsActive(true);
           isActiveRef.current = true;
           setIsConnecting(false);
           isConnectingRef.current = false;
 
-          // Speak welcome message with correct language
+          // Provide feedback
           const welcomeMsg = language === 'Hebrew'
             ? `מצב דיוק פעיל. אני מקשיבה.`
             : `Precision mode active. I'm listening.`;
-          const utterance = new SpeechSynthesisUtterance(welcomeMsg);
-          utterance.lang = language === 'Hebrew' ? 'he-IL' : 'en-US';
-          utterance.onstart = () => console.log('[Theia Precision] TTS Welcome started');
-          utterance.onend = () => console.log('[Theia Precision] TTS Welcome finished');
-          utterance.onerror = (e) => console.error('[Theia Precision] TTS Welcome error:', e);
-          window.speechSynthesis.speak(utterance);
-        };
+          voiceService.speak(welcomeMsg);
 
-        recognition.onerror = (event: any) => {
-          console.error('[Theia Precision] Recognition error', event.error);
-
-          // Handle no-speech specifically - this is NOT a fatal error
-          // Keep listening instead of disconnecting
-          if (event.error === 'no-speech') {
-            console.log('[Theia Precision] No speech detected, continuing to listen...');
-            // Do NOT reset UI state for no-speech - just keep listening
-            return; // Early return - don't disconnect
-          }
-
-          // For other errors, reset UI state
+        } catch (err: any) {
+          console.error('[Theia Precision] Failed to start VoiceService:', err);
+          setError(err.message || "Failed to start voice listener");
           setIsActive(false);
           isActiveRef.current = false;
-
-          // Provide specific error messages
-          if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-            setError("Microphone access denied. Please allow microphone permissions.");
-          } else if (event.error === 'audio-capture') {
-            setError("Microphone not available. Please check your audio devices.");
-          } else if (event.error === 'network') {
-            setError("Network error during speech recognition.");
-          } else {
-            setError(`Speech recognition error: ${event.error}`);
-          }
-
-          // Stop the recognition
-          if (recognitionRef.current) {
-            try { recognitionRef.current.stop(); } catch (e) { }
-            recognitionRef.current = null;
-          }
-        };
-
-        // Reusable speech result handler - can be called by real STT or test hook
-        const handleSpeechResult = async (transcript: string) => {
-          console.log('[Theia Precision] handleSpeechResult called:', { transcript, length: transcript?.length, isEmpty: !transcript?.trim() });
-
-          if (!transcript.trim()) {
-            console.warn('[Theia Precision] Empty transcript detected, ignoring...');
-            return;
-          }
-
-          console.log('[Theia Precision] User said:', transcript);
-
-          // User Message
-          const userId = 'user-' + Date.now();
-          upsertMessage({ id: userId, role: 'user', content: transcript, timestamp: Date.now() });
-
-          // "Thinking" state
-          const assistantId = 'ai-' + Date.now();
-          upsertMessage({ id: assistantId, role: 'assistant', content: 'Thinking...', timestamp: Date.now() });
-
-          // Generate Response
-          // Get current active file content for grounding
-          // In a real implementation we would get this from UserContextMonitor or tracked state
-          const contextState = (window as any).__THEIA_CONTEXT_STATE__;
-          let fileContent = '';
-          if (contextState?.activeFile) {
-            const file = prData.files.find(f => f.path === contextState.activeFile);
-            if (file) fileContent = file.newContent || '';
-          }
-
-          console.log('[Theia Precision] Calling LLM with context:', {
-            transcript,
-            hasFileContent: !!fileContent,
-            fileContentLength: fileContent.length,
-            activeFile: contextState?.activeFile,
-            historyLength: messages.length
-          });
-
-          let result: PrecisionResponse | null;
-          try {
-            result = await generatePrecisionResponse(
-              transcript,
-              messages, // Pass history
-              {
-                fileContent,
-                filePath: contextState?.activeFile || 'No file selected',
-                prTitle: prData.title,
-                prDescription: prData.description,
-                specAtoms: activeSpec?.atoms || []
-              }
-            );
-
-            console.log('[Theia Precision] LLM Response:', {
-              hasResult: !!result,
-              voiceLength: result?.voice?.length,
-              screenLength: result?.screen?.length
-            });
-          } catch (llmError: any) {
-            console.error('[Theia Precision] LLM call failed:', llmError.message || llmError);
-            result = null;
-          }
-
-          // Handle response - fallback if null
-          const screenContent = result?.screen || 'I encountered an error processing your request.';
-          const voiceContent = result?.voice || 'I encountered an error processing your request.';
-
-          // Update voice state for E2E testing
-          if (import.meta.env.MODE === 'test' || import.meta.env.DEV) {
-            outputTranscript.current = screenContent;
-            // Also update the global state
-            (window as any).__THEIA_VOICE_STATE__ = {
-              ...(window as any).__THEIA_VOICE_STATE__,
-              lastLLMResponse: screenContent,
-              lastTranscript: transcript
-            };
-          }
-
-          // Update Assistant Message with SCREEN content (full Markdown)
-          upsertMessage({ id: assistantId, role: 'assistant', content: screenContent, timestamp: Date.now() });
-
-          // Speak Response using Google Cloud TTS with VOICE content (no markdown)
-          if (voiceContent && voiceContent.trim()) {
-            console.log('[Theia Precision] Speaking voice content via Cloud TTS:', voiceContent.substring(0, 50) + '...');
-            // Use Cloud TTS with automatic fallback to browser TTS
-            speakWithCloudTTS(voiceContent, language, (speaking) => {
-              isSpeakingRef.current = speaking;
-            }).catch(err => {
-              console.error('[Theia Precision] TTS completely failed:', err);
-            });
-          } else {
-            console.error('[Theia Precision] Empty voice content, cannot speak');
-          }
-        };
-
-        // Wire the real STT to the handler
-        recognition.onresult = async (event: any) => {
-          const transcript = event.results[event.results.length - 1][0].transcript;
-          console.log('[Theia Precision] STT Raw result:', { transcript });
-          await handleSpeechResult(transcript);
-        };
-
-        // TEST HOOK: Expose __THEIA_SIMULATE_SPEECH__ for E2E testing (bypasses STT)
-        if (import.meta.env.MODE === 'test' || import.meta.env.DEV) {
-          (window as any).__THEIA_SIMULATE_SPEECH__ = handleSpeechResult;
-          console.log('[Theia Precision] Test hook __THEIA_SIMULATE_SPEECH__ exposed');
         }
-
-        recognitionRef.current = recognition;
-        recognition.start();
         return;
       }
 
@@ -480,22 +329,20 @@ export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       let systemInstruction = `You are Theia, a world-class Staff Software Engineer. You are performing a live code review conversation.
 Review context: PR "${prData.title}" by ${prData.author}.
-You can control the UI. Navigate to files when I ask.
 
 ${langInstruction}
 
-## CRITICAL: Silent Context Updates
+## CRITICAL: Visual Grounding (The Visual Anchor)
 You will receive internal system messages prefixed with "[CONTEXT UPDATE".
-ABSOLUTE RULES FOR THESE MESSAGES:
-1. NEVER speak these messages aloud - they are INTERNAL ONLY
-2. NEVER acknowledge receiving them ("I see you're looking at..." is FORBIDDEN)
-3. NEVER read ANY part of them to the user
-4. Simply absorb the information silently and use it to inform your responses
-5. If you catch yourself about to read one aloud, STOP IMMEDIATELY
+These provide your "VISUAL_ANCHOR" (the file the user is currently looking at).
 
-These are like stage directions - the audience (user) should never hear them.
+ABSOLUTE RULES FOR CONTEXT:
+1. THE VISUAL_ANCHOR IS THE GROUND TRUTH. If you are asked about "this file", refer ONLY to that anchor.
+2. DO NOT GUESS filenames or code content if the VISUAL_ANCHOR is "NONE". 
+3. If you are blind (no anchor), politely ask the user: "I'm not sure which file you're looking at right now, could you select it in the tree?"
+4. NEVER read "[CONTEXT UPDATE" or "VISUAL_ANCHOR" aloud. Use the information silently.
 
-IF THE USER ASKS ABOUT THE LINEAR ISSUE, REFER TO THE "PRIMARY REQUIREMENTS" SECTION BELOW.\n`;
+IF THE USER ASKS ABOUT THE LINEAR ISSUE...`;
 
       // Include SpecAtoms as requirements checklist
       const atoms = activeSpec?.atoms || [];
