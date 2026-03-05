@@ -40,3 +40,4 @@ userConfig.ts
 /temp
 /tmp
 /TO_BE_DELETED
+.worktrees/
