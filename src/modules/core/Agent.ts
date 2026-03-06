@@ -1323,33 +1323,73 @@ Selection: ${context?.activeSelection || 'None'}
   }
 
   /**
-   * FR-039: Context Middleware - Constructs the "Ground Truth" envelope
-   * This ensures the Agent always knows the user's active context.
+   * FR-039: Context Middleware — Constructs the "Ground Truth" envelope.
+   *
+   * Injects all known user-location signals into the prompt so the AI never
+   * has to guess where the reviewer is looking. The envelope covers:
+   *   - Active file (the file open in the code viewer)
+   *   - Visible line range (what the reviewer can currently see)
+   *   - Focused line (explicit scroll-to target, more precise than viewport top)
+   *   - Text selection (code the reviewer highlighted — strongest signal)
+   *   - View mode (diff vs source — changes what line numbers mean)
+   *   - Active UI tab
    */
   private buildContextEnvelope(message: string, context: any): string {
-    const activeFile = context?.activeFile || 'None';
-    const activeTab = context?.activeTab || 'files';
-    const selection = context?.activeSelection ? `\nACTIVE_SELECTION: ${context.activeSelection}` : '';
+    if (!context) {
+      return `USER_QUERY: ${message}`;
+    }
 
-    const warning = activeFile === 'None' 
-      ? '\nWARNING: No active file detected. If the user asks about "this file", ASK THEM to open it first. DO NOT GUESS filenames.' 
-      : '';
+    const activeFile: string = context.activeFile || 'None';
+    const activeTab: string = context.activeTab || 'files';
+    const isDiffMode: boolean = context.isDiffMode ?? true;
 
-    const contextHeader = context ? `
-[SYSTEM_CONTEXT]
-ACTIVE_FILE: ${activeFile}
-ACTIVE_TAB: ${activeTab}${selection}${warning}
-[/SYSTEM_CONTEXT]
-` : '';
+    const lines: string[] = [];
+
+    lines.push(`ACTIVE_FILE: ${activeFile}`);
+    lines.push(`VIEW_MODE: ${isDiffMode ? 'diff' : 'source'}`);
+    lines.push(`ACTIVE_TAB: ${activeTab}`);
+
+    // Viewport: the line range currently visible in the code viewer
+    if (context.viewportStartLine != null && context.viewportEndLine != null) {
+      lines.push(`VISIBLE_LINES: ${context.viewportStartLine}–${context.viewportEndLine}`);
+    } else if (context.viewportStartLine != null) {
+      lines.push(`VISIBLE_FROM_LINE: ${context.viewportStartLine}`);
+    }
+
+    // Focused line: explicit scroll target (stronger than viewport top)
+    if (context.focusedLine != null) {
+      lines.push(`FOCUSED_LINE: ${context.focusedLine}`);
+    }
+
+    // Text selection: the strongest possible location signal — user highlighted this code
+    if (context.selectionText) {
+      const selRange = context.selectionStartLine != null && context.selectionEndLine != null
+        ? ` (lines ${context.selectionStartLine}–${context.selectionEndLine})`
+        : '';
+      const preview = context.selectionText.length > 300
+        ? context.selectionText.slice(0, 300) + '…'
+        : context.selectionText;
+      lines.push(`SELECTED_CODE${selRange}:\n${preview}`);
+    } else if (context.activeSelection) {
+      lines.push(`ACTIVE_SELECTION: ${context.activeSelection}`);
+    }
+
+    if (activeFile === 'None') {
+      lines.push('WARNING: No active file detected. If the user asks about "this file", ASK THEM to open it first. DO NOT GUESS filenames.');
+    }
+
+    const contextHeader = `[SYSTEM_CONTEXT]\n${lines.join('\n')}\n[/SYSTEM_CONTEXT]`;
 
     console.log('[MIDDLEWARE_PROBE] Final Prompt Injection:', contextHeader);
 
-    return `${contextHeader}
-
-USER_QUERY: ${message}`;
+    return `${contextHeader}\n\nUSER_QUERY: ${message}`;
   }
 
   private buildSystemPrompt(context: any, prData: any): string {
+    const activeFile: string = context?.activeFile || 'None';
+    const activeTab: string = context?.activeTab || 'files';
+    const isDiffMode: boolean = context?.isDiffMode ?? true;
+
     return `You are Theia, a Senior Staff Software Engineer reviewing code.
 PR: "${prData?.title || 'Unknown'}"
 Author: ${prData?.author || 'Unknown'}
@@ -1359,8 +1399,9 @@ When discussing specific code, use navigate_to_code to show the user.
 When switching context, use change_tab.
 Use toggle_diff_mode to show or hide changes.
 
-Current File: ${context?.activeFile || 'None'}
-Current Tab: ${context?.activeTab || 'files'}`;
+Current File: ${activeFile}
+Current View Mode: ${isDiffMode ? 'diff' : 'source'}
+Current Tab: ${activeTab}`;
   }
 }
 

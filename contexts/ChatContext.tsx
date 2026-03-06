@@ -53,7 +53,9 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsDiffMode,
     selectedFile,
     viewportState,
-    focusedLocation // NEW: Import focusedLocation (Source of Truth for Navigation)
+    selectionState,
+    isDiffMode,
+    focusedLocation,
   } = usePR();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -217,20 +219,23 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // --- ACTIONS ---
 
-  // Create Refs for dynamic context to ensure sendMessage always sees the latest state
-  // without re-subscribing the EventBus listener (which caused loops/race conditions).
+  // Refs for dynamic context — prevent stale closures in sendMessage without
+  // re-subscribing the EventBus listener (which caused loops/race conditions).
   const selectedFileRef = useRef(selectedFile);
   const focusedLocationRef = useRef(focusedLocation);
   const viewportStateRef = useRef(viewportState);
+  const selectionStateRef = useRef(selectionState);
+  const isDiffModeRef = useRef(isDiffMode);
   const prDataRef = useRef(prData);
 
-  // Sync Refs with State
   useEffect(() => {
     selectedFileRef.current = selectedFile;
     focusedLocationRef.current = focusedLocation;
     viewportStateRef.current = viewportState;
+    selectionStateRef.current = selectionState;
+    isDiffModeRef.current = isDiffMode;
     prDataRef.current = prData;
-  }, [selectedFile, focusedLocation, viewportState, prData]);
+  }, [selectedFile, focusedLocation, viewportState, selectionState, isDiffMode, prData]);
 
   // --- ACTIONS ---
 
@@ -247,30 +252,47 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // 2. Emit Signal to Brain
     console.log('[ChatContext] Emitting USER_MESSAGE to EventBus');
 
-    // [UI_PROBE] Capturing Context (Using Refs to break closure staleness)
-    // Fallback chain: PR Selection -> File System Selection -> Navigation State
+    // Build authoritative context snapshot using refs (never stale in closures).
+    // Priority: PR file selection > focused navigation location > tab-level activeFile.
     const currentSelectedFile = selectedFileRef.current;
     const currentFocusedLocation = focusedLocationRef.current;
-    const realFile = currentSelectedFile?.path || currentFocusedLocation?.file || userContextRef.current.activeFile;
+    const vp = viewportStateRef.current;
+    const sel = selectionStateRef.current;
 
-    console.log('[UI_PROBE] Capturing Context:', {
-      file: realFile,
-      lines: viewportStateRef.current?.startLine,
-      source: currentSelectedFile ? 'PR Selection' : (currentFocusedLocation ? 'Focused Location' : 'Fallback')
-    });
+    const activeFile =
+      currentSelectedFile?.path ??
+      currentFocusedLocation?.file ??
+      userContextRef.current.activeFile ??
+      null;
+
+    // Viewport: prefer focusedLocation line (explicit scroll target) over viewport top
+    const viewportStartLine = vp?.startLine ?? null;
+    const viewportEndLine = vp?.endLine ?? null;
+    const focusedLine = currentFocusedLocation?.line ?? null;
+
+    const contextSnapshot = {
+      ...userContextRef.current,
+      activeFile,
+      viewportStartLine,
+      viewportEndLine,
+      focusedLine,
+      isDiffMode: isDiffModeRef.current,
+      // Selected text range (if user highlighted code)
+      selectionStartLine: sel?.startLine ?? null,
+      selectionEndLine: sel?.endLine ?? null,
+      selectionText: sel?.content ?? null,
+    };
+
+    console.log('[UI_PROBE] Context snapshot:', contextSnapshot);
 
     eventBus.emit({
       type: 'USER_MESSAGE',
       payload: {
         text,
         mode: 'text',
-        context: {
-          ...userContextRef.current,
-          activeFile: realFile,
-          cursorLine: viewportStateRef.current?.startLine
-        }, // Pass the view snapshot with authoritative overrides
-        prData: prDataRef.current // Pass the data snapshot
-      }
+        context: contextSnapshot,
+        prData: prDataRef.current,
+      },
     });
   }, []); // Stable reference - never changes
 

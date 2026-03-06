@@ -96,10 +96,11 @@ export const CodeViewer: React.FC = () => {
         {isPreviewMode && selectedFile.path.endsWith('.md') ? (
           <div className="p-8"><MarkdownRenderer content={(selectedFile as any).newContent || (selectedFile as any).content || ''} /></div>
         ) : isSource ? (
-          <SourceView 
-            key={selectedFile.path} 
-            content={(selectedFile as any).newContent || (selectedFile as any).content || (selectedFile as any).oldContent || ""} 
-            filePath={selectedFile.path} 
+          <SourceView
+            key={selectedFile.path}
+            content={(selectedFile as any).newContent || (selectedFile as any).content || (selectedFile as any).oldContent || ""}
+            filePath={selectedFile.path}
+            onViewportChange={(f, s, e) => updateViewport({ file: f, startLine: s, endLine: e })}
           />
         ) : (
           <DiffView
