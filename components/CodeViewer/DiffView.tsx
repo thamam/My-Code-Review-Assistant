@@ -5,8 +5,9 @@ import { LineMarker } from './LineMarker';
 import { usePR } from '../../contexts/PRContext';
 import { arePathsEquivalent } from '../../utils/fileUtils';
 import { MapPin, MessageSquare, Tag } from 'lucide-react';
-import Prism from 'prismjs';
 import { AnnotationInput } from './AnnotationInput';
+import { getLanguage, HighlightedText } from './syntaxHelpers';
+import { useViewportTracker } from './useViewportTracker';
 
 interface DiffViewProps {
   oldContent?: string;
@@ -15,54 +16,9 @@ interface DiffViewProps {
   onViewportChange: (file: string, start: number, end: number) => void;
 }
 
-const getLanguage = (path: string) => {
-    if (path.endsWith('.ts') || path.endsWith('.tsx')) return 'javascript'; 
-    if (path.endsWith('.js') || path.endsWith('.jsx')) return 'javascript';
-    if (path.endsWith('.css')) return 'css';
-    if (path.endsWith('.html')) return 'html';
-    if (path.endsWith('.json')) return 'json';
-    if (path.endsWith('.md')) return 'markdown';
-    return 'clike';
-};
-
-const renderToken = (token: string | Prism.Token, key: number): React.ReactNode => {
-    if (typeof token === 'string') return token;
-    
-    const className = `token ${token.type} ${token.alias || ''}`;
-    
-    const content = Array.isArray(token.content) 
-        ? token.content.map((t, i) => renderToken(t, i)) 
-        : token.content.toString();
-
-    return (
-        <span key={key} className={className}>
-            {content}
-        </span>
-    );
-};
-
-const HighlightedText: React.FC<{ text: string, language: string }> = React.memo(({ text, language }) => {
-    if (text.length > 500) return <>{text}</>;
-
-    try {
-        const grammar = Prism.languages[language] || Prism.languages.clike;
-        if (!grammar) return <>{text}</>;
-        
-        const tokens = Prism.tokenize(text, grammar);
-        return (
-            <>
-                {tokens.map((token, i) => renderToken(token, i))}
-            </>
-        );
-    } catch (e) {
-        return <>{text}</>;
-    }
-});
-
 export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, filePath, onViewportChange }) => {
   const diffLines = useMemo(() => computeDiff(oldContent, newContent), [oldContent, newContent]);
-  const visibleLines = React.useRef(new Set<number>());
-  const updateTimeout = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const { handleLineVisibility } = useViewportTracker(filePath, onViewportChange);
   const { walkthrough, activeSectionId, selectionState, setSelectionState, annotations, addAnnotation, removeAnnotation, focusedLocation } = usePR();
   const [hoveredLine, setHoveredLine] = useState<number | null>(null);
   const [flashLine, setFlashLine] = useState<number | null>(null);
@@ -81,19 +37,6 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
         return () => clearTimeout(timer);
     }
   }, [focusedLocation, filePath]);
-
-  const handleLineVisibility = (lineNumber: number, isVisible: boolean) => {
-    if (isVisible) visibleLines.current.add(lineNumber);
-    else visibleLines.current.delete(lineNumber);
-
-    if (updateTimeout.current) clearTimeout(updateTimeout.current);
-
-    updateTimeout.current = setTimeout(() => {
-      if (visibleLines.current.size === 0) return;
-      const lines = Array.from(visibleLines.current).sort((a: number, b: number) => a - b);
-      if (lines.length > 0) onViewportChange(filePath, lines[0], lines[lines.length - 1]);
-    }, 100);
-  };
 
   const handleMouseUp = useCallback(() => {
     const selection = window.getSelection();

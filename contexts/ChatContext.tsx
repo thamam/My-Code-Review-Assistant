@@ -8,6 +8,7 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef, useCallback } from 'react';
 import { ChatMessage } from '../types';
 import { usePR } from './PRContext';
+import type { ContextSnapshot } from '../src/types/context';
 // Event-Driven Architecture imports
 import { eventBus } from '../src/modules/core/EventBus';
 import { agent } from '../src/modules/core/Agent'; // Force instantiation (Polyfill enabled)
@@ -270,13 +271,15 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const viewportEndLine = vp?.endLine ?? null;
     const focusedLine = currentFocusedLocation?.line ?? null;
 
-    const contextSnapshot = {
-      ...userContextRef.current,
+    // Exclude activeFile from the base spread — it's set explicitly below with higher-priority logic
+    const { activeFile: _af, ...baseContext } = userContextRef.current;
+    const contextSnapshot: ContextSnapshot = {
+      ...baseContext,
       activeFile,
       viewportStartLine,
       viewportEndLine,
       focusedLine,
-      isDiffMode: isDiffModeRef.current,
+      isDiffMode: isDiffModeRef.current ?? true,
       // Selected text range (if user highlighted code)
       selectionStartLine: sel?.startLine ?? null,
       selectionEndLine: sel?.endLine ?? null,

@@ -1,49 +1,13 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
-import Prism from 'prismjs';
+import React, { useState, useCallback, useEffect } from 'react';
 import { usePR } from '../../contexts/PRContext';
-import { Annotation } from '../../types';
 import { MessageSquare, MapPin, Tag } from 'lucide-react';
 import clsx from 'clsx';
 import { AnnotationInput } from './AnnotationInput';
 import { SelectionToolbar } from './SelectionToolbar';
 import { LineMarker } from './LineMarker';
 import { arePathsEquivalent } from '../../utils/fileUtils';
-
-// --- Syntax Highlighting Helpers ---
-
-const renderToken = (token: string | Prism.Token, key: number): React.ReactNode => {
-    if (typeof token === 'string') return token;
-
-    const className = `token ${token.type} ${token.alias || ''}`;
-
-    const content = Array.isArray(token.content)
-        ? token.content.map((t, i) => renderToken(t, i))
-        : token.content.toString();
-
-    return (
-        <span key={key} className={className}>
-            {content}
-        </span>
-    );
-};
-
-const HighlightedText: React.FC<{ text: string, language: string }> = React.memo(({ text, language }) => {
-    if (text.length > 1000) return <>{text}</>;
-
-    try {
-        const grammar = Prism.languages[language] || Prism.languages.clike;
-        if (!grammar) return <>{text}</>;
-
-        const tokens = Prism.tokenize(text, grammar);
-        return (
-            <>
-                {tokens.map((token, i) => renderToken(token, i))}
-            </>
-        );
-    } catch (e) {
-        return <>{text}</>;
-    }
-});
+import { getLanguage, HighlightedText } from './syntaxHelpers';
+import { useViewportTracker } from './useViewportTracker';
 
 interface SourceViewProps {
     content: string;
@@ -57,35 +21,10 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath, onVie
     const [creatingLabelLine, setCreatingLabelLine] = useState<number | null>(null);
     const [flashLine, setFlashLine] = useState<number | null>(null);
 
-    // Viewport tracking — mirrors DiffView's approach using LineMarker + IntersectionObserver
-    const visibleLines = useRef(new Set<number>());
-    const updateTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-    const handleLineVisibility = useCallback((lineNumber: number, isVisible: boolean) => {
-        if (isVisible) visibleLines.current.add(lineNumber);
-        else visibleLines.current.delete(lineNumber);
-
-        if (updateTimeout.current) clearTimeout(updateTimeout.current);
-        updateTimeout.current = setTimeout(() => {
-            if (visibleLines.current.size === 0 || !onViewportChange) return;
-            const sorted = Array.from(visibleLines.current).sort((a, b) => a - b);
-            onViewportChange(filePath, sorted[0], sorted[sorted.length - 1]);
-        }, 100);
-    }, [filePath, onViewportChange]);
+    const { handleLineVisibility } = useViewportTracker(filePath, onViewportChange);
 
     const fileAnnotations = annotations.filter(a => a.file === filePath);
     const language = getLanguage(filePath);
-
-    function getLanguage(path: string) {
-        if (path.endsWith('.ts') || path.endsWith('.tsx')) return 'javascript';
-        if (path.endsWith('.js') || path.endsWith('.jsx')) return 'javascript';
-        if (path.endsWith('.py')) return 'python';
-        if (path.endsWith('.css')) return 'css';
-        if (path.endsWith('.html')) return 'html';
-        if (path.endsWith('.json')) return 'json';
-        if (path.endsWith('.md')) return 'markdown';
-        return 'clike';
-    }
 
     // Handle flash highlight for navigation
     useEffect(() => {

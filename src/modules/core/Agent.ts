@@ -13,6 +13,7 @@ import { storageService } from '../persistence';
 import { sanitizeForVoice } from "../../utils/VoiceUtils";
 import { formatSearchCommand, formatWriteFileCommand } from "../runtime/ToolUtils";
 import { DiagramAgent } from "../../../services/diagramAgent";
+import { ContextSnapshot } from "../../types/context";
 
 // --- Types ---
 
@@ -25,7 +26,7 @@ export interface PendingAction {
 
 export interface AgentState {
   messages: { role: string; content: string }[];
-  context: any; // The UserContextState passed from UI
+  context: ContextSnapshot | null; // The UserContextState passed from UI
   prData: any;  // PR metadata
   plan?: AgentPlan; // The Cortex - Deliberative Reasoning
   lastError?: string; // Phase 13: The reason for failure (Trauma Memory)
@@ -575,11 +576,15 @@ Available Tools:
 - navigate_to_code: Use to navigate to a specific file and line number.
 - change_tab: Use to switch sidebar tabs.
 
-CRITICAL: You will receive a [SYSTEM_CONTEXT] block. This is the GROUND TRUTH.
-If User says 'this file', refer to ACTIVE_FILE.
-NEVER guess filenames. Use the context.
+CRITICAL: You will receive a [SYSTEM_CONTEXT] block. This is the GROUND TRUTH about the reviewer's current location.
+- ACTIVE_FILE: the file currently open. "this file" always means this.
+- VISIBLE_LINES: the line range currently on screen — use this when the user says "here", "this section", "what I'm looking at".
+- FOCUSED_LINE: the exact line scrolled to — use this for "this line".
+- SELECTED_CODE: code the user highlighted — use this for "this code", "this function", "explain this".
+- VIEW_MODE: diff or source — line numbers differ between modes.
+NEVER guess filenames or line numbers. Use the context.
 
-Context: File: ${context?.activeFile}, Repo: ${prData?.title}`;
+Context: File: ${context?.activeFile || 'None'}, Lines: ${context?.viewportStartLine ?? '?'}–${context?.viewportEndLine ?? '?'}, Repo: ${prData?.title || 'Unknown'}`;
 
     let prompt = userMsg.content;
 
@@ -1064,14 +1069,6 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
       });
     }
 
-    // Context Injection (Hidden)
-    const contextSuffix = `
-[SYSTEM INJECTION]
-User View: ${context?.activeFile || 'None'}
-Tab: ${context?.activeTab || 'files'}
-Selection: ${context?.activeSelection || 'None'}
-`;
-
     // Ensure message content is a valid non-empty string
     const messageContent = String(userMsg.content || '').trim();
     if (!messageContent) {
@@ -1079,7 +1076,10 @@ Selection: ${context?.activeSelection || 'None'}
       return { messages: [] };
     }
 
-    let response = await this.chatSession.sendMessage({ message: messageContent + contextSuffix });
+    // Context Injection — use canonical buildContextEnvelope (prevents double-injection)
+    const envelopedMessage = this.buildContextEnvelope(messageContent, context);
+
+    let response = await this.chatSession.sendMessage({ message: envelopedMessage });
 
     // =========================================================================
     // TOOL LOOP: Execute until we get a text response
@@ -1334,7 +1334,7 @@ Selection: ${context?.activeSelection || 'None'}
    *   - View mode (diff vs source — changes what line numbers mean)
    *   - Active UI tab
    */
-  private buildContextEnvelope(message: string, context: any): string {
+  private buildContextEnvelope(message: string, context: ContextSnapshot | null): string {
     if (!context) {
       return `USER_QUERY: ${message}`;
     }
@@ -1385,7 +1385,7 @@ Selection: ${context?.activeSelection || 'None'}
     return `${contextHeader}\n\nUSER_QUERY: ${message}`;
   }
 
-  private buildSystemPrompt(context: any, prData: any): string {
+  private buildSystemPrompt(context: ContextSnapshot | null, prData: any): string {
     const activeFile: string = context?.activeFile || 'None';
     const activeTab: string = context?.activeTab || 'files';
     const isDiffMode: boolean = context?.isDiffMode ?? true;
