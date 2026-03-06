@@ -83,9 +83,9 @@ interface ContextSnapshot {
 
 ## Future: PRD Features
 
-### F1: Review Map
-File tree with `VerificationState` badges. Requires wiring `ReviewSession` to file selection.
-Types: `src/types/review.ts` (already defined)
+### F1: Review Map  [DONE]
+File tree with `VerificationState` badges — click to cycle unreviewed→inspected→verified→flagged.
+Coverage progress bar in header. `fileVerificationStates` in PRContext.
 
 ### F2: Hierarchical Context
 Section summaries from walkthrough shown as collapsible context in chat.
@@ -93,8 +93,9 @@ Section summaries from walkthrough shown as collapsible context in chat.
 ### F3: Checkpoints + Report
 Milestone tracking. `ReviewReport` type already defined.
 
-### F4: PR Memory
-Persist review state across sessions. `storageService` exists; needs `ReviewSession` serialization.
+### F4: PR Memory  [DONE]
+`storageService.saveReviewState/loadReviewState` persists per-PR verification states.
+Loads on PR open, saves on every state change.
 
 ### F5: Whiteboard
 Freeform annotation canvas. Not started.
@@ -102,8 +103,9 @@ Freeform annotation canvas. Not started.
 ### I2: Prompt→Requirements
 Parse system prompt to extract implied requirements for review coverage.
 
-### I3: Risk Scoring
-Use session parser data to score files by risk (filesNotRead, error sequences, etc.).
+### I3: Risk Scoring  [DONE]
+`src/lib/risk-scoring/index.ts`: scoreFiles(session, filePaths) → SessionRiskReport.
+3 signals: not_read_back (+0.40), high_churn (+0.30), error_nearby (+0.20). 86 tests passing.
 
 ### I1 Integration
 Wire session parser to UI — allow user to drop a `.jsonl` file and see the session walkthrough.

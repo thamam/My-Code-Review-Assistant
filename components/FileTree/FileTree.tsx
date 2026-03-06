@@ -1,8 +1,8 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { usePR } from '../../contexts/PRContext';
 import { buildFileTree } from '../../utils/fileUtils';
 import { FileNode } from './FileNode';
-import { AlertTriangle, FolderOpen, FolderClosed, Loader2, Eye, EyeOff } from 'lucide-react';
+import { AlertTriangle, FolderOpen, FolderClosed, Loader2, Eye, EyeOff, Brain } from 'lucide-react';
 import { FileTreeNode, FileChange, RepoNode } from '../../types';
 import clsx from 'clsx';
 
@@ -71,8 +71,25 @@ export const FileTree: React.FC = () => {
         loadGhostFile,
         selectFile,
         fileVerificationStates,
+        loadSessionFile,
+        hasSession,
     } = usePR();
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+    const [isLoadingSession, setIsLoadingSession] = useState(false);
+    const sessionInputRef = useRef<HTMLInputElement>(null);
+
+    const handleSessionFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setIsLoadingSession(true);
+        try {
+            await loadSessionFile(file);
+        } finally {
+            setIsLoadingSession(false);
+            // Reset input so same file can be re-loaded
+            if (sessionInputRef.current) sessionInputRef.current.value = '';
+        }
+    };
 
     // Build tree based on mode
     const treeData = useMemo(() => {
@@ -194,6 +211,24 @@ export const FileTree: React.FC = () => {
                         <button onClick={collapseAll} className="p-1.5 text-gray-500 hover:text-white hover:bg-gray-800 rounded" title="Collapse All">
                             <FolderClosed size={14} />
                         </button>
+                        <button
+                            onClick={() => sessionInputRef.current?.click()}
+                            disabled={isLoadingSession}
+                            className={clsx(
+                                "p-1.5 rounded transition-colors",
+                                hasSession ? "text-purple-400 hover:text-purple-200 hover:bg-gray-800" : "text-gray-500 hover:text-white hover:bg-gray-800"
+                            )}
+                            title={hasSession ? "Session loaded — click to reload" : "Load Claude session (.jsonl) for risk scoring"}
+                        >
+                            {isLoadingSession ? <Loader2 size={14} className="animate-spin" /> : <Brain size={14} />}
+                        </button>
+                        <input
+                            ref={sessionInputRef}
+                            type="file"
+                            accept=".jsonl"
+                            className="hidden"
+                            onChange={handleSessionFileChange}
+                        />
                     </div>
                 </div>
 

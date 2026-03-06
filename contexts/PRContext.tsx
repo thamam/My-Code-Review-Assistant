@@ -12,6 +12,9 @@ import { useNavigationModule } from '../src/modules/navigation/hooks';
 import { RepoNode, LazyFile } from '../src/modules/navigation/types';
 import type { VerificationState } from '../src/types/review';
 import { storageService } from '../src/modules/persistence';
+import { parseSessionText } from '../src/lib/session-parser/index.js';
+import { scoreFiles } from '../src/lib/risk-scoring/index.js';
+import type { FileRiskScore } from '../src/lib/risk-scoring/index.js';
 
 // Phase 9: Unify Selection Type
 export type SelectedFile = FileChange | LazyFile;
@@ -73,6 +76,11 @@ interface PRContextType {
   // F1: Review Map — per-file verification states
   fileVerificationStates: Map<string, VerificationState>;
   setFileVerificationState: (path: string, state: VerificationState) => void;
+
+  // I1+I3: Session parser risk scoring
+  fileRiskScores: Map<string, FileRiskScore>;
+  loadSessionFile: (file: File) => Promise<void>;
+  hasSession: boolean;
 }
 
 const PRContext = createContext<PRContextType | undefined>(undefined);
@@ -117,6 +125,20 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const setFileVerificationState = useCallback((path: string, state: VerificationState) => {
     setFileVerificationStates(prev => new Map(prev).set(path, state));
   }, []);
+
+  // I1+I3: Session file risk scores
+  const [fileRiskScores, setFileRiskScores] = useState<Map<string, FileRiskScore>>(new Map());
+  const [hasSession, setHasSession] = useState(false);
+
+  const loadSessionFile = useCallback(async (file: File) => {
+    const text = await file.text();
+    const session = parseSessionText(text, file.name);
+    const filePaths = prData?.files.map(f => f.path) ?? [];
+    const report = scoreFiles(session, filePaths);
+    const scoreMap = new Map(report.files.map(s => [s.filePath, s]));
+    setFileRiskScores(scoreMap);
+    setHasSession(true);
+  }, [prData?.files]);
 
   // NEW: Hook into the Navigation Module
   const navModule = useNavigationModule();
@@ -280,6 +302,10 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       // F1: Review Map
       fileVerificationStates,
       setFileVerificationState,
+      // I1+I3: Risk scoring
+      fileRiskScores,
+      loadSessionFile,
+      hasSession,
     }}>
       {children}
     </PRContext.Provider>

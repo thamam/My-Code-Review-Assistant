@@ -51,7 +51,7 @@ const FileIcon = ({ name, className }: { name: string; className?: string }) => 
 };
 
 export const FileNode: React.FC<FileNodeProps> = ({ node, depth = 0, expandedPaths, onToggle, onGhostClick }) => {
-  const { selectedFile, selectFile, walkthrough, activeSectionId, lazyFiles, fileVerificationStates, setFileVerificationState } = usePR();
+  const { selectedFile, selectFile, walkthrough, activeSectionId, lazyFiles, fileVerificationStates, setFileVerificationState, fileRiskScores, hasSession } = usePR();
   const [isLoading, setIsLoading] = useState(false);
 
   const filePath = node.data?.path ?? node.path;
@@ -70,6 +70,9 @@ export const FileNode: React.FC<FileNodeProps> = ({ node, depth = 0, expandedPat
   const isDirectory = node.type === 'directory';
   const isOpen = expandedPaths.has(node.path);
   const isGhost = (node as any).isGhost === true;
+
+  // I1+I3: Risk score for this file
+  const riskScore = !isDirectory && hasSession ? fileRiskScores.get(filePath) : undefined;
 
   // Check if this ghost file is already loaded
   const isGhostLoaded = isGhost && lazyFiles.has(node.path);
@@ -168,6 +171,18 @@ export const FileNode: React.FC<FileNodeProps> = ({ node, depth = 0, expandedPat
           )}
           {isGhost && !isGhostLoaded && <span className="text-[9px] text-gray-600 uppercase">repo</span>}
           {isGhostLoaded && <span className="text-[9px] text-blue-400 uppercase">loaded</span>}
+          {riskScore && riskScore.level !== 'low' && (
+            <span
+              title={`Risk: ${riskScore.level} (${Math.round(riskScore.score * 100)}%)\n${Object.entries(riskScore.signals).filter(([, v]) => v).map(([k]) => k).join(', ')}`}
+              className={clsx(
+                'text-[9px] px-1 rounded uppercase font-bold',
+                riskScore.level === 'high'   && 'bg-red-900/60 text-red-300',
+                riskScore.level === 'medium' && 'bg-yellow-900/60 text-yellow-300',
+              )}
+            >
+              {riskScore.level}
+            </span>
+          )}
           {!isDirectory && (
             <VerificationBadge state={verificationState} onClick={cycleVerificationState} />
           )}
