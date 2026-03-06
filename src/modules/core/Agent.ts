@@ -13,6 +13,7 @@ import { storageService } from '../persistence';
 import { sanitizeForVoice } from "../../utils/VoiceUtils";
 import { formatSearchCommand, formatWriteFileCommand } from "../runtime/ToolUtils";
 import { DiagramAgent } from "../../../services/diagramAgent";
+import { ContextSnapshot } from "../../types/context";
 
 // --- Types ---
 
@@ -25,7 +26,7 @@ export interface PendingAction {
 
 export interface AgentState {
   messages: { role: string; content: string }[];
-  context: any; // The UserContextState passed from UI
+  context: ContextSnapshot | null; // The UserContextState passed from UI
   prData: any;  // PR metadata
   plan?: AgentPlan; // The Cortex - Deliberative Reasoning
   lastError?: string; // Phase 13: The reason for failure (Trauma Memory)
@@ -575,11 +576,15 @@ Available Tools:
 - navigate_to_code: Use to navigate to a specific file and line number.
 - change_tab: Use to switch sidebar tabs.
 
-CRITICAL: You will receive a [SYSTEM_CONTEXT] block. This is the GROUND TRUTH.
-If User says 'this file', refer to ACTIVE_FILE.
-NEVER guess filenames. Use the context.
+CRITICAL: You will receive a [SYSTEM_CONTEXT] block. This is the GROUND TRUTH about the reviewer's current location.
+- ACTIVE_FILE: the file currently open. "this file" always means this.
+- VISIBLE_LINES: the line range currently on screen — use this when the user says "here", "this section", "what I'm looking at".
+- FOCUSED_LINE: the exact line scrolled to — use this for "this line".
+- SELECTED_CODE: code the user highlighted — use this for "this code", "this function", "explain this".
+- VIEW_MODE: diff or source — line numbers differ between modes.
+NEVER guess filenames or line numbers. Use the context.
 
-Context: File: ${context?.activeFile}, Repo: ${prData?.title}`;
+Context: File: ${context?.activeFile || 'None'}, Lines: ${context?.viewportStartLine ?? '?'}–${context?.viewportEndLine ?? '?'}, Repo: ${prData?.title || 'Unknown'}`;
 
     let prompt = userMsg.content;
 
@@ -1064,14 +1069,6 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
       });
     }
 
-    // Context Injection (Hidden)
-    const contextSuffix = `
-[SYSTEM INJECTION]
-User View: ${context?.activeFile || 'None'}
-Tab: ${context?.activeTab || 'files'}
-Selection: ${context?.activeSelection || 'None'}
-`;
-
     // Ensure message content is a valid non-empty string
     const messageContent = String(userMsg.content || '').trim();
     if (!messageContent) {
@@ -1079,7 +1076,10 @@ Selection: ${context?.activeSelection || 'None'}
       return { messages: [] };
     }
 
-    let response = await this.chatSession.sendMessage({ message: messageContent + contextSuffix });
+    // Context Injection — use canonical buildContextEnvelope (prevents double-injection)
+    const envelopedMessage = this.buildContextEnvelope(messageContent, context);
+
+    let response = await this.chatSession.sendMessage({ message: envelopedMessage });
 
     // =========================================================================
     // TOOL LOOP: Execute until we get a text response
@@ -1323,33 +1323,81 @@ Selection: ${context?.activeSelection || 'None'}
   }
 
   /**
-   * FR-039: Context Middleware - Constructs the "Ground Truth" envelope
-   * This ensures the Agent always knows the user's active context.
+   * FR-039: Context Middleware — Constructs the "Ground Truth" envelope.
+   *
+   * Injects all known user-location signals into the prompt so the AI never
+   * has to guess where the reviewer is looking. The envelope covers:
+   *   - Active file (the file open in the code viewer)
+   *   - Visible line range (what the reviewer can currently see)
+   *   - Focused line (explicit scroll-to target, more precise than viewport top)
+   *   - Text selection (code the reviewer highlighted — strongest signal)
+   *   - View mode (diff vs source — changes what line numbers mean)
+   *   - Active UI tab
    */
-  private buildContextEnvelope(message: string, context: any): string {
-    const activeFile = context?.activeFile || 'None';
-    const activeTab = context?.activeTab || 'files';
-    const selection = context?.activeSelection ? `\nACTIVE_SELECTION: ${context.activeSelection}` : '';
+  private buildContextEnvelope(message: string, context: ContextSnapshot | null): string {
+    if (!context) {
+      return `USER_QUERY: ${message}`;
+    }
 
-    const warning = activeFile === 'None' 
-      ? '\nWARNING: No active file detected. If the user asks about "this file", ASK THEM to open it first. DO NOT GUESS filenames.' 
-      : '';
+    const activeFile: string = context.activeFile || 'None';
+    const activeTab: string = context.activeTab || 'files';
+    const isDiffMode: boolean = context.isDiffMode ?? true;
 
-    const contextHeader = context ? `
-[SYSTEM_CONTEXT]
-ACTIVE_FILE: ${activeFile}
-ACTIVE_TAB: ${activeTab}${selection}${warning}
-[/SYSTEM_CONTEXT]
-` : '';
+    const lines: string[] = [];
+
+    lines.push(`ACTIVE_FILE: ${activeFile}`);
+    lines.push(`VIEW_MODE: ${isDiffMode ? 'diff' : 'source'}`);
+    lines.push(`ACTIVE_TAB: ${activeTab}`);
+
+    // Viewport: the line range currently visible in the code viewer
+    if (context.viewportStartLine != null && context.viewportEndLine != null) {
+      lines.push(`VISIBLE_LINES: ${context.viewportStartLine}–${context.viewportEndLine}`);
+    } else if (context.viewportStartLine != null) {
+      lines.push(`VISIBLE_FROM_LINE: ${context.viewportStartLine}`);
+    }
+
+    // Focused line: explicit scroll target (stronger than viewport top)
+    if (context.focusedLine != null) {
+      lines.push(`FOCUSED_LINE: ${context.focusedLine}`);
+    }
+
+    // Text selection: the strongest possible location signal — user highlighted this code
+    if (context.selectionText) {
+      const selRange = context.selectionStartLine != null && context.selectionEndLine != null
+        ? ` (lines ${context.selectionStartLine}–${context.selectionEndLine})`
+        : '';
+      const preview = context.selectionText.length > 300
+        ? context.selectionText.slice(0, 300) + '…'
+        : context.selectionText;
+      lines.push(`SELECTED_CODE${selRange}:\n${preview}`);
+    } else if (context.activeSelection) {
+      lines.push(`ACTIVE_SELECTION: ${context.activeSelection}`);
+    }
+
+    // F2: Hierarchical context — active walkthrough section
+    if (context.activeSectionTitle) {
+      lines.push(`ACTIVE_SECTION: ${context.activeSectionTitle}`);
+      if (context.activeSectionDescription) {
+        lines.push(`SECTION_DESCRIPTION: ${context.activeSectionDescription}`);
+      }
+    }
+
+    if (activeFile === 'None') {
+      lines.push('WARNING: No active file detected. If the user asks about "this file", ASK THEM to open it first. DO NOT GUESS filenames.');
+    }
+
+    const contextHeader = `[SYSTEM_CONTEXT]\n${lines.join('\n')}\n[/SYSTEM_CONTEXT]`;
 
     console.log('[MIDDLEWARE_PROBE] Final Prompt Injection:', contextHeader);
 
-    return `${contextHeader}
-
-USER_QUERY: ${message}`;
+    return `${contextHeader}\n\nUSER_QUERY: ${message}`;
   }
 
-  private buildSystemPrompt(context: any, prData: any): string {
+  private buildSystemPrompt(context: ContextSnapshot | null, prData: any): string {
+    const activeFile: string = context?.activeFile || 'None';
+    const activeTab: string = context?.activeTab || 'files';
+    const isDiffMode: boolean = context?.isDiffMode ?? true;
+
     return `You are Theia, a Senior Staff Software Engineer reviewing code.
 PR: "${prData?.title || 'Unknown'}"
 Author: ${prData?.author || 'Unknown'}
@@ -1359,8 +1407,9 @@ When discussing specific code, use navigate_to_code to show the user.
 When switching context, use change_tab.
 Use toggle_diff_mode to show or hide changes.
 
-Current File: ${context?.activeFile || 'None'}
-Current Tab: ${context?.activeTab || 'files'}`;
+Current File: ${activeFile}
+Current View Mode: ${isDiffMode ? 'diff' : 'source'}
+Current Tab: ${activeTab}`;
   }
 }
 

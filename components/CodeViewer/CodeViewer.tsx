@@ -1,6 +1,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { usePR } from '../../contexts/PRContext';
+import { getActiveSection } from '../../utils/walkthroughUtils';
 import { DiffView } from './DiffView';
 import { SourceView } from './SourceView';
 import { FileCode2, Eye, Lock } from 'lucide-react';
@@ -31,7 +32,7 @@ export const CodeViewer: React.FC = () => {
     if (focusedLocation && arePathsEquivalent(focusedLocation.file, selectedFile.path)) {
       targetLine = focusedLocation.line;
     } else if (activeSectionId && walkthrough) {
-      const section = walkthrough.sections.find(s => s.id === activeSectionId);
+      const section = getActiveSection(walkthrough, activeSectionId);
       const highlight = section?.highlights?.find(h => arePathsEquivalent(h.file, selectedFile.path));
       if (highlight) targetLine = highlight.lines[0];
     }
@@ -96,10 +97,11 @@ export const CodeViewer: React.FC = () => {
         {isPreviewMode && selectedFile.path.endsWith('.md') ? (
           <div className="p-8"><MarkdownRenderer content={(selectedFile as any).newContent || (selectedFile as any).content || ''} /></div>
         ) : isSource ? (
-          <SourceView 
-            key={selectedFile.path} 
-            content={(selectedFile as any).newContent || (selectedFile as any).content || (selectedFile as any).oldContent || ""} 
-            filePath={selectedFile.path} 
+          <SourceView
+            key={selectedFile.path}
+            content={(selectedFile as any).newContent || (selectedFile as any).content || (selectedFile as any).oldContent || ""}
+            filePath={selectedFile.path}
+            onViewportChange={(f, s, e) => updateViewport({ file: f, startLine: s, endLine: e })}
           />
         ) : (
           <DiffView

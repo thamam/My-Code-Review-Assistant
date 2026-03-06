@@ -3,6 +3,7 @@
  * Protocol Definition for Event-Driven Architecture.
  * Defines the contract between UI (Signals) and Agent (Actions).
  */
+import type { ContextSnapshot } from '../../types/context';
 
 // ============================================================================
 // INPUT SIGNALS (UserIntent) - UI -> Agent
@@ -36,7 +37,7 @@ export interface UserMessageEvent {
         text?: string; // Alias for content (backwards compat)
         source?: 'voice' | 'text';
         mode?: 'voice' | 'text'; // Alias for source
-        context?: UIContext;
+        context?: ContextSnapshot | null;
         prData?: any; // PR Data snapshot
         timestamp?: number;
     };

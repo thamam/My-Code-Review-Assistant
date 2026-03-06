@@ -30,6 +30,8 @@
     "test:context-injection": "npx tsx scripts/test-context-injection.ts",
     "test:director": "npx tsx scripts/test-director-service.ts",
     "test:guards": "npm run test:voice-config && npm run test:context-injection && npm run test:director",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
     "test:e2e": "npx playwright test",
     "test:e2e:director": "npx playwright test tests/director-actor.spec.ts"
   },

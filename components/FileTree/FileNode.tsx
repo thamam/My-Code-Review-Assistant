@@ -1,10 +1,40 @@
 import React, { useState } from 'react';
 import { FileTreeNode } from '../../types';
 import { getFileColor, getStatusColorClass } from '../../utils/colorUtils';
-import { ChevronRight, ChevronDown, File, Folder, FileJson, FileCode, FileText, Loader2 } from 'lucide-react';
+import { ChevronRight, ChevronDown, File, Folder, FileJson, FileCode, FileText, Loader2, Check, Eye, Flag, Sparkles } from 'lucide-react';
 import clsx from 'clsx';
 import { usePR } from '../../contexts/PRContext';
 import { arePathsEquivalent } from '../../utils/fileUtils';
+import { getActiveSection } from '../../utils/walkthroughUtils';
+import type { VerificationState } from '../../src/types/review';
+
+const VERIFICATION_CYCLE: VerificationState[] = ['unreviewed', 'inspected', 'verified', 'flagged'];
+
+const VerificationBadge: React.FC<{ state: VerificationState; onClick: (e: React.MouseEvent) => void }> = ({ state, onClick }) => {
+  if (state === 'unreviewed') return (
+    <button
+      onClick={onClick}
+      title="Mark as inspected"
+      className="shrink-0 w-4 h-4 rounded-full border border-gray-600 hover:border-blue-400 transition-colors opacity-0 group-hover:opacity-100"
+    />
+  );
+  const configs: Record<Exclude<VerificationState, 'unreviewed'>, { icon: React.ReactNode; className: string; title: string }> = {
+    inspected:   { icon: <Eye size={9} />,      className: 'bg-blue-600 text-white',   title: 'Inspected — click to mark verified' },
+    verified:    { icon: <Check size={9} />,    className: 'bg-green-600 text-white',  title: 'Verified — click to flag' },
+    flagged:     { icon: <Flag size={9} />,     className: 'bg-red-600 text-white',    title: 'Flagged — click to clear' },
+    'ai-verified': { icon: <Sparkles size={9} />, className: 'bg-purple-600 text-white', title: 'AI-verified' },
+  };
+  const cfg = configs[state as Exclude<VerificationState, 'unreviewed'>];
+  return (
+    <button
+      onClick={onClick}
+      title={cfg.title}
+      className={clsx('ml-auto shrink-0 w-4 h-4 rounded-full flex items-center justify-center', cfg.className)}
+    >
+      {cfg.icon}
+    </button>
+  );
+};
 
 interface FileNodeProps {
   node: FileTreeNode & { isGhost?: boolean };
@@ -22,12 +52,28 @@ const FileIcon = ({ name, className }: { name: string; className?: string }) => 
 };
 
 export const FileNode: React.FC<FileNodeProps> = ({ node, depth = 0, expandedPaths, onToggle, onGhostClick }) => {
-  const { selectedFile, selectFile, walkthrough, activeSectionId, lazyFiles } = usePR();
+  const { selectedFile, selectFile, walkthrough, activeSectionId, lazyFiles, fileVerificationStates, setFileVerificationState, fileRiskScores, hasSession } = usePR();
   const [isLoading, setIsLoading] = useState(false);
+
+  const filePath = node.data?.path ?? node.path;
+  const verificationState: VerificationState = (!node.type || node.type === 'file')
+    ? (fileVerificationStates.get(filePath) ?? 'unreviewed')
+    : 'unreviewed';
+
+  const cycleVerificationState = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (node.type === 'directory') return;
+    const currentIdx = VERIFICATION_CYCLE.indexOf(verificationState === 'ai-verified' ? 'unreviewed' : verificationState);
+    const next = VERIFICATION_CYCLE[(currentIdx + 1) % VERIFICATION_CYCLE.length];
+    setFileVerificationState(filePath, next);
+  };
 
   const isDirectory = node.type === 'directory';
   const isOpen = expandedPaths.has(node.path);
   const isGhost = (node as any).isGhost === true;
+
+  // I1+I3: Risk score for this file
+  const riskScore = !isDirectory && hasSession ? fileRiskScores.get(filePath) : undefined;
 
   // Check if this ghost file is already loaded
   const isGhostLoaded = isGhost && lazyFiles.has(node.path);
@@ -39,7 +85,7 @@ export const FileNode: React.FC<FileNodeProps> = ({ node, depth = 0, expandedPat
   );
 
   // Walkthrough highlight logic
-  const isHighlightedInActiveSection = activeSectionId && walkthrough?.sections.find(s => s.id === activeSectionId)?.files.some(f =>
+  const isHighlightedInActiveSection = activeSectionId && getActiveSection(walkthrough, activeSectionId)?.files.some(f =>
     node.data && arePathsEquivalent(f, node.data.path)
   );
 
@@ -77,7 +123,7 @@ export const FileNode: React.FC<FileNodeProps> = ({ node, depth = 0, expandedPat
     <div>
       <div
         className={clsx(
-          "flex items-center py-1 px-2 cursor-pointer transition-colors text-sm select-none",
+          "group flex items-center py-1 px-2 cursor-pointer transition-colors text-sm select-none",
           isSelected ? "bg-blue-900/50 border-r-2 border-blue-500" : "hover:bg-gray-800",
           isHighlightedInActiveSection && !isSelected ? "bg-purple-900/30 border-l-2 border-purple-500" : "",
           isGhost && !isSelected && !isGhostLoaded && "opacity-50" // Dim unloaded ghost files
@@ -116,23 +162,32 @@ export const FileNode: React.FC<FileNodeProps> = ({ node, depth = 0, expandedPat
           {node.name}
         </span>
 
-        {/* Show additions/deletions for PR files */}
-        {node.data && (node.data.status !== 'unchanged') && (
-          <span className="ml-auto flex gap-1 text-[10px] font-mono opacity-60">
-            {node.data.additions > 0 && <span className="text-green-400">+{node.data.additions}</span>}
-            {node.data.deletions > 0 && <span className="text-red-400">-{node.data.deletions}</span>}
-          </span>
-        )}
-
-        {/* Ghost indicator for non-PR files */}
-        {isGhost && !isGhostLoaded && (
-          <span className="ml-auto text-[9px] text-gray-600 uppercase">repo</span>
-        )}
-
-        {/* Loaded ghost indicator */}
-        {isGhostLoaded && (
-          <span className="ml-auto text-[9px] text-blue-400 uppercase">loaded</span>
-        )}
+        {/* Right side: stats + ghost label + verification badge */}
+        <span className="ml-auto flex items-center gap-1.5">
+          {node.data && node.data.status !== 'unchanged' && (
+            <span className="flex gap-1 text-[10px] font-mono opacity-60">
+              {node.data.additions > 0 && <span className="text-green-400">+{node.data.additions}</span>}
+              {node.data.deletions > 0 && <span className="text-red-400">-{node.data.deletions}</span>}
+            </span>
+          )}
+          {isGhost && !isGhostLoaded && <span className="text-[9px] text-gray-600 uppercase">repo</span>}
+          {isGhostLoaded && <span className="text-[9px] text-blue-400 uppercase">loaded</span>}
+          {riskScore && riskScore.level !== 'low' && (
+            <span
+              title={`Risk: ${riskScore.level} (${Math.round(riskScore.score * 100)}%)\n${Object.entries(riskScore.signals).filter(([, v]) => v).map(([k]) => k).join(', ')}`}
+              className={clsx(
+                'text-[9px] px-1 rounded uppercase font-bold',
+                riskScore.level === 'high'   && 'bg-red-900/60 text-red-300',
+                riskScore.level === 'medium' && 'bg-yellow-900/60 text-yellow-300',
+              )}
+            >
+              {riskScore.level}
+            </span>
+          )}
+          {!isDirectory && (
+            <VerificationBadge state={verificationState} onClick={cycleVerificationState} />
+          )}
+        </span>
       </div>
 
       {isDirectory && isOpen && node.children && (

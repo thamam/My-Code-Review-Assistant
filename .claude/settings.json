@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "code-refactoring@claude-code-workflows": true,
+    "codebase-cleanup@claude-code-workflows": true
+  }
+}

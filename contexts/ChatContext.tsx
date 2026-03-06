@@ -8,6 +8,9 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef, useCallback } from 'react';
 import { ChatMessage } from '../types';
 import { usePR } from './PRContext';
+import { getActiveSection } from '../utils/walkthroughUtils';
+import { downloadBlob } from '../utils/downloadUtils';
+import type { ContextSnapshot } from '../src/types/context';
 // Event-Driven Architecture imports
 import { eventBus } from '../src/modules/core/EventBus';
 import { agent } from '../src/modules/core/Agent'; // Force instantiation (Polyfill enabled)
@@ -53,7 +56,11 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsDiffMode,
     selectedFile,
     viewportState,
-    focusedLocation // NEW: Import focusedLocation (Source of Truth for Navigation)
+    selectionState,
+    isDiffMode,
+    focusedLocation,
+    walkthrough,
+    activeSectionId,
   } = usePR();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -217,20 +224,27 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // --- ACTIONS ---
 
-  // Create Refs for dynamic context to ensure sendMessage always sees the latest state
-  // without re-subscribing the EventBus listener (which caused loops/race conditions).
+  // Refs for dynamic context — prevent stale closures in sendMessage without
+  // re-subscribing the EventBus listener (which caused loops/race conditions).
   const selectedFileRef = useRef(selectedFile);
   const focusedLocationRef = useRef(focusedLocation);
   const viewportStateRef = useRef(viewportState);
+  const selectionStateRef = useRef(selectionState);
+  const isDiffModeRef = useRef(isDiffMode);
   const prDataRef = useRef(prData);
+  const walkthroughRef = useRef(walkthrough);
+  const activeSectionIdRef = useRef(activeSectionId);
 
-  // Sync Refs with State
   useEffect(() => {
     selectedFileRef.current = selectedFile;
     focusedLocationRef.current = focusedLocation;
     viewportStateRef.current = viewportState;
+    selectionStateRef.current = selectionState;
+    isDiffModeRef.current = isDiffMode;
     prDataRef.current = prData;
-  }, [selectedFile, focusedLocation, viewportState, prData]);
+    walkthroughRef.current = walkthrough;
+    activeSectionIdRef.current = activeSectionId;
+  }, [selectedFile, focusedLocation, viewportState, selectionState, isDiffMode, prData, walkthrough, activeSectionId]);
 
   // --- ACTIONS ---
 
@@ -247,30 +261,55 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // 2. Emit Signal to Brain
     console.log('[ChatContext] Emitting USER_MESSAGE to EventBus');
 
-    // [UI_PROBE] Capturing Context (Using Refs to break closure staleness)
-    // Fallback chain: PR Selection -> File System Selection -> Navigation State
+    // Build authoritative context snapshot using refs (never stale in closures).
+    // Priority: PR file selection > focused navigation location > tab-level activeFile.
     const currentSelectedFile = selectedFileRef.current;
     const currentFocusedLocation = focusedLocationRef.current;
-    const realFile = currentSelectedFile?.path || currentFocusedLocation?.file || userContextRef.current.activeFile;
+    const vp = viewportStateRef.current;
+    const sel = selectionStateRef.current;
 
-    console.log('[UI_PROBE] Capturing Context:', {
-      file: realFile,
-      lines: viewportStateRef.current?.startLine,
-      source: currentSelectedFile ? 'PR Selection' : (currentFocusedLocation ? 'Focused Location' : 'Fallback')
-    });
+    const activeFile =
+      currentSelectedFile?.path ??
+      currentFocusedLocation?.file ??
+      userContextRef.current.activeFile ??
+      null;
+
+    // Viewport: prefer focusedLocation line (explicit scroll target) over viewport top
+    const viewportStartLine = vp?.startLine ?? null;
+    const viewportEndLine = vp?.endLine ?? null;
+    const focusedLine = currentFocusedLocation?.line ?? null;
+
+    // F2: Resolve active walkthrough section (if any)
+    const activeSection = getActiveSection(walkthroughRef.current, activeSectionIdRef.current);
+
+    // Exclude activeFile from the base spread — it's set explicitly below with higher-priority logic
+    const { activeFile: _af, ...baseContext } = userContextRef.current;
+    const contextSnapshot: ContextSnapshot = {
+      ...baseContext,
+      activeFile,
+      viewportStartLine,
+      viewportEndLine,
+      focusedLine,
+      isDiffMode: isDiffModeRef.current ?? true,
+      // Selected text range (if user highlighted code)
+      selectionStartLine: sel?.startLine ?? null,
+      selectionEndLine: sel?.endLine ?? null,
+      selectionText: sel?.content ?? null,
+      // F2: Hierarchical context
+      activeSectionTitle: activeSection?.title ?? null,
+      activeSectionDescription: activeSection?.description ?? null,
+    };
+
+    console.log('[UI_PROBE] Context snapshot:', contextSnapshot);
 
     eventBus.emit({
       type: 'USER_MESSAGE',
       payload: {
         text,
         mode: 'text',
-        context: {
-          ...userContextRef.current,
-          activeFile: realFile,
-          cursorLine: viewportStateRef.current?.startLine
-        }, // Pass the view snapshot with authoritative overrides
-        prData: prDataRef.current // Pass the data snapshot
-      }
+        context: contextSnapshot,
+        prData: prDataRef.current,
+      },
     });
   }, []); // Stable reference - never changes
 
@@ -322,15 +361,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       traces: traces // Added traces to export
     };
 
-    const blob = new Blob([JSON.stringify(sessionData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `theia-session-${Date.now()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob(new Blob([JSON.stringify(sessionData, null, 2)], { type: 'application/json' }), `theia-session-${Date.now()}.json`);
   }, [prData, messages]);
 
   return (
