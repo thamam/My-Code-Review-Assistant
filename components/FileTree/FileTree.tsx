@@ -69,7 +69,8 @@ export const FileTree: React.FC = () => {
         isLoadingRepoTree,
         toggleFullRepoMode,
         loadGhostFile,
-        selectFile
+        selectFile,
+        fileVerificationStates,
     } = usePR();
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
 
@@ -83,6 +84,18 @@ export const FileTree: React.FC = () => {
 
         return buildFileTree(prData.files);
     }, [prData, isFullRepoMode, repoTree]);
+
+    // F1: Coverage — memoized so badge clicks don't run two filter passes per render
+    const { changedFiles, reviewedCount, coveragePct } = useMemo(() => {
+        if (!prData) return { changedFiles: [], reviewedCount: 0, coveragePct: 0 };
+        const changed = prData.files.filter(f => f.status !== 'unchanged');
+        const reviewed = changed.filter(f => (fileVerificationStates.get(f.path) ?? 'unreviewed') !== 'unreviewed').length;
+        return {
+            changedFiles: changed,
+            reviewedCount: reviewed,
+            coveragePct: changed.length > 0 ? Math.round((reviewed / changed.length) * 100) : 0,
+        };
+    }, [prData, fileVerificationStates]);
 
     // Initial Expand All (only for PR files mode)
     useEffect(() => {
@@ -147,7 +160,6 @@ export const FileTree: React.FC = () => {
 
     if (!prData) return <div className="p-4 text-gray-500">No PR loaded</div>;
 
-    const changedCount = prData.files.filter(f => f.status !== 'unchanged').length;
     const totalCount = isFullRepoMode && repoTree.length > 0
         ? repoTree.filter(n => n.type === 'blob').length
         : prData.files.length;
@@ -156,11 +168,24 @@ export const FileTree: React.FC = () => {
         <div className="h-full flex flex-col bg-gray-900 border-r border-gray-800 select-none">
             <div className="p-3 border-b border-gray-800 bg-gray-900">
                 <div className="flex justify-between items-center">
-                    <div>
+                    <div className="flex-1 min-w-0">
                         <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Files</h2>
                         <div className="text-[10px] text-gray-500 mt-0.5">
-                            {changedCount} changed{isFullRepoMode && ` / ${totalCount} total`}
+                            {changedFiles.length} changed{isFullRepoMode && ` / ${totalCount} total`}
+                            {changedFiles.length > 0 && (
+                                <span className="ml-2 text-gray-600">
+                                    · {reviewedCount}/{changedFiles.length} reviewed
+                                </span>
+                            )}
                         </div>
+                        {changedFiles.length > 0 && (
+                            <div className="mt-1.5 h-1 bg-gray-700 rounded-full overflow-hidden">
+                                <div
+                                    className="h-full bg-green-600 rounded-full transition-all duration-300"
+                                    style={{ width: `${coveragePct}%` }}
+                                />
+                            </div>
+                        )}
                     </div>
                     <div className="flex gap-1">
                         <button onClick={expandAll} className="p-1.5 text-gray-500 hover:text-white hover:bg-gray-800 rounded" title="Expand All">

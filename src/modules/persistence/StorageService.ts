@@ -9,8 +9,10 @@
  */
 
 import { AgentState } from "../core/Agent";
+import type { VerificationState } from "../../types/review";
 
 const STORAGE_KEY = 'THEIA_AGENT_STATE_V1';
+const REVIEW_STATE_PREFIX = 'THEIA_REVIEW_STATE_V1_';
 
 class StorageService {
 
@@ -81,6 +83,38 @@ class StorageService {
      */
     public hasSavedState(): boolean {
         return localStorage.getItem(STORAGE_KEY) !== null;
+    }
+
+    // ─── F4: Review State Persistence ─────────────────────────────────────────
+
+    /**
+     * Save per-file verification states for a specific PR.
+     */
+    public saveReviewState(prId: string, states: Map<string, VerificationState>) {
+        try {
+            localStorage.setItem(
+                `${REVIEW_STATE_PREFIX}${prId}`,
+                JSON.stringify({ states: Object.fromEntries(states), savedAt: Date.now() })
+            );
+        } catch (err) {
+            console.error('[Storage] Failed to save review state:', err);
+        }
+    }
+
+    /**
+     * Load per-file verification states for a specific PR.
+     * Returns an empty Map if nothing is saved.
+     */
+    public loadReviewState(prId: string): Map<string, VerificationState> {
+        try {
+            const raw = localStorage.getItem(`${REVIEW_STATE_PREFIX}${prId}`);
+            if (!raw) return new Map();
+            const parsed = JSON.parse(raw);
+            return new Map(Object.entries(parsed.states ?? {})) as Map<string, VerificationState>;
+        } catch (err) {
+            console.error('[Storage] Failed to load review state:', err);
+            return new Map();
+        }
     }
 }
 

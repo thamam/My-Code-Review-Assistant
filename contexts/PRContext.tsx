@@ -10,6 +10,8 @@ import { resolveFilePath } from '../utils/fileUtils';
 // NEW IMPORTS
 import { useNavigationModule } from '../src/modules/navigation/hooks';
 import { RepoNode, LazyFile } from '../src/modules/navigation/types';
+import type { VerificationState } from '../src/types/review';
+import { storageService } from '../src/modules/persistence';
 
 // Phase 9: Unify Selection Type
 export type SelectedFile = FileChange | LazyFile;
@@ -67,6 +69,10 @@ interface PRContextType {
   isLoadingRepoTree: boolean;
   toggleFullRepoMode: () => Promise<void>;
   loadGhostFile: (path: string) => Promise<LazyFile | null>;
+
+  // F1: Review Map — per-file verification states
+  fileVerificationStates: Map<string, VerificationState>;
+  setFileVerificationState: (path: string, state: VerificationState) => void;
 }
 
 const PRContext = createContext<PRContextType | undefined>(undefined);
@@ -88,6 +94,29 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [activeDiagram, setActiveDiagram] = useState<Diagram | null>(null);
   const [diagramViewMode, setDiagramViewMode] = useState<'full' | 'split'>('full');
   const [diagramSplitPercent, setDiagramSplitPercent] = useState(50);
+
+  // F1+F4: Review Map — per-file verification states, persisted per PR
+  const [fileVerificationStates, setFileVerificationStates] = useState<Map<string, VerificationState>>(new Map());
+
+  // F4: Load saved review state when a new PR is opened
+  useEffect(() => {
+    if (prData?.id) {
+      setFileVerificationStates(storageService.loadReviewState(prData.id));
+    } else {
+      setFileVerificationStates(new Map());
+    }
+  }, [prData?.id]);
+
+  // F4: Persist review state whenever it changes (no size guard — must persist empty state too)
+  useEffect(() => {
+    if (prData?.id) {
+      storageService.saveReviewState(prData.id, fileVerificationStates);
+    }
+  }, [prData?.id, fileVerificationStates]);
+
+  const setFileVerificationState = useCallback((path: string, state: VerificationState) => {
+    setFileVerificationStates(prev => new Map(prev).set(path, state));
+  }, []);
 
   // NEW: Hook into the Navigation Module
   const navModule = useNavigationModule();
@@ -247,7 +276,10 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       isFullRepoMode: navModule.isFullRepoMode,
       isLoadingRepoTree: navModule.isLoadingRepoTree,
       toggleFullRepoMode,
-      loadGhostFile
+      loadGhostFile,
+      // F1: Review Map
+      fileVerificationStates,
+      setFileVerificationState,
     }}>
       {children}
     </PRContext.Provider>
