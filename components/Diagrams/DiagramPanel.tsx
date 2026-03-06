@@ -3,6 +3,7 @@ import { usePR } from '../../contexts/PRContext';
 import { DiagramAgent } from '../../services/diagramAgent';
 import { Play, Plus, Trash2, Download, Workflow, MessageSquarePlus, Loader2, RotateCcw } from 'lucide-react';
 import clsx from 'clsx';
+import { downloadBlob } from '../../utils/downloadUtils';
 
 export const DiagramPanel: React.FC = () => {
     const { prData, diagrams, addDiagram, removeDiagram, activeDiagram, setActiveDiagram, setDiagrams } = usePR();
@@ -52,12 +53,7 @@ export const DiagramPanel: React.FC = () => {
     };
 
     const handleExport = (diagram: any) => {
-        const blob = new Blob([diagram.mermaidCode], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${diagram.title.replace(/\s+/g, '_')}.mmd`;
-        a.click();
+        downloadBlob(new Blob([diagram.mermaidCode], { type: 'text/plain' }), `${diagram.title.replace(/\s+/g, '_')}.mmd`);
     };
 
     return (

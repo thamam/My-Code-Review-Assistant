@@ -3,6 +3,7 @@ import { computeDiff, DiffLine } from '../../utils/diffUtils';
 import clsx from 'clsx';
 import { LineMarker } from './LineMarker';
 import { usePR } from '../../contexts/PRContext';
+import { getActiveSection } from '../../utils/walkthroughUtils';
 import { arePathsEquivalent } from '../../utils/fileUtils';
 import { MapPin, MessageSquare, Tag } from 'lucide-react';
 import { AnnotationInput } from './AnnotationInput';
@@ -79,7 +80,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
 
   const highlights = useMemo(() => {
       if (!activeSectionId || !walkthrough) return [];
-      const section = walkthrough.sections.find(s => s.id === activeSectionId);
+      const section = getActiveSection(walkthrough, activeSectionId);
       return section?.highlights?.filter(h => arePathsEquivalent(h.file, filePath)) || [];
   }, [walkthrough, activeSectionId, filePath]);
 

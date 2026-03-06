@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { usePR } from '../../contexts/PRContext';
 import { buildFileTree } from '../../utils/fileUtils';
 import { FileNode } from './FileNode';
-import { AlertTriangle, FolderOpen, FolderClosed, Loader2, Eye, EyeOff, Brain } from 'lucide-react';
+import { AlertTriangle, FolderOpen, FolderClosed, Loader2, Eye, EyeOff, Brain, FileDown } from 'lucide-react';
 import { FileTreeNode, FileChange, RepoNode } from '../../types';
 import clsx from 'clsx';
 
@@ -73,6 +73,7 @@ export const FileTree: React.FC = () => {
         fileVerificationStates,
         loadSessionFile,
         hasSession,
+        exportReviewReport,
     } = usePR();
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
     const [isLoadingSession, setIsLoadingSession] = useState(false);
@@ -229,6 +230,13 @@ export const FileTree: React.FC = () => {
                             className="hidden"
                             onChange={handleSessionFileChange}
                         />
+                        <button
+                            onClick={exportReviewReport}
+                            className="p-1.5 text-gray-500 hover:text-white hover:bg-gray-800 rounded transition-colors"
+                            title="Export review report (.md)"
+                        >
+                            <FileDown size={14} />
+                        </button>
                     </div>
                 </div>
 

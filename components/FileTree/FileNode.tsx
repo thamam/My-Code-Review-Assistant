@@ -5,6 +5,7 @@ import { ChevronRight, ChevronDown, File, Folder, FileJson, FileCode, FileText, 
 import clsx from 'clsx';
 import { usePR } from '../../contexts/PRContext';
 import { arePathsEquivalent } from '../../utils/fileUtils';
+import { getActiveSection } from '../../utils/walkthroughUtils';
 import type { VerificationState } from '../../src/types/review';
 
 const VERIFICATION_CYCLE: VerificationState[] = ['unreviewed', 'inspected', 'verified', 'flagged'];
@@ -84,7 +85,7 @@ export const FileNode: React.FC<FileNodeProps> = ({ node, depth = 0, expandedPat
   );
 
   // Walkthrough highlight logic
-  const isHighlightedInActiveSection = activeSectionId && walkthrough?.sections.find(s => s.id === activeSectionId)?.files.some(f =>
+  const isHighlightedInActiveSection = activeSectionId && getActiveSection(walkthrough, activeSectionId)?.files.some(f =>
     node.data && arePathsEquivalent(f, node.data.path)
   );
 

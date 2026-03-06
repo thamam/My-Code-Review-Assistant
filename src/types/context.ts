@@ -26,4 +26,8 @@ export interface ContextSnapshot {
   selectionStartLine: number | null;
   selectionEndLine: number | null;
   selectionText: string | null;
+
+  // F2: Hierarchical context — active walkthrough section (if any)
+  activeSectionTitle: string | null;
+  activeSectionDescription: string | null;
 }

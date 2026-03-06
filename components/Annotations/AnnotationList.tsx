@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { usePR } from '../../contexts/PRContext';
 import { MapPin, Tag, Download, Trash2, Edit2, Info } from 'lucide-react';
+import { downloadBlob } from '../../utils/downloadUtils';
 
 export const AnnotationList: React.FC = () => {
   const { annotations, removeAnnotation, updateAnnotation, scrollToLine } = usePR();
@@ -17,12 +18,7 @@ export const AnnotationList: React.FC = () => {
           md += `\n`;
       });
       
-      const blob = new Blob([md], { type: 'text/markdown' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'annotations.md';
-      a.click();
+      downloadBlob(new Blob([md], { type: 'text/markdown' }), 'annotations.md');
   };
 
   const handleEdit = (id: string, currentTitle: string) => {

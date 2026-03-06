@@ -8,6 +8,8 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef, useCallback } from 'react';
 import { ChatMessage } from '../types';
 import { usePR } from './PRContext';
+import { getActiveSection } from '../utils/walkthroughUtils';
+import { downloadBlob } from '../utils/downloadUtils';
 import type { ContextSnapshot } from '../src/types/context';
 // Event-Driven Architecture imports
 import { eventBus } from '../src/modules/core/EventBus';
@@ -57,6 +59,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     selectionState,
     isDiffMode,
     focusedLocation,
+    walkthrough,
+    activeSectionId,
   } = usePR();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -228,6 +232,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const selectionStateRef = useRef(selectionState);
   const isDiffModeRef = useRef(isDiffMode);
   const prDataRef = useRef(prData);
+  const walkthroughRef = useRef(walkthrough);
+  const activeSectionIdRef = useRef(activeSectionId);
 
   useEffect(() => {
     selectedFileRef.current = selectedFile;
@@ -236,7 +242,9 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     selectionStateRef.current = selectionState;
     isDiffModeRef.current = isDiffMode;
     prDataRef.current = prData;
-  }, [selectedFile, focusedLocation, viewportState, selectionState, isDiffMode, prData]);
+    walkthroughRef.current = walkthrough;
+    activeSectionIdRef.current = activeSectionId;
+  }, [selectedFile, focusedLocation, viewportState, selectionState, isDiffMode, prData, walkthrough, activeSectionId]);
 
   // --- ACTIONS ---
 
@@ -271,6 +279,9 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const viewportEndLine = vp?.endLine ?? null;
     const focusedLine = currentFocusedLocation?.line ?? null;
 
+    // F2: Resolve active walkthrough section (if any)
+    const activeSection = getActiveSection(walkthroughRef.current, activeSectionIdRef.current);
+
     // Exclude activeFile from the base spread — it's set explicitly below with higher-priority logic
     const { activeFile: _af, ...baseContext } = userContextRef.current;
     const contextSnapshot: ContextSnapshot = {
@@ -284,6 +295,9 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       selectionStartLine: sel?.startLine ?? null,
       selectionEndLine: sel?.endLine ?? null,
       selectionText: sel?.content ?? null,
+      // F2: Hierarchical context
+      activeSectionTitle: activeSection?.title ?? null,
+      activeSectionDescription: activeSection?.description ?? null,
     };
 
     console.log('[UI_PROBE] Context snapshot:', contextSnapshot);
@@ -347,15 +361,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       traces: traces // Added traces to export
     };
 
-    const blob = new Blob([JSON.stringify(sessionData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `theia-session-${Date.now()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob(new Blob([JSON.stringify(sessionData, null, 2)], { type: 'application/json' }), `theia-session-${Date.now()}.json`);
   }, [prData, messages]);
 
   return (

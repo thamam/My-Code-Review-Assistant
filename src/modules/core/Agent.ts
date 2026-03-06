@@ -1374,6 +1374,14 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
       lines.push(`ACTIVE_SELECTION: ${context.activeSelection}`);
     }
 
+    // F2: Hierarchical context — active walkthrough section
+    if (context.activeSectionTitle) {
+      lines.push(`ACTIVE_SECTION: ${context.activeSectionTitle}`);
+      if (context.activeSectionDescription) {
+        lines.push(`SECTION_DESCRIPTION: ${context.activeSectionDescription}`);
+      }
+    }
+
     if (activeFile === 'None') {
       lines.push('WARNING: No active file detected. If the user asks about "this file", ASK THEM to open it first. DO NOT GUESS filenames.');
     }

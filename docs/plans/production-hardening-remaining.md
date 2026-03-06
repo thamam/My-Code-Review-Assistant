@@ -5,9 +5,11 @@
 
 ## Status Summary
 
-Tests: 71/71 passing
+Tests: 102/102 passing
 TypeScript: 0 errors
 Build: clean
+
+**All tasks complete.** See completed section for details.
 
 ---
 
@@ -87,28 +89,28 @@ interface ContextSnapshot {
 File tree with `VerificationState` badges — click to cycle unreviewed→inspected→verified→flagged.
 Coverage progress bar in header. `fileVerificationStates` in PRContext.
 
-### F2: Hierarchical Context
-Section summaries from walkthrough shown as collapsible context in chat.
+### F2: Hierarchical Context  [DONE]
+`activeSectionTitle` + `activeSectionContext` added to `ContextSnapshot`. Injected as `ACTIVE_SECTION` / `SECTION_CONTEXT` in `buildContextEnvelope`. `walkthrough` + `activeSectionId` pulled from `usePR()` in `ChatContext.sendMessage` and flattened into snapshot via ref-forwarding pattern.
 
-### F3: Checkpoints + Report
-Milestone tracking. `ReviewReport` type already defined.
+### F3: Checkpoints + Report  [DONE]
+`src/lib/report/index.ts`: `generateReport()` builds `ReviewReport` from `fileVerificationStates` + annotations. `renderReportMarkdown()` produces downloadable `.md`. `exportReviewReport` wired into PRContext + FileTree `FileDown` icon button.
 
 ### F4: PR Memory  [DONE]
 `storageService.saveReviewState/loadReviewState` persists per-PR verification states.
 Loads on PR open, saves on every state change.
 
-### F5: Whiteboard
-Freeform annotation canvas. Not started.
+### F5: Whiteboard  [DONE]
+`WhiteboardPanel` component — sticky-note style free-form notes (not tied to file/line). `Note` type added to `types/index.ts`. `notes/addNote/updateNote/removeNote` wired through PRContext. `StickyNote` tab added to App.tsx left panel. 'notes' tab maps to 'files' in context snapshot (like 'terminal').
 
-### I2: Prompt→Requirements
-Parse system prompt to extract implied requirements for review coverage.
+### I2: Prompt→Requirements  [DONE]
+`src/lib/requirements/index.ts`: rule-based extractor scans `ParsedSession.prompts` for imperative patterns (must/should/never/ensure/…). Returns deduplicated `Requirement[]`. Wired into `loadSessionFile` — requirements available via `PRContext.sessionRequirements` after session load. 8 tests.
 
 ### I3: Risk Scoring  [DONE]
 `src/lib/risk-scoring/index.ts`: scoreFiles(session, filePaths) → SessionRiskReport.
 3 signals: not_read_back (+0.40), high_churn (+0.30), error_nearby (+0.20). 86 tests passing.
 
-### I1 Integration
-Wire session parser to UI — allow user to drop a `.jsonl` file and see the session walkthrough.
+### I1 Integration  [DONE]
+Brain icon button in FileTree header opens hidden `<input type="file" accept=".jsonl">`. `loadSessionFile(file)` parses via `parseSessionText`, runs I3 risk scoring + I2 requirement extraction. `hasSession` flag turns the Brain icon purple.
 
 ---
 

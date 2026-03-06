@@ -156,6 +156,38 @@ describe('Agent Context Injection (buildContextEnvelope)', () => {
     expect(envelope).toContain('[/SYSTEM_CONTEXT]');
   });
 
+  // ── F2: ACTIVE_SECTION ────────────────────────────────────────────────────
+
+  it('injects ACTIVE_SECTION and SECTION_DESCRIPTION when active section is set', () => {
+    const envelope = agentAny.buildContextEnvelope('Q', {
+      activeFile: 'f.ts',
+      activeSectionTitle: 'Authentication Flow',
+      activeSectionDescription: 'Covers the JWT validation middleware and token refresh logic.',
+    });
+    expect(envelope).toContain('ACTIVE_SECTION: Authentication Flow');
+    expect(envelope).toContain('SECTION_DESCRIPTION: Covers the JWT validation middleware and token refresh logic.');
+  });
+
+  it('omits ACTIVE_SECTION when activeSectionTitle is null', () => {
+    const envelope = agentAny.buildContextEnvelope('Q', {
+      activeFile: 'f.ts',
+      activeSectionTitle: null,
+      activeSectionDescription: null,
+    });
+    expect(envelope).not.toContain('ACTIVE_SECTION');
+    expect(envelope).not.toContain('SECTION_DESCRIPTION');
+  });
+
+  it('injects ACTIVE_SECTION without SECTION_DESCRIPTION when description is missing', () => {
+    const envelope = agentAny.buildContextEnvelope('Q', {
+      activeFile: 'f.ts',
+      activeSectionTitle: 'Database Layer',
+      activeSectionDescription: null,
+    });
+    expect(envelope).toContain('ACTIVE_SECTION: Database Layer');
+    expect(envelope).not.toContain('SECTION_DESCRIPTION');
+  });
+
   // ── Edge cases ────────────────────────────────────────────────────────────
 
   it('returns bare USER_QUERY when context is undefined', () => {
