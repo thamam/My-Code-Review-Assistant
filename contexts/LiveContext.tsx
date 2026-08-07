@@ -6,8 +6,10 @@ import { useChat } from './ChatContext';
 import { useSpec } from './SpecContext';
 import { ContextBrief } from '../src/types/contextBrief';
 import { formatBriefAsWhisper, getBrainResponse, generatePrecisionResponse, PrecisionResponse } from '../src/services/DirectorService';
+import { generateDeepInsight } from '../src/services/BrainService';
 import { speakWithCloudTTS } from '../src/modules/voice/TTSService';
 import { voiceService } from '../src/services/VoiceService';
+import { resolveActiveFileContent } from '../src/types/context';
 
 interface LiveContextType {
   isActive: boolean;
@@ -126,7 +128,7 @@ function createBlob(data: Float32Array): Blob {
 }
 
 export const LiveProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { prData, navigateToCode, setLeftTab, setIsDiffMode, diagrams, setActiveDiagram } = usePR();
+  const { prData, navigateToCode, setLeftTab, setIsDiffMode, diagrams, setActiveDiagram, selectedFile } = usePR();
   const { upsertMessage, messages, language } = useChat(); // Need messages history for Precision Mode
   const { activeSpec } = useSpec(); // Get activeSpec for SpecAtoms
   const [isActive, setIsActive] = useState(false);
@@ -523,6 +525,31 @@ IF THE USER ASKS ABOUT THE LINEAR ISSUE...`;
     console.debug('[Director] Injecting brief for:', brief.activeFile?.path);
     sendTextToSession(whisper);
   };
+
+  // --- Brain-to-Voice Bridge ---
+  // When the user focuses a new file while the live session is active, run a
+  // one-shot deep analysis and whisper the insight into the live session so
+  // spoken answers are instant and informed.
+  const brainSelectedFileRef = useRef(selectedFile);
+  useEffect(() => {
+    brainSelectedFileRef.current = selectedFile;
+  }, [selectedFile]);
+
+  useEffect(() => {
+    if (!isActive || !selectedFile) return;
+
+    const timeoutId = setTimeout(async () => {
+      const resolved = resolveActiveFileContent(selectedFile);
+      if (!resolved) return;
+
+      const insight = await generateDeepInsight(selectedFile.path, resolved.content);
+      if (insight && isActiveRef.current && brainSelectedFileRef.current === selectedFile) {
+        sendTextToSession(`[BRAIN UPDATE] User is looking at ${selectedFile.path}. Analysis: ${insight}`);
+      }
+    }, 1500);
+
+    return () => clearTimeout(timeoutId);
+  }, [selectedFile, isActive]);
 
   useEffect(() => {
     return () => disconnect();
