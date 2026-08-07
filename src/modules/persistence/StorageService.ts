@@ -10,10 +10,12 @@
 
 import { AgentState } from "../core/Agent";
 import type { VerificationState } from "../../types/review";
-import type { Note } from "../../../types";
+import type { Note, Diagram, ChatMessage } from "../../../types";
 
 const STORAGE_KEY = 'THEIA_AGENT_STATE_V1';
 const REVIEW_STATE_PREFIX = 'THEIA_REVIEW_STATE_V1_';
+const DIAGRAMS_PREFIX = 'THEIA_DIAGRAMS_V1_';
+const CHAT_PREFIX = 'THEIA_CHAT_V1_';
 
 class StorageService {
 
@@ -115,6 +117,72 @@ class StorageService {
         } catch (err) {
             console.error('[Storage] Failed to load review state:', err);
             return new Map();
+        }
+    }
+
+    // ─── Diagrams Persistence ─────────────────────────────────────────────────
+
+    /**
+     * Save generated diagrams for a specific PR.
+     * Diagrams carry mermaid code + references; persisted as-is (plain JSON).
+     */
+    public saveDiagrams(prId: string, diagrams: Diagram[]) {
+        try {
+            localStorage.setItem(
+                `${DIAGRAMS_PREFIX}${prId}`,
+                JSON.stringify({ diagrams, savedAt: Date.now() })
+            );
+        } catch (err) {
+            console.error('[Storage] Failed to save diagrams:', err);
+        }
+    }
+
+    /**
+     * Load saved diagrams for a specific PR.
+     * Returns an empty array if nothing is saved.
+     */
+    public loadDiagrams(prId: string): Diagram[] {
+        try {
+            const raw = localStorage.getItem(`${DIAGRAMS_PREFIX}${prId}`);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            return (parsed.diagrams ?? []) as Diagram[];
+        } catch (err) {
+            console.error('[Storage] Failed to load diagrams:', err);
+            return [];
+        }
+    }
+
+    // ─── Chat History Persistence ─────────────────────────────────────────────
+
+    /**
+     * Save the UI chat history (message list) for a specific PR.
+     * Messages may carry groundingChunks and dual-track content; persisted as-is.
+     */
+    public saveChatHistory(prId: string, messages: ChatMessage[]) {
+        try {
+            localStorage.setItem(
+                `${CHAT_PREFIX}${prId}`,
+                JSON.stringify({ messages, savedAt: Date.now() })
+            );
+        } catch (err) {
+            console.error('[Storage] Failed to save chat history:', err);
+        }
+    }
+
+    /**
+     * Load the UI chat history for a specific PR.
+     * Returns null if nothing is saved (caller decides whether to seed welcome message).
+     */
+    public loadChatHistory(prId: string): ChatMessage[] | null {
+        try {
+            const raw = localStorage.getItem(`${CHAT_PREFIX}${prId}`);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            return (parsed.messages ?? null) as ChatMessage[] | null;
+        } catch (err) {
+            console.error('[Storage] Failed to load chat history:', err);
+            return null;
         }
     }
 

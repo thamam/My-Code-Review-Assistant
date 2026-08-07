@@ -155,6 +155,31 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     setFileVerificationStates(prev => new Map(prev).set(path, state));
   }, []);
 
+  // Diagrams — persisted per PR (mirrors fileVerificationStates pattern)
+  const isLoadingDiagramsRef = useRef(false);
+
+  // Load saved diagrams when a new PR is opened
+  useEffect(() => {
+    if (prData?.id) {
+      isLoadingDiagramsRef.current = true;
+      const loaded = storageService.loadDiagrams(prData.id);
+      setDiagrams(loaded);
+      // Restore the most recent diagram as active, if any
+      setActiveDiagram(loaded.length > 0 ? loaded[loaded.length - 1] : null);
+    } else {
+      setDiagrams([]);
+      setActiveDiagram(null);
+    }
+  }, [prData?.id]);
+
+  // Persist diagrams whenever they change (no size guard — empty state must persist too)
+  useEffect(() => {
+    if (prData?.id) {
+      if (isLoadingDiagramsRef.current) { isLoadingDiagramsRef.current = false; return; }
+      storageService.saveDiagrams(prData.id, diagrams);
+    }
+  }, [prData?.id, diagrams]);
+
   // I1+I3: Session file risk scores
   const [fileRiskScores, setFileRiskScores] = useState<Map<string, FileRiskScore>>(new Map());
   const [hasSession, setHasSession] = useState(false);
