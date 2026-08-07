@@ -9,6 +9,7 @@ import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotat
 import { resolveFilePath } from '../utils/fileUtils';
 // NEW IMPORTS
 import { useNavigationModule } from '../src/modules/navigation/hooks';
+import { canFetchRemote } from '../src/modules/ingestion/PRSourceService';
 import { RepoNode, LazyFile } from '../src/modules/navigation/types';
 import { waitForLine } from '../src/modules/navigation/lineRegistry';
 import type { VerificationState } from '../src/types/review';
@@ -275,7 +276,7 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
   // FR-043: Auto-trigger Full Repo Mode when in Repo Mode (no PR files)
   useEffect(() => {
-    if (prData && prData.files.length === 0 && prData.owner && prData.repo && prData.headSha) {
+    if (prData && prData.files.length === 0 && canFetchRemote(prData) && prData.owner && prData.repo && prData.headSha) {
       console.log('[PRContext] Repo Mode detected - auto-enabling Full Repo Mode');
       navModule.service.toggleFullRepoMode(prData.owner, prData.repo, prData.headSha);
     }
@@ -316,7 +317,7 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         const lazyFile = navModule.lazyFiles.get(resolvedPath);
         if (lazyFile) {
           fileToSelect = lazyFile;
-        } else if (prData.owner && prData.repo && prData.headSha) {
+        } else if (canFetchRemote(prData) && prData.owner && prData.repo && prData.headSha) {
           // Attempt Fetch
           console.log(`[PRContext] Attempting to load Ghost File: ${resolvedPath}`);
           const fetched = await navModule.service.loadGhostFile(prData.owner, prData.repo, resolvedPath, prData.headSha);
@@ -375,7 +376,7 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // --- DELEGATED METHODS ---
 
   const toggleFullRepoMode = useCallback(async () => {
-    if (!prData?.owner || !prData?.repo || !prData?.headSha) {
+    if (!canFetchRemote(prData) || !prData?.owner || !prData?.repo || !prData?.headSha) {
       console.warn('[PRContext] Missing PR metadata for full repo mode');
       return;
     }
@@ -388,7 +389,7 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       return null;
     }
 
-    if (!prData?.owner || !prData?.repo || !prData?.headSha) {
+    if (!canFetchRemote(prData) || !prData?.owner || !prData?.repo || !prData?.headSha) {
       return null;
     }
 

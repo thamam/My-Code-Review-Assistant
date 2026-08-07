@@ -16,6 +16,11 @@ export interface PRData {
   repo?: string;           // Repository name (for API calls)
   headSha?: string;        // HEAD commit SHA (for fetching files)
   repoTree?: RepoNode[];   // Full repository tree (lazy loaded)
+  // Explicit capability flag — whether this PRData can be fetched/refreshed
+  // remotely. Undefined (persisted state from before this field existed)
+  // falls back to owner/repo/headSha presence; see canFetchRemote() in
+  // src/modules/ingestion/PRSourceService.ts.
+  canFetchRemote?: boolean;
 }
 
 /**

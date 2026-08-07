@@ -2,13 +2,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Github, Loader2, PlayCircle, AlertCircle, HelpCircle, CheckSquare, Square, History, Database, RefreshCw, Upload, FileText, Clock, FileJson, Sparkles, BookOpen, Microscope, Crosshair, GitPullRequest } from 'lucide-react';
 import { usePR } from '../contexts/PRContext';
-import { GitHubService } from '../services/github';
-import { SAMPLE_PR, SAMPLE_WALKTHROUGH } from '../mock/samplePR';
+import { SAMPLE_WALKTHROUGH } from '../mock/samplePR';
 import { PRData, Walkthrough, PRHistoryItem, AppMode } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 import { parseWalkthroughFile, parseWalkthroughFromText } from '../services/walkthroughParser';
 import { eventBus } from '../src/modules/core/EventBus';
 import { getGitHubToken, saveGitHubToken } from '../src/lib/credentials';
+import { prSourceService } from '../src/modules/ingestion/PRSourceService';
 
 const USER_CONFIG = {
   DEFAULT_PR_URL: import.meta.env.VITE_DEFAULT_PR_URL || '',
@@ -41,12 +41,7 @@ export const WelcomeScreen: React.FC = () => {
 
   const [token, setToken] = useState(() => getGitHubToken() || '');
 
-  const [history, setHistory] = useState<PRHistoryItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('vcr_history');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
+  const [history, setHistory] = useState<PRHistoryItem[]>(() => prSourceService.getHistory());
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,36 +101,12 @@ export const WelcomeScreen: React.FC = () => {
   };
 
   useEffect(() => {
-    const checkCache = async () => {
-      if (!url) { setCachedData(null); return; }
-      try {
-        const cacheKey = `vcr_cache_${btoa(url)}`;
-        const cached = localStorage.getItem(cacheKey);
-        if (cached) setCachedData(JSON.parse(cached));
-        else setCachedData(null);
-      } catch (e) { console.error("Cache check failed", e); }
-    };
-    const timer = setTimeout(checkCache, 300);
+    if (!url) { setCachedData(null); return; }
+    const timer = setTimeout(() => {
+      setCachedData(prSourceService.checkCache(url));
+    }, 300);
     return () => clearTimeout(timer);
   }, [url]);
-
-  const saveToHistory = (data: PRData, prUrl: string) => {
-    try {
-      const newItem: PRHistoryItem = {
-        id: data.id, title: data.title, url: prUrl, author: data.author, timestamp: Date.now()
-      };
-      const newHistory = [newItem, ...history.filter(h => h.url !== prUrl)].slice(0, 5);
-      setHistory(newHistory);
-      localStorage.setItem('vcr_history', JSON.stringify(newHistory));
-    } catch (e) { console.warn("Failed to save history", e); }
-  };
-
-  const saveToCache = (data: PRData, prUrl: string) => {
-    try {
-      const cacheKey = `vcr_cache_${btoa(prUrl)}`;
-      localStorage.setItem(cacheKey, JSON.stringify(data));
-    } catch (e) { console.warn("Failed to save to cache", e); }
-  };
 
   const handleWalkthroughUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -186,27 +157,8 @@ export const WelcomeScreen: React.FC = () => {
     setIsLoading(true);
     setError(null);
     try {
-      if (!forceRefresh && cachedData) {
-        processDataLoad(cachedData);
-        saveToHistory(cachedData, url);
-        return;
-      }
-      const service = new GitHubService(token.trim() || undefined);
-
-      // FR-043: Detect URL type and use appropriate fetch method
-      const urlType = service.detectUrlType(url);
-      let data: PRData;
-
-      if (urlType === 'pr') {
-        data = await service.fetchPR(url);
-      } else if (urlType === 'repo') {
-        data = await service.fetchRepoMode(url);
-      } else {
-        throw new Error("Invalid URL. Please enter a GitHub repository or PR URL.");
-      }
-
-      saveToCache(data, url);
-      saveToHistory(data, url);
+      const { data, history: newHistory } = await prSourceService.load(url, forceRefresh);
+      setHistory(newHistory);
       processDataLoad(data);
     } catch (err: any) {
       setError(err.message || "Failed to load.");
@@ -216,11 +168,12 @@ export const WelcomeScreen: React.FC = () => {
   };
 
   const loadSample = () => {
+    const data = prSourceService.loadSample();
     // Clear previous session's chat history before loading new data (mirrors processDataLoad above).
-    eventBus.emit({ type: 'SESSION_RESET', payload: { reason: 'new_session', repoName: SAMPLE_PR.title } });
+    eventBus.emit({ type: 'SESSION_RESET', payload: { reason: 'new_session', repoName: data.title } });
 
     setAppMode('pr');
-    setPRData(SAMPLE_PR);
+    setPRData(data);
     loadWalkthrough(SAMPLE_WALKTHROUGH);
   };
 

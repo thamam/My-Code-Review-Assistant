@@ -191,25 +191,23 @@ export class GitHubService {
     const BATCH_SIZE = 20;
     const processedFiles: FileChange[] = [];
 
-    const fetchContent = async (sha: string, path: string) => {
-      try {
-        if (this.token) {
-          const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${sha}`, {
-            headers: {
-              ...this.getHeaders(),
-              'Accept': 'application/vnd.github.v3.raw'
-            }
-          });
-          if (res.ok) return await res.text();
-          return '';
-        } else {
-          const res = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${sha}/${path}`);
-          if (res.ok) return await res.text();
-          return '';
-        }
-      } catch (e) {
-        console.error(`Failed to fetch content for ${path}`, e);
-        return '';
+    // Failures throw rather than resolving to '' — an empty string must mean
+    // "this file is genuinely empty", never "the fetch failed". Callers (and
+    // the PR-level cache above them) rely on that distinction.
+    const fetchContent = async (sha: string, path: string): Promise<string> => {
+      if (this.token) {
+        const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${sha}`, {
+          headers: {
+            ...this.getHeaders(),
+            'Accept': 'application/vnd.github.v3.raw'
+          }
+        });
+        if (!res.ok) throw new Error(`Failed to fetch content for ${path} (${res.status})`);
+        return await res.text();
+      } else {
+        const res = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${sha}/${path}`);
+        if (!res.ok) throw new Error(`Failed to fetch content for ${path} (${res.status})`);
+        return await res.text();
       }
     };
 
