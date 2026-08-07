@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { usePR } from '../../contexts/PRContext';
 import { MessageSquare, MapPin, Tag } from 'lucide-react';
 import clsx from 'clsx';
@@ -8,6 +8,7 @@ import { LineMarker } from './LineMarker';
 import { arePathsEquivalent } from '../../utils/fileUtils';
 import { getLanguage, HighlightedText } from './syntaxHelpers';
 import { useViewportTracker } from './useViewportTracker';
+import { registerLine, unregisterLine } from '../../src/modules/navigation/lineRegistry';
 
 interface SourceViewProps {
     content: string;
@@ -16,24 +17,17 @@ interface SourceViewProps {
 }
 
 export const SourceView: React.FC<SourceViewProps> = ({ content, filePath, onViewportChange }) => {
-    const { annotations, addAnnotation, removeAnnotation, selectionState, setSelectionState, focusedLocation } = usePR();
+    const { annotations, addAnnotation, removeAnnotation, selectionState, setSelectionState, focusedLocation, isFlashActive } = usePR();
     const [hoveredLine, setHoveredLine] = useState<number | null>(null);
     const [creatingLabelLine, setCreatingLabelLine] = useState<number | null>(null);
-    const [flashLine, setFlashLine] = useState<number | null>(null);
 
     const { handleLineVisibility } = useViewportTracker(filePath, onViewportChange);
 
     const fileAnnotations = annotations.filter(a => a.file === filePath);
     const language = getLanguage(filePath);
 
-    // Handle flash highlight for navigation
-    useEffect(() => {
-        if (focusedLocation && arePathsEquivalent(focusedLocation.file, filePath)) {
-            setFlashLine(focusedLocation.line);
-            const timer = setTimeout(() => setFlashLine(null), 1500);
-            return () => clearTimeout(timer);
-        }
-    }, [focusedLocation, filePath]);
+    const isLineFlashing = (lineNum: number) =>
+        isFlashActive && !!focusedLocation && arePathsEquivalent(focusedLocation.file, filePath) && lineNum === focusedLocation.line;
 
     const toggleMarker = (lineNum: number) => {
         const existingMarker = fileAnnotations.find(a => a.line === lineNum && a.type === 'marker');
@@ -157,7 +151,7 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath, onVie
                     const lineAnnotations = fileAnnotations.filter(a => a.line === lineNum);
                     const hasMarker = lineAnnotations.some(a => a.type === 'marker');
                     const hasLabel = lineAnnotations.some(a => a.type === 'label');
-                    const isFlashing = flashLine !== null && lineNum === flashLine;
+                    const isFlashing = isLineFlashing(lineNum);
 
                     const isSelected = selectionState && selectionState.file === filePath &&
                         lineNum >= selectionState.startLine && lineNum <= selectionState.endLine;
@@ -202,11 +196,21 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath, onVie
                         const lineAnnotations = fileAnnotations.filter(a => a.line === lineNum);
                         const isSelected = selectionState && selectionState.file === filePath &&
                             lineNum >= selectionState.startLine && lineNum <= selectionState.endLine;
-                        const isFlashing = flashLine !== null && lineNum === flashLine;
+                        const isFlashing = isLineFlashing(lineNum);
+                        let registeredEl: HTMLElement | null = null;
 
                         return (
                             <div
                                 key={i}
+                                ref={(el) => {
+                                    if (el) {
+                                        registerLine(filePath, lineNum, el);
+                                        registeredEl = el;
+                                    } else if (registeredEl) {
+                                        unregisterLine(filePath, lineNum, registeredEl);
+                                        registeredEl = null;
+                                    }
+                                }}
                                 className={clsx(
                                     "relative h-6 leading-6 whitespace-pre px-4 transition-colors duration-200 flex items-center cursor-text",
                                     isSelected && "bg-blue-500/10",

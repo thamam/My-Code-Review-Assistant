@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback, useState, useEffect } from 'react';
+import React, { useMemo, useCallback, useState } from 'react';
 import { computeDiff, DiffLine } from '../../utils/diffUtils';
 import clsx from 'clsx';
 import { LineMarker } from './LineMarker';
@@ -9,6 +9,7 @@ import { MapPin, MessageSquare, Tag } from 'lucide-react';
 import { AnnotationInput } from './AnnotationInput';
 import { getLanguage, HighlightedText } from './syntaxHelpers';
 import { useViewportTracker } from './useViewportTracker';
+import { registerLine, unregisterLine } from '../../src/modules/navigation/lineRegistry';
 
 interface DiffViewProps {
   oldContent?: string;
@@ -20,24 +21,14 @@ interface DiffViewProps {
 export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, filePath, onViewportChange }) => {
   const diffLines = useMemo(() => computeDiff(oldContent, newContent), [oldContent, newContent]);
   const { handleLineVisibility } = useViewportTracker(filePath, onViewportChange);
-  const { walkthrough, activeSectionId, selectionState, setSelectionState, annotations, addAnnotation, removeAnnotation, focusedLocation } = usePR();
+  const { walkthrough, activeSectionId, selectionState, setSelectionState, annotations, addAnnotation, removeAnnotation, focusedLocation, isFlashActive } = usePR();
   const [hoveredLine, setHoveredLine] = useState<number | null>(null);
-  const [flashLine, setFlashLine] = useState<number | null>(null);
-  
+
   // State for inline label creation
   const [creatingLabelLine, setCreatingLabelLine] = useState<number | null>(null);
 
   const fileAnnotations = annotations.filter(a => a.file === filePath);
   const language = getLanguage(filePath);
-
-  // Handle flash highlight for navigation
-  useEffect(() => {
-    if (focusedLocation && arePathsEquivalent(focusedLocation.file, filePath)) {
-        setFlashLine(focusedLocation.line);
-        const timer = setTimeout(() => setFlashLine(null), 1500);
-        return () => clearTimeout(timer);
-    }
-  }, [focusedLocation, filePath]);
 
   const handleMouseUp = useCallback(() => {
     const selection = window.getSelection();
@@ -146,7 +137,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
         const isAdded = line.type === 'add';
         const isRemoved = line.type === 'remove';
         const isHighlighted = isLineHighlighted(line.newLineNumber);
-        const isFlashing = flashLine !== null && line.newLineNumber === flashLine;
+        const isFlashing = isFlashActive && !!focusedLocation && arePathsEquivalent(focusedLocation.file, filePath) && line.newLineNumber === focusedLocation.line;
         const note = getHighlightNote(line.newLineNumber);
         const showNote = note && line.newLineNumber && highlights.find(h => h.lines[0] === line.newLineNumber);
         
@@ -157,9 +148,20 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
         const isSelected = line.newLineNumber && selectionState && selectionState.file === filePath && 
                            line.newLineNumber >= selectionState.startLine && line.newLineNumber <= selectionState.endLine;
 
+        let registeredEl: HTMLElement | null = null;
         return (
-          <div 
-            key={`${filePath}-${idx}`} 
+          <div
+            key={`${filePath}-${idx}`}
+            ref={(el) => {
+              if (!line.newLineNumber) return;
+              if (el) {
+                registerLine(filePath, line.newLineNumber, el);
+                registeredEl = el;
+              } else if (registeredEl) {
+                unregisterLine(filePath, line.newLineNumber, registeredEl);
+                registeredEl = null;
+              }
+            }}
             className={clsx(
               "flex relative group hover:bg-white/5 transition-colors duration-200",
               isAdded && "bg-green-900/20",
