@@ -1,15 +1,24 @@
 import React, { useState } from 'react';
 import { usePR } from '../../contexts/PRContext';
 import { DiagramAgent } from '../../services/diagramAgent';
+import { DiagramType } from '../../types';
 import { Play, Plus, Trash2, Download, Workflow, MessageSquarePlus, Loader2, RotateCcw } from 'lucide-react';
 import clsx from 'clsx';
 import { downloadBlob } from '../../utils/downloadUtils';
+
+const DIAGRAM_TYPES: { value: DiagramType; label: string }[] = [
+    { value: 'sequence', label: 'Sequence' },
+    { value: 'flowchart', label: 'Flowchart' },
+    { value: 'class', label: 'Class' },
+    { value: 'state', label: 'State' },
+];
 
 export const DiagramPanel: React.FC = () => {
     const { prData, diagrams, addDiagram, removeDiagram, activeDiagram, setActiveDiagram, setDiagrams } = usePR();
     const [isGenerating, setIsGenerating] = useState(false);
     const [customPrompt, setCustomPrompt] = useState('');
     const [showPromptInput, setShowPromptInput] = useState(false);
+    const [diagramType, setDiagramType] = useState<DiagramType>('sequence');
 
     const agent = new DiagramAgent();
 
@@ -31,7 +40,7 @@ export const DiagramPanel: React.FC = () => {
         if (!prData || !customPrompt.trim()) return;
         setIsGenerating(true);
         try {
-            const diagram = await agent.generateCustomDiagram(prData, customPrompt);
+            const diagram = await agent.generateStructureDiagram(prData, diagramType, customPrompt);
             addDiagram(diagram);
             setCustomPrompt('');
             setShowPromptInput(false);
@@ -60,7 +69,7 @@ export const DiagramPanel: React.FC = () => {
         <div className="h-full bg-gray-900 border-l border-gray-800 flex flex-col">
             <div className="p-3 border-b border-gray-800 bg-gray-900">
                 <div className="flex justify-between items-center mb-3">
-                    <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Sequence Diagrams</h2>
+                    <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Diagrams</h2>
                     <button
                         onClick={handleRefresh}
                         disabled={isGenerating}
@@ -91,6 +100,23 @@ export const DiagramPanel: React.FC = () => {
 
                 {showPromptInput && (
                     <form onSubmit={handleCustomGenerate} className="mt-3 animate-in slide-in-from-top-2">
+                        <div className="flex gap-1 mb-2">
+                            {DIAGRAM_TYPES.map(t => (
+                                <button
+                                    key={t.value}
+                                    type="button"
+                                    onClick={() => setDiagramType(t.value)}
+                                    className={clsx(
+                                        "flex-1 text-[10px] py-1 rounded border transition-colors",
+                                        diagramType === t.value
+                                            ? "bg-purple-600 border-purple-500 text-white"
+                                            : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600"
+                                    )}
+                                >
+                                    {t.label}
+                                </button>
+                            ))}
+                        </div>
                         <textarea
                             value={customPrompt}
                             onChange={e => setCustomPrompt(e.target.value)}
