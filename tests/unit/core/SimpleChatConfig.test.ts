@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   SEARCH_GROUNDED_MODELS,
   buildSimpleChatConfig,
-  buildSessionKey,
+  buildTranscriptUpdate,
   mergeGroundingChunks,
   describeChatError,
 } from '../../../src/modules/core/simpleChatConfig';
@@ -40,31 +40,16 @@ describe('SEARCH_GROUNDED_MODELS / buildSimpleChatConfig', () => {
   });
 });
 
-describe('buildSessionKey', () => {
-  const base = { prId: 'pr-1', model: 'gemini-3-flash-preview', appMode: 'pr', customReviewGoal: null, language: 'Auto' };
-
-  it('produces identical keys for identical inputs', () => {
-    expect(buildSessionKey(base)).toBe(buildSessionKey({ ...base }));
+describe('buildTranscriptUpdate', () => {
+  it('pushes a user+model pair together when the turn produced text', () => {
+    expect(buildTranscriptUpdate('hi', 'hello there')).toEqual([
+      { role: 'user', text: 'hi' },
+      { role: 'model', text: 'hello there' },
+    ]);
   });
 
-  it('differs when prId differs', () => {
-    expect(buildSessionKey(base)).not.toBe(buildSessionKey({ ...base, prId: 'pr-2' }));
-  });
-
-  it('differs when model differs', () => {
-    expect(buildSessionKey(base)).not.toBe(buildSessionKey({ ...base, model: 'gemini-3.1-pro-preview' }));
-  });
-
-  it('differs when appMode differs', () => {
-    expect(buildSessionKey(base)).not.toBe(buildSessionKey({ ...base, appMode: 'learn' }));
-  });
-
-  it('differs when customReviewGoal differs', () => {
-    expect(buildSessionKey(base)).not.toBe(buildSessionKey({ ...base, customReviewGoal: 'find bugs' }));
-  });
-
-  it('differs when language differs', () => {
-    expect(buildSessionKey(base)).not.toBe(buildSessionKey({ ...base, language: 'Hebrew' }));
+  it('pushes nothing when the final text is empty (safety block / empty candidate)', () => {
+    expect(buildTranscriptUpdate('hi', '')).toEqual([]);
   });
 });
 

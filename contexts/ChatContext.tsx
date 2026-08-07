@@ -237,8 +237,11 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   // Engine toggle (Q7): persist preference + append a local divider message.
-  // Skip the divider on the initial mount — that's not a user-initiated switch.
-  const isFirstEngineEffectRef = useRef(true);
+  // Skip the divider when `engine` hasn't actually changed value — tracking
+  // the previous VALUE (not a first-run boolean) survives React.StrictMode's
+  // mount→unmount→remount, which would otherwise re-run a first-run flag and
+  // append a spurious divider on every mount.
+  const prevEngineRef = useRef<ChatEngine | null>(null);
   useEffect(() => {
     try {
       localStorage.setItem('theia_chat_engine', engine);
@@ -246,10 +249,14 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.warn('[ChatContext] Failed to persist engine preference');
     }
 
-    if (isFirstEngineEffectRef.current) {
-      isFirstEngineEffectRef.current = false;
+    if (prevEngineRef.current === null) {
+      prevEngineRef.current = engine;
       return;
     }
+    if (prevEngineRef.current === engine) {
+      return;
+    }
+    prevEngineRef.current = engine;
 
     const divider: ChatMessage = {
       id: `divider-${Date.now()}`,
@@ -271,19 +278,20 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     const prId = prData?.id;
     if (!prId) return;
+
+    // Cross-PR leak guard: SimpleChat's transcript is in-memory and outlives
+    // this effect's own state, so switching PRs must always drop the old
+    // one — even when the new PR has no saved history to hydrate from.
+    simpleChat.reset();
+
     const saved = storageService.loadChatHistory(prId);
     if (saved && saved.length > 0 && messages.length <= 1) {
       isLoadingChatRef.current = true;
       setMessages(saved);
 
       // Q6: hydrate SimpleChat's in-memory transcript from the same restored
-      // history, mirroring agent.loadSession() above. System/divider
-      // messages are dropped — they're UI-only, not model turns.
-      simpleChat.hydrate(
-        saved
-          .filter(m => m.role === 'user' || m.role === 'assistant')
-          .map(m => ({ role: m.role === 'user' ? 'user' as const : 'model' as const, text: m.content }))
-      );
+      // history, mirroring agent.loadSession() above.
+      simpleChat.hydrate(saved);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prData?.id]);

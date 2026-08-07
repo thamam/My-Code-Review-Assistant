@@ -159,7 +159,8 @@ test.describe('Phase 10: The Neural Loop', () => {
                     text: 'Test message for Neural Loop verification',
                     mode: 'text',
                     context: { activeTab: 'files', activeFile: null },
-                    prData: null
+                    prData: null,
+                    engine: 'agent'
                 }
             });
         });

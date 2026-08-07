@@ -258,7 +258,11 @@ export class TheiaAgent {
         // for the mirror guard.
         const engine = event.payload.engine ?? 'simple';
         if (engine !== 'agent') {
-          console.warn('[Agent] USER_MESSAGE rejected: engine is not "agent".');
+          // Ordinary 'simple' traffic takes this path on every default-path
+          // message — only warn when the value is neither known engine.
+          if (engine !== 'simple') {
+            console.warn(`[Agent] USER_MESSAGE rejected: unknown engine "${engine}".`);
+          }
           return;
         }
 

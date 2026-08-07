@@ -5,6 +5,11 @@
  */
 import type { GroundingChunk } from '../../../types';
 
+export interface SimpleTurn {
+  role: 'user' | 'model';
+  text: string;
+}
+
 /**
  * Models that get Google Search grounding on the simple-chat path.
  * `gemini-2.5-flash-lite` is deliberately excluded — it's the "Fastest"
@@ -16,7 +21,7 @@ export const SEARCH_GROUNDED_MODELS = new Set([
 ]);
 
 /**
- * Builds the per-session GenerateContentConfig for SimpleChat.
+ * Builds the per-turn GenerateContentConfig for SimpleChat.
  * No `thinkingConfig` — extended thinking is the agent path's latency
  * cost, and simple mode exists specifically to avoid it.
  * No `functionDeclarations` — simple mode never calls tools, so grounding
@@ -30,27 +35,19 @@ export function buildSimpleChatConfig(model: string, systemInstruction: string):
   return config;
 }
 
-export interface SessionKeyParts {
-  prId?: string | null;
-  model: string;
-  appMode?: string | null;
-  customReviewGoal?: string | null;
-  language?: string | null;
-}
-
 /**
- * Builds a session identity key. Every part is baked into either the
- * system instruction or the model itself, so a change in any of them
- * must produce a new `Chat` session (see SimpleChat.ts turn algorithm).
+ * Decides what (if anything) a completed turn adds to the transcript.
+ * A non-empty final answer commits the user+model pair together; an empty
+ * final answer (safety block, empty candidate) commits nothing, keeping the
+ * transcript alternating user/model with only non-empty parts. Errors never
+ * call this at all — the turn simply never happened.
  */
-export function buildSessionKey(parts: SessionKeyParts): string {
+export function buildTranscriptUpdate(rawMessage: string, fullText: string): SimpleTurn[] {
+  if (!fullText) return [];
   return [
-    parts.prId ?? '',
-    parts.model,
-    parts.appMode ?? '',
-    parts.customReviewGoal ?? '',
-    parts.language ?? '',
-  ].join('|');
+    { role: 'user', text: rawMessage },
+    { role: 'model', text: fullText },
+  ];
 }
 
 type IncomingGroundingChunk = {

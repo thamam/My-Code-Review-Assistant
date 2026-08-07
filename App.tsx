@@ -22,6 +22,7 @@ import { Layout, MessageSquare, ArrowLeft, Mic, Loader2, BookMarked, FolderTree,
 import clsx from 'clsx';
 import { parseWalkthroughFile } from './services/walkthroughParser';
 import { voiceService } from './src/services/VoiceService';
+import { eventBus } from './src/modules/core/EventBus';
 
 // Phase 2: Voice Service Initialization Component
 const VoiceInit = () => {
@@ -230,7 +231,13 @@ const MainLayout = () => {
             <header className="h-14 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-4 shrink-0">
                 <div className="flex items-center gap-3 min-0 overflow-hidden">
                     <button
-                        onClick={() => setPRData(null as any)}
+                        onClick={() => {
+                            // Clear the outgoing PR's chat/transcript state before leaving —
+                            // otherwise it stays live in SimpleChat/Agent and leaks into
+                            // whatever the user loads next.
+                            eventBus.emit({ type: 'SESSION_RESET', payload: { reason: 'user_reset' } });
+                            setPRData(null as any);
+                        }}
                         className="text-gray-500 hover:text-white transition-colors shrink-0"
                         title="Exit Review"
                     >

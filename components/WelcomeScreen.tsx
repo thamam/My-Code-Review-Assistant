@@ -230,6 +230,9 @@ export const WelcomeScreen: React.FC = () => {
   };
 
   const loadSample = () => {
+    // Clear previous session's chat history before loading new data (mirrors processDataLoad above).
+    eventBus.emit({ type: 'SESSION_RESET', payload: { reason: 'new_session', repoName: SAMPLE_PR.title } });
+
     setAppMode('pr');
     setPRData(SAMPLE_PR);
     loadWalkthrough(SAMPLE_WALKTHROUGH);
