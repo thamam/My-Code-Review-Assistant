@@ -132,6 +132,8 @@ export interface Annotation {
   id: string;
   file: string;
   line: number;
+  /** Which side of a diff `line` addresses. Absent on annotations persisted before this field existed — treat as 'new'. */
+  side?: 'old' | 'new';
   type: AnnotationType;
   title?: string;
   description?: string;

@@ -1,6 +1,6 @@
-import React, { useState, useCallback } from 'react';
+import React, { useMemo } from 'react';
 import { usePR } from '../../contexts/PRContext';
-import { MessageSquare, MapPin, Tag } from 'lucide-react';
+import { MapPin, Tag } from 'lucide-react';
 import clsx from 'clsx';
 import { AnnotationInput } from './AnnotationInput';
 import { SelectionToolbar } from './SelectionToolbar';
@@ -9,6 +9,9 @@ import { arePathsEquivalent } from '../../utils/fileUtils';
 import { getLanguage, HighlightedText } from './syntaxHelpers';
 import { useViewportTracker } from './useViewportTracker';
 import { registerLine, unregisterLine } from '../../src/modules/navigation/lineRegistry';
+import { useLineInteractions } from './useLineInteractions';
+import { coordAttr, coordsEqual, type LineCoord, type LineEntry } from './lineCoord';
+import { LineGutterIndicator } from './LineGutterIndicator';
 
 interface SourceViewProps {
     content: string;
@@ -17,141 +20,38 @@ interface SourceViewProps {
 }
 
 export const SourceView: React.FC<SourceViewProps> = ({ content, filePath, onViewportChange }) => {
-    const { annotations, addAnnotation, removeAnnotation, selectionState, setSelectionState, focusedLocation, isFlashActive } = usePR();
-    const [hoveredLine, setHoveredLine] = useState<number | null>(null);
-    const [creatingLabelLine, setCreatingLabelLine] = useState<number | null>(null);
+    const { selectionState, focusedLocation, isFlashActive } = usePR();
+    const interactions = useLineInteractions({ filePath });
 
     const { handleLineVisibility } = useViewportTracker(filePath, onViewportChange);
 
-    const fileAnnotations = annotations.filter(a => a.file === filePath);
     const language = getLanguage(filePath);
 
     const isLineFlashing = (lineNum: number) =>
         isFlashActive && !!focusedLocation && arePathsEquivalent(focusedLocation.file, filePath) && lineNum === focusedLocation.line;
 
-    const toggleMarker = (lineNum: number) => {
-        const existingMarker = fileAnnotations.find(a => a.line === lineNum && a.type === 'marker');
-        if (existingMarker) {
-            removeAnnotation(existingMarker.id);
-        } else {
-            addAnnotation(filePath, lineNum, 'marker');
-        }
-    };
+    const linesList = useMemo(() => content.split('\n'), [content]);
 
-    const startLabelCreation = (lineNum: number) => {
-        setCreatingLabelLine(lineNum);
-    };
-
-    const handleSaveLabel = (text: string) => {
-        if (creatingLabelLine !== null) {
-            addAnnotation(filePath, creatingLabelLine, 'label', text);
-            setCreatingLabelLine(null);
-        }
-    };
-
-    const handleInteraction = (e: React.MouseEvent, lineNum: number) => {
-        e.stopPropagation();
-
-        // Ctrl+Click or Cmd+Click -> Label
-        if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            startLabelCreation(lineNum);
-            return;
-        }
-
-        const selection = window.getSelection();
-        if (!selection || selection.isCollapsed) {
-            toggleMarker(lineNum);
-        }
-    };
-
-    const handleContextMenu = (e: React.MouseEvent, lineNum: number) => {
-        e.preventDefault();
-        e.stopPropagation();
-        startLabelCreation(lineNum);
-    };
-
-    // Unified click/selection handler on the container
-    const handleContainerClick = useCallback((e: React.MouseEvent) => {
-        // 1. Check for Drag Selection (Range)
-        const selection = window.getSelection();
-        if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
-            const range = selection.getRangeAt(0);
-            const findLineNumber = (node: Node | null): number | null => {
-                let curr = node as HTMLElement;
-                while (curr) {
-                    if (curr.getAttribute && curr.getAttribute('data-line-number')) {
-                        return parseInt(curr.getAttribute('data-line-number')!, 10);
-                    }
-                    curr = curr.parentElement as HTMLElement;
-                }
-                return null;
-            };
-
-            const startLine = findLineNumber(range.startContainer);
-            const endLine = findLineNumber(range.endContainer);
-
-            if (startLine !== null && endLine !== null) {
-                const actualStart = Math.min(startLine, endLine);
-                const actualEnd = Math.max(startLine, endLine);
-                const lines = content.split('\n');
-                const selectedText = lines.slice(actualStart - 1, actualEnd).join('\n');
-
-                if (selectedText) {
-                    setSelectionState({
-                        file: filePath,
-                        startLine: actualStart,
-                        endLine: actualEnd,
-                        content: selectedText
-                    });
-                    return;
-                }
-            }
-        }
-
-        // 2. Fallback: Single Click (Collapsed) via Event Delegation
-        // FIXED: We disabled single-click row selection in the Code Area to allow native text selection.
-        // Row selection is now restricted to the Gutter (handled by its own onClick) or Drag Selection.
-
-        /* 
-        const target = e.target as HTMLElement;
-        const lineEl = target.closest('[data-line-number]');
-
-        if (lineEl) {
-            const lineNum = parseInt(lineEl.getAttribute('data-line-number')!, 10);
-            const lines = content.split('\n');
-            const lineContent = lines[lineNum - 1];
-
-            setSelectionState({
-                file: filePath,
-                startLine: lineNum,
-                endLine: lineNum,
-                content: lineContent
-            });
-        }
-        */
-    }, [content, filePath, setSelectionState]);
-
-    const linesList = content.split('\n');
+    const lineEntries = useMemo<LineEntry[]>(() =>
+        linesList.map((line, i): LineEntry => ({ coord: { side: 'new', line: i + 1 }, content: line })),
+        [linesList]
+    );
 
     return (
         <div
             className="flex min-h-full font-mono text-sm bg-gray-950"
-            onClick={handleContainerClick}
-            onMouseUp={(e) => {
-                // Optional: handle pure drag selection end if onClick doesn't fire for drags?
-                // Usually onClick fires after mouseUp.
-                // We can rely on onClick for both as long as we check selection.
-            }}
+            onClick={() => interactions.captureSelection(lineEntries)}
         >
             {/* Gutter - ONLY Interaction Zone */}
             <div className="flex-shrink-0 w-12 bg-gray-900 border-r border-gray-800 text-gray-600 text-right select-none pt-2">
                 {linesList.map((_, i) => {
                     const lineNum = i + 1;
-                    const lineAnnotations = fileAnnotations.filter(a => a.line === lineNum);
+                    const coord: LineCoord = { side: 'new', line: lineNum };
+                    const lineAnnotations = interactions.annotationsAt(coord);
                     const hasMarker = lineAnnotations.some(a => a.type === 'marker');
                     const hasLabel = lineAnnotations.some(a => a.type === 'label');
                     const isFlashing = isLineFlashing(lineNum);
+                    const isHovered = !!interactions.hoveredCoord && coordsEqual(interactions.hoveredCoord, coord);
 
                     const isSelected = selectionState && selectionState.file === filePath &&
                         lineNum >= selectionState.startLine && lineNum <= selectionState.endLine;
@@ -166,23 +66,14 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath, onVie
                                     : "border-l-4 border-transparent",
                                 isFlashing && "bg-blue-600/30 text-blue-100 border-l-4 border-blue-400 font-bold"
                             )}
-                            onMouseEnter={() => setHoveredLine(lineNum)}
-                            onMouseLeave={() => setHoveredLine(null)}
-                            onClick={(e) => handleInteraction(e, lineNum)}
-                            onContextMenu={(e) => handleContextMenu(e, lineNum)}
+                            onMouseEnter={() => interactions.setHoveredCoord(coord)}
+                            onMouseLeave={() => interactions.setHoveredCoord(null)}
+                            onClick={(e) => interactions.handleInteraction(e, coord)}
+                            onContextMenu={(e) => interactions.handleContextMenu(e, coord)}
                             title="Left-Click: Marker | Right-Click / Ctrl+Click: Label"
                         >
                             {lineNum}
-                            {hoveredLine === lineNum && !hasMarker && !hasLabel && !isSelected && (
-                                <div className="absolute left-1 top-1 text-gray-500 opacity-50 pointer-events-none">
-                                    <MapPin size={10} />
-                                </div>
-                            )}
-                            {(hasMarker || hasLabel) && (
-                                <div className="absolute left-1 top-1 text-blue-400 pointer-events-none">
-                                    {hasLabel ? <MessageSquare size={10} className="text-yellow-400" /> : <MapPin size={10} />}
-                                </div>
-                            )}
+                            <LineGutterIndicator size={10} isHovered={isHovered} isSelected={!!isSelected} hasMarker={hasMarker} hasLabel={hasLabel} />
                         </div>
                     );
                 })}
@@ -193,10 +84,12 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath, onVie
                 <div className={`language-${language} !bg-transparent`}>
                     {linesList.map((line, i) => {
                         const lineNum = i + 1;
-                        const lineAnnotations = fileAnnotations.filter(a => a.line === lineNum);
+                        const coord: LineCoord = { side: 'new', line: lineNum };
+                        const lineAnnotations = interactions.annotationsAt(coord);
                         const isSelected = selectionState && selectionState.file === filePath &&
                             lineNum >= selectionState.startLine && lineNum <= selectionState.endLine;
                         const isFlashing = isLineFlashing(lineNum);
+                        const isCreatingLabel = !!interactions.creatingLabelCoord && coordsEqual(interactions.creatingLabelCoord, coord);
                         let registeredEl: HTMLElement | null = null;
 
                         return (
@@ -217,16 +110,17 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath, onVie
                                     isFlashing && "bg-blue-500/20 shadow-[inset_2px_0_0_0_#60a5fa]"
                                 )}
                                 data-line-number={lineNum}
+                                data-line-coord={coordAttr(coord)}
                             >
                                 <LineMarker
                                     lineId={`${filePath}:${lineNum}`}
                                     lineNumber={lineNum}
                                     onVisible={handleLineVisibility}
                                 />
-                                {creatingLabelLine === lineNum && (
+                                {isCreatingLabel && (
                                     <AnnotationInput
-                                        onSave={handleSaveLabel}
-                                        onCancel={() => setCreatingLabelLine(null)}
+                                        onSave={interactions.handleSaveLabel}
+                                        onCancel={interactions.cancelLabelCreation}
                                     />
                                 )}
 

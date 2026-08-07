@@ -1,15 +1,18 @@
-import React, { useMemo, useCallback, useState } from 'react';
+import React, { useMemo } from 'react';
 import { computeDiff, DiffLine } from '../../utils/diffUtils';
 import clsx from 'clsx';
 import { LineMarker } from './LineMarker';
 import { usePR } from '../../contexts/PRContext';
 import { getActiveSection } from '../../utils/walkthroughUtils';
 import { arePathsEquivalent } from '../../utils/fileUtils';
-import { MapPin, MessageSquare, Tag } from 'lucide-react';
+import { Tag } from 'lucide-react';
 import { AnnotationInput } from './AnnotationInput';
 import { getLanguage, HighlightedText } from './syntaxHelpers';
 import { useViewportTracker } from './useViewportTracker';
 import { registerLine, unregisterLine } from '../../src/modules/navigation/lineRegistry';
+import { useLineInteractions } from './useLineInteractions';
+import { coordAttr, coordsEqual, type LineCoord, type LineEntry } from './lineCoord';
+import { LineGutterIndicator } from './LineGutterIndicator';
 
 interface DiffViewProps {
   oldContent?: string;
@@ -18,56 +21,27 @@ interface DiffViewProps {
   onViewportChange: (file: string, start: number, end: number) => void;
 }
 
+function coordForLine(line: DiffLine): LineCoord | null {
+  if (line.newLineNumber) return { side: 'new', line: line.newLineNumber };
+  if (line.oldLineNumber) return { side: 'old', line: line.oldLineNumber };
+  return null;
+}
+
 export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, filePath, onViewportChange }) => {
   const diffLines = useMemo(() => computeDiff(oldContent, newContent), [oldContent, newContent]);
   const { handleLineVisibility } = useViewportTracker(filePath, onViewportChange);
-  const { walkthrough, activeSectionId, selectionState, setSelectionState, annotations, addAnnotation, removeAnnotation, focusedLocation, isFlashActive } = usePR();
-  const [hoveredLine, setHoveredLine] = useState<number | null>(null);
+  const { walkthrough, activeSectionId, selectionState, focusedLocation, isFlashActive } = usePR();
+  const interactions = useLineInteractions({ filePath });
 
-  // State for inline label creation
-  const [creatingLabelLine, setCreatingLabelLine] = useState<number | null>(null);
-
-  const fileAnnotations = annotations.filter(a => a.file === filePath);
   const language = getLanguage(filePath);
 
-  const handleMouseUp = useCallback(() => {
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
-
-    const range = selection.getRangeAt(0);
-    const startNode = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentElement : range.startContainer;
-    const endNode = range.endContainer.nodeType === Node.TEXT_NODE ? range.endContainer.parentElement : range.endContainer;
-
-    const findLineNumber = (node: Node | null): number | null => {
-      let curr = node as HTMLElement;
-      while (curr && curr.getAttribute) {
-        const line = curr.getAttribute('data-line-number');
-        if (line) return parseInt(line, 10);
-        curr = curr.parentElement as HTMLElement;
-      }
-      return null;
-    };
-
-    const startLine = findLineNumber(startNode);
-    const endLine = findLineNumber(endNode);
-
-    if (startLine !== null && endLine !== null) {
-      const actualStart = Math.min(startLine, endLine);
-      const actualEnd = Math.max(startLine, endLine);
-      
-      const selectedContent = diffLines
-        .filter(l => l.newLineNumber && l.newLineNumber >= actualStart && l.newLineNumber <= actualEnd)
-        .map(l => l.content)
-        .join('\n');
-
-      setSelectionState({
-        file: filePath,
-        startLine: actualStart,
-        endLine: actualEnd,
-        content: selectedContent
-      });
-    }
-  }, [diffLines, filePath, setSelectionState]);
+  const lineEntries = useMemo<LineEntry[]>(() =>
+    diffLines.flatMap(line => {
+      const coord = coordForLine(line);
+      return coord ? [{ coord, content: line.content }] : [];
+    }),
+    [diffLines]
+  );
 
   const highlights = useMemo(() => {
       if (!activeSectionId || !walkthrough) return [];
@@ -79,59 +53,16 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
       if (!newLineNum) return false;
       return highlights.some(h => newLineNum >= h.lines[0] && newLineNum <= h.lines[1]);
   };
-  
+
   const getHighlightNote = (newLineNum?: number) => {
       if (!newLineNum) return null;
       return highlights.find(h => newLineNum >= h.lines[0] && newLineNum <= h.lines[1])?.note;
   };
 
-  const toggleMarker = (lineNum: number) => {
-      const existingMarker = fileAnnotations.find(a => a.line === lineNum && a.type === 'marker');
-      if (existingMarker) {
-          removeAnnotation(existingMarker.id);
-      } else {
-          addAnnotation(filePath, lineNum, 'marker');
-      }
-  };
-
-  const startLabelCreation = (lineNum: number) => {
-      setCreatingLabelLine(lineNum);
-  };
-  
-  const handleSaveLabel = (text: string) => {
-      if (creatingLabelLine !== null) {
-          addAnnotation(filePath, creatingLabelLine, 'label', text);
-          setCreatingLabelLine(null);
-      }
-  };
-
-  const handleInteraction = (e: React.MouseEvent, lineNum: number) => {
-      e.stopPropagation();
-      
-      // Ctrl+Click or Cmd+Click -> Label
-      if (e.ctrlKey || e.metaKey) {
-          e.preventDefault();
-          startLabelCreation(lineNum);
-          return;
-      }
-
-      // Simple Click -> Marker (Check selection to avoid marker on selection)
-      const selection = window.getSelection();
-      if (!selection || selection.isCollapsed) {
-          toggleMarker(lineNum);
-      }
-  };
-
-  const handleContextMenu = (e: React.MouseEvent, lineNum: number) => {
-      e.preventDefault();
-      e.stopPropagation();
-      startLabelCreation(lineNum);
-  };
-
   return (
-    <div 
+    <div
       className="font-mono text-xs md:text-sm bg-gray-950 min-h-full"
-      onMouseUp={handleMouseUp}
+      onMouseUp={() => interactions.captureSelection(lineEntries)}
     >
       {diffLines.map((line, idx) => {
         const isAdded = line.type === 'add';
@@ -140,12 +71,15 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
         const isFlashing = isFlashActive && !!focusedLocation && arePathsEquivalent(focusedLocation.file, filePath) && line.newLineNumber === focusedLocation.line;
         const note = getHighlightNote(line.newLineNumber);
         const showNote = note && line.newLineNumber && highlights.find(h => h.lines[0] === line.newLineNumber);
-        
-        const lineAnnotations = line.newLineNumber ? fileAnnotations.filter(a => a.line === line.newLineNumber) : [];
+
+        const coord = coordForLine(line);
+        const lineAnnotations = coord ? interactions.annotationsAt(coord) : [];
         const hasMarker = lineAnnotations.some(a => a.type === 'marker');
         const hasLabel = lineAnnotations.some(a => a.type === 'label');
-        
-        const isSelected = line.newLineNumber && selectionState && selectionState.file === filePath && 
+        const isHovered = !!coord && !!interactions.hoveredCoord && coordsEqual(interactions.hoveredCoord, coord);
+        const isCreatingLabel = !!coord && !!interactions.creatingLabelCoord && coordsEqual(interactions.creatingLabelCoord, coord);
+
+        const isSelected = line.newLineNumber && selectionState && selectionState.file === filePath &&
                            line.newLineNumber >= selectionState.startLine && line.newLineNumber <= selectionState.endLine;
 
         let registeredEl: HTMLElement | null = null;
@@ -170,53 +104,47 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
               isFlashing && "bg-blue-600/30 ring-1 ring-blue-500/50 z-20"
             )}
             data-line-number={line.newLineNumber}
+            data-line-coord={coord ? coordAttr(coord) : undefined}
           >
             {line.newLineNumber && (
-              <LineMarker 
-                lineId={`${filePath}:${line.newLineNumber}`} 
-                lineNumber={line.newLineNumber} 
-                onVisible={handleLineVisibility} 
+              <LineMarker
+                lineId={`${filePath}:${line.newLineNumber}`}
+                lineNumber={line.newLineNumber}
+                onVisible={handleLineVisibility}
               />
             )}
 
             {/* Old Line Number */}
-            <div 
+            <div
               className={clsx(
                   "w-12 text-right pr-3 text-gray-600 select-none border-r py-0.5 relative transition-all duration-150 cursor-pointer hover:bg-gray-800/50",
-                  isSelected 
-                      ? "bg-blue-900/30 text-blue-200 border-blue-500 border-l-4 font-bold" 
+                  isSelected
+                      ? "bg-blue-900/30 text-blue-200 border-blue-500 border-l-4 font-bold"
                       : "bg-gray-900/50 border-gray-800 border-l-4 border-l-transparent"
               )}
-              onClick={(e) => line.newLineNumber && handleInteraction(e, line.newLineNumber)}
-              onContextMenu={(e) => line.newLineNumber && handleContextMenu(e, line.newLineNumber)}
+              onClick={(e) => coord && interactions.handleInteraction(e, coord)}
+              onContextMenu={(e) => coord && interactions.handleContextMenu(e, coord)}
             >
               {line.oldLineNumber || ''}
             </div>
-            
+
             {/* New Line Number */}
-            <div 
+            <div
                 className={clsx(
                     "w-12 text-right pr-3 select-none border-r py-0.5 relative cursor-pointer hover:text-gray-400 hover:bg-gray-800/50 transition-all duration-150 z-20",
-                    isSelected 
-                        ? "bg-blue-900/30 text-blue-200 border-blue-500 font-bold" 
+                    isSelected
+                        ? "bg-blue-900/30 text-blue-200 border-blue-500 font-bold"
                         : "bg-gray-900/50 border-gray-800 text-gray-600"
                 )}
-                onClick={(e) => line.newLineNumber && handleInteraction(e, line.newLineNumber)}
-                onContextMenu={(e) => line.newLineNumber && handleContextMenu(e, line.newLineNumber)}
-                onMouseEnter={() => line.newLineNumber && setHoveredLine(line.newLineNumber)}
-                onMouseLeave={() => setHoveredLine(null)}
+                onClick={(e) => coord && interactions.handleInteraction(e, coord)}
+                onContextMenu={(e) => coord && interactions.handleContextMenu(e, coord)}
+                onMouseEnter={() => coord && interactions.setHoveredCoord(coord)}
+                onMouseLeave={() => interactions.setHoveredCoord(null)}
                 title="Left-Click: Marker | Right-Click / Ctrl+Click: Label"
             >
               {line.newLineNumber || ''}
-              
-              {line.newLineNumber && hoveredLine === line.newLineNumber && !hasMarker && !hasLabel && !isSelected && (
-                  <div className="absolute left-1 top-1 text-gray-500 opacity-50 pointer-events-none"><MapPin size={8} /></div>
-              )}
-              {(hasMarker || hasLabel) && (
-                 <div className="absolute left-1 top-1 text-blue-400 pointer-events-none">
-                    {hasLabel ? <MessageSquare size={8} className="text-yellow-400" /> : <MapPin size={8} />}
-                 </div>
-              )}
+
+              <LineGutterIndicator size={8} isHovered={isHovered} isSelected={!!isSelected} hasMarker={hasMarker} hasLabel={hasLabel} />
             </div>
 
             <div className="w-6 text-center select-none text-gray-500 py-0.5">
@@ -224,18 +152,18 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
               {isRemoved && '-'}
             </div>
 
-            <div 
-                className={clsx("flex-1 whitespace-pre py-0.5 pl-2 relative transition-colors duration-150 cursor-text", 
-                    isAdded && "text-green-100", 
+            <div
+                className={clsx("flex-1 whitespace-pre py-0.5 pl-2 relative transition-colors duration-150 cursor-text",
+                    isAdded && "text-green-100",
                     isRemoved && "text-red-200 line-through opacity-60",
                     !isAdded && !isRemoved && "text-gray-300",
                     isSelected && "bg-blue-500/10"
                 )}
             >
-              {creatingLabelLine === line.newLineNumber && (
-                  <AnnotationInput 
-                    onSave={handleSaveLabel}
-                    onCancel={() => setCreatingLabelLine(null)}
+              {isCreatingLabel && (
+                  <AnnotationInput
+                    onSave={interactions.handleSaveLabel}
+                    onCancel={interactions.cancelLabelCreation}
                   />
               )}
 
@@ -260,7 +188,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
               ) : (
                   <HighlightedText text={line.content} language={language} />
               )}
-              
+
               <div className="absolute right-4 top-0 flex gap-2 pointer-events-none">
                  {lineAnnotations.map(a => (
                      <span key={a.id} className={clsx(
