@@ -225,6 +225,33 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     agent.loadSession();
   }, []);
 
+  // Per-PR chat history persistence (UI message list, separate from agent state)
+  const isLoadingChatRef = useRef(false);
+
+  // Load saved chat history when a PR becomes available.
+  // Only replace state if there is saved history AND current messages are just
+  // the initial/welcome state (length <= 1) — never clobber an active conversation.
+  useEffect(() => {
+    const prId = prData?.id;
+    if (!prId) return;
+    const saved = storageService.loadChatHistory(prId);
+    if (saved && saved.length > 0 && messages.length <= 1) {
+      isLoadingChatRef.current = true;
+      setMessages(saved);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prData?.id]);
+
+  // Persist chat history on messages change.
+  // Skip while a stream/turn is in flight (isTyping) to avoid half-written state.
+  useEffect(() => {
+    const prId = prData?.id;
+    if (!prId) return;
+    if (isLoadingChatRef.current) { isLoadingChatRef.current = false; return; }
+    if (isTyping) return; // busy: stream/turn in flight
+    storageService.saveChatHistory(prId, messages);
+  }, [prData?.id, messages, isTyping]);
+
   // --- ACTIONS ---
 
   // Refs for dynamic context — prevent stale closures in sendMessage without
