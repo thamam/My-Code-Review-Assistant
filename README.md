@@ -3,7 +3,7 @@
 
 # Theia — AI Code Review Assistant
 
-**v0.3.0: The Explorer Update**
+**v1.1 — Status: Beta**
 
 *Voice-First, Spec-Driven Code Review with L4 Autonomy*
 

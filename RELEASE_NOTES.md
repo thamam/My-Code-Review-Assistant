@@ -1,11 +1,12 @@
-# Theia v1.0 Golden Master - Release Notes
+# Theia v1.0 Beta - Release Notes
 
 **Version:** v1.0
-**Status:** GOLDEN MASTER
+**Status:** Beta
 **Date:** 2026-01-20
+**Known Issues:** One open P1 (QA-001 — planner JSON leaking into chat); one open P2 (ENV-001 — rate limiting).
 
 ## 🚀 Launch Overview
-We are proud to announce the **v1.0 Golden Master** of Theia, the Advanced Agentic Coding Assistant. This release marks the transition from Development to Production, featuring a fully autonomous agent capable of self-correction, safe execution, and visual explanation.
+We are proud to announce the **v1.0 Beta** of Theia, the Advanced Agentic Coding Assistant. This release is a Beta milestone (see HANDOVER_v1.1.0.md), featuring an autonomous agent capable of self-correction, safe execution, and visual explanation.
 
 ---
 
@@ -57,4 +58,4 @@ Ask "Draw the architecture," and get a live, clickable diagram. Click any node t
 ## 🔧 Infrastructure
 - **End-to-End Testing:** Full "Hunter-Killer" suite running on Playwright.
 - **Performance:** Sub-2s latency for file fetching; optimized context updates.
-- **Observability:** Full state dumps and LangSmith tracing enabled.
+- **Observability:** Full state dumps and local event tracing via the in-app EventBus, TraceService, and FlightRecorder (no external LangSmith integration).
