@@ -17,7 +17,7 @@ import { eventBus } from '../src/modules/core/EventBus';
  * Phase 17: Added "Instant Anchor" for S2S low-latency grounding.
  */
 export const UserContextMonitor: React.FC = () => {
-    const { leftTab, selectedFile, selectionState, activeDiagram, prData, focusedLocation, lazyFiles } = usePR();
+    const { leftTab, selectedFile, selectionState, activeDiagram, prData, focusedLocation, lazyFiles, appMode, customReviewGoal } = usePR();
     const { updateUserContext } = useChat();
     const { isActive: isLiveActive, injectBrief, sendText: sendLiveText } = useLive();
     const { activeSpec } = useSpec(); // Get spec atoms
@@ -102,7 +102,9 @@ export const UserContextMonitor: React.FC = () => {
                 filePath,
                 prTitle: prData.title,
                 prDescription: prData.description,
-                specAtoms: activeSpec?.atoms || []
+                specAtoms: activeSpec?.atoms || [],
+                appMode,
+                customReviewGoal
             };
 
             console.debug('[Director] Generating brief for:', filePath);
@@ -120,7 +122,7 @@ export const UserContextMonitor: React.FC = () => {
         }, 500);
 
         return () => clearTimeout(timer);
-    }, [selectedFile?.path, focusedLocation?.file, prData, activeSpec, isLiveActive, updateUserContext, injectBrief, lazyFiles, sendLiveText]);
+    }, [selectedFile?.path, focusedLocation?.file, prData, activeSpec, isLiveActive, updateUserContext, injectBrief, lazyFiles, sendLiveText, appMode, customReviewGoal]);
 
     // Monitor Selection Changes
     useEffect(() => {

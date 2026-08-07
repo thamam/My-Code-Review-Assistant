@@ -7,6 +7,8 @@
  */
 
 import { SpecAtom } from '../types/SpecTypes';
+import { AppMode } from '../../types';
+import { buildModeLine } from './modeInstructions';
 
 export const DIRECTOR_SYSTEM_PROMPT = `You are the "Director" in a code review assistant. Your job is to analyze source code and produce a structured JSON summary called a "ContextBrief".
 
@@ -68,9 +70,13 @@ export function buildDirectorPrompt(
   filePath: string,
   prTitle: string,
   prDescription: string,
-  atoms: SpecAtom[]
+  atoms: SpecAtom[],
+  appMode: AppMode = 'pr',
+  customReviewGoal?: string | null
 ): string {
-  let prompt = `## File Being Viewed
+  let prompt = `${buildModeLine(appMode, customReviewGoal)}
+
+## File Being Viewed
 Path: ${filePath}
 
 \`\`\`

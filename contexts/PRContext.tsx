@@ -5,7 +5,7 @@
  */
 
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef, useCallback } from 'react';
-import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue, Diagram, NavigationTarget, Note } from '../types';
+import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue, Diagram, NavigationTarget, Note, AppMode } from '../types';
 import { resolveFilePath } from '../utils/fileUtils';
 // NEW IMPORTS
 import { useNavigationModule } from '../src/modules/navigation/hooks';
@@ -69,6 +69,12 @@ interface PRContextType {
   setDiagramSplitPercent: (val: number) => void;
   setDiagrams: (diagrams: Diagram[]) => void;
 
+  // Review-intent mode: shapes what the AI focuses on (see src/prompts/modeInstructions.ts)
+  appMode: AppMode;
+  setAppMode: (mode: AppMode) => void;
+  customReviewGoal: string;
+  setCustomReviewGoal: (goal: string) => void;
+
   // Phase 9: Delegated to Navigation Module
   repoTree: RepoNode[];
   lazyFiles: Map<string, LazyFile>;
@@ -118,6 +124,10 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [activeDiagram, setActiveDiagram] = useState<Diagram | null>(null);
   const [diagramViewMode, setDiagramViewMode] = useState<'full' | 'split'>('full');
   const [diagramSplitPercent, setDiagramSplitPercent] = useState(50);
+
+  // Review-intent mode
+  const [appMode, setAppMode] = useState<AppMode>('pr');
+  const [customReviewGoal, setCustomReviewGoal] = useState<string>('');
 
   // F1+F4: Review Map — per-file verification states, persisted per PR
   const [fileVerificationStates, setFileVerificationStates] = useState<Map<string, VerificationState>>(new Map());
@@ -365,6 +375,7 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       removeDiagram: (id) => { setDiagrams(p => p.filter(d => d.id !== id)); if (activeDiagram?.id === id) setActiveDiagram(null); },
       setActiveDiagram, diagramViewMode, setDiagramViewMode, diagramSplitPercent, setDiagramSplitPercent,
       setDiagrams,
+      appMode, setAppMode, customReviewGoal, setCustomReviewGoal,
       // Mapped Module State
       repoTree: navModule.repoTree,
       lazyFiles: navModule.lazyFiles,

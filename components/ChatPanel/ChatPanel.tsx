@@ -2,13 +2,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useChat } from '../../contexts/ChatContext';
 import { ChatMessage } from './ChatMessage';
-import { Send, Sparkles, BrainCircuit, Zap, Globe, FileJson } from 'lucide-react';
+import { Send, Sparkles, BrainCircuit, Zap, Globe, FileJson, BookOpen, Microscope, Crosshair, GitPullRequest } from 'lucide-react';
 import { usePR } from '../../contexts/PRContext';
 import { LanguagePreference } from '../../contexts/ChatContext';
 
 export const ChatPanel: React.FC = () => {
   const { messages, sendMessage, isTyping, currentModel, setModel, language, setLanguage, exportSessionLogs } = useChat();
-  const { viewportState } = usePR();
+  const { viewportState, appMode } = usePR();
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -31,12 +31,36 @@ export const ChatPanel: React.FC = () => {
 
   const isPro = currentModel.includes('pro');
 
+  const getModeBadge = () => {
+    let icon = GitPullRequest;
+    let label = "PR";
+    let color = "bg-blue-900/40 text-blue-300 border-blue-700";
+
+    switch (appMode) {
+      case 'learn':
+        icon = BookOpen; label = "LEARN"; color = "bg-green-900/40 text-green-300 border-green-700"; break;
+      case 'dive':
+        icon = Microscope; label = "DIVE"; color = "bg-purple-900/40 text-purple-300 border-purple-700"; break;
+      case 'custom':
+        icon = Crosshair; label = "CUSTOM"; color = "bg-orange-900/40 text-orange-300 border-orange-700"; break;
+    }
+
+    const Icon = icon;
+    return (
+      <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-bold ${color}`}>
+        <Icon size={10} />
+        {label}
+      </div>
+    );
+  };
+
   return (
     <div className="h-full flex flex-col bg-gray-900 border-l border-gray-800 w-full">
       <div className="p-3 border-b border-gray-800 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           {isPro ? <BrainCircuit size={16} className="text-pink-400" /> : <Zap size={16} className="text-yellow-400" />}
           <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Theia AI</h2>
+          {getModeBadge()}
         </div>
 
         <div className="flex items-center gap-2">

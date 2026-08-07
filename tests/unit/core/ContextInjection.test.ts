@@ -241,3 +241,35 @@ describe('Agent Context Injection (buildContextEnvelope)', () => {
     expect(envelope).toContain('USER_QUERY: my question');
   });
 });
+
+describe('Agent Mode Injection (buildSystemPrompt)', () => {
+
+  it('includes a MODE section defaulting to PR REVIEW when appMode is absent', () => {
+    const prompt = agentAny.buildSystemPrompt({ activeFile: 'f.ts' }, { title: 'PR', author: 'me' });
+    expect(prompt).toContain('MODE: PR REVIEW');
+  });
+
+  it('includes a MODE section for the learn mode', () => {
+    const prompt = agentAny.buildSystemPrompt({ activeFile: 'f.ts', appMode: 'learn' }, { title: 'PR', author: 'me' });
+    expect(prompt).toContain('MODE: LEARN THE CODE BASE');
+  });
+
+  it('includes a MODE section for the dive mode', () => {
+    const prompt = agentAny.buildSystemPrompt({ activeFile: 'f.ts', appMode: 'dive' }, { title: 'PR', author: 'me' });
+    expect(prompt).toContain('MODE: CODE DIVE');
+  });
+
+  it('includes the free-text review goal for custom mode', () => {
+    const prompt = agentAny.buildSystemPrompt(
+      { activeFile: 'f.ts', appMode: 'custom', customReviewGoal: 'Find security vulnerabilities' },
+      { title: 'PR', author: 'me' }
+    );
+    expect(prompt).toContain('MODE: CUSTOM REVIEW');
+    expect(prompt).toContain('Find security vulnerabilities');
+  });
+
+  it('falls back to "General Review" when custom mode has no goal', () => {
+    const prompt = agentAny.buildSystemPrompt({ activeFile: 'f.ts', appMode: 'custom' }, { title: 'PR', author: 'me' });
+    expect(prompt).toContain('General Review');
+  });
+});

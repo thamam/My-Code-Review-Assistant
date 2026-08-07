@@ -1,10 +1,10 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Github, Loader2, PlayCircle, AlertCircle, HelpCircle, CheckSquare, Square, History, Database, RefreshCw, Upload, FileText, Clock, FileJson, Sparkles } from 'lucide-react';
+import { Github, Loader2, PlayCircle, AlertCircle, HelpCircle, CheckSquare, Square, History, Database, RefreshCw, Upload, FileText, Clock, FileJson, Sparkles, BookOpen, Microscope, Crosshair, GitPullRequest } from 'lucide-react';
 import { usePR } from '../contexts/PRContext';
 import { GitHubService } from '../services/github';
 import { SAMPLE_PR, SAMPLE_WALKTHROUGH } from '../mock/samplePR';
-import { PRData, Walkthrough, PRHistoryItem } from '../types';
+import { PRData, Walkthrough, PRHistoryItem, AppMode } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 import { parseWalkthroughFile, parseWalkthroughFromText } from '../services/walkthroughParser';
 import { eventBus } from '../src/modules/core/EventBus';
@@ -16,7 +16,11 @@ const USER_CONFIG = {
 };
 
 export const WelcomeScreen: React.FC = () => {
-  const { setPRData, loadWalkthrough } = usePR();
+  const { setPRData, loadWalkthrough, setAppMode, setCustomReviewGoal } = usePR();
+
+  // Mode Selection State
+  const [selectedMode, setSelectedMode] = useState<AppMode>('pr');
+  const [customGoalInput, setCustomGoalInput] = useState('');
 
   const [url, setUrl] = useState(() => {
     try {
@@ -167,6 +171,12 @@ export const WelcomeScreen: React.FC = () => {
     // Clear previous session's chat history before loading new data
     eventBus.emit({ type: 'SESSION_RESET', payload: { reason: 'new_session', repoName: data.title } });
 
+    // Mode cards apply to the PR flow; repo-only mode (no PR files) always reviews as "Learn"
+    const isRepoMode = data.files.length === 0;
+    const effectiveMode: AppMode = isRepoMode ? 'learn' : selectedMode;
+    setAppMode(effectiveMode);
+    setCustomReviewGoal(effectiveMode === 'custom' ? customGoalInput : '');
+
     setPRData(data);
     if (walkthroughFile) {
       loadWalkthrough(walkthroughFile);
@@ -181,6 +191,12 @@ export const WelcomeScreen: React.FC = () => {
   const handleLoad = async (e: React.FormEvent | null, forceRefresh: boolean = false) => {
     if (e) e.preventDefault();
     if (!url.trim()) return;
+
+    if (selectedMode === 'custom' && !customGoalInput.trim()) {
+      setError("Please describe the specific focus for your custom review.");
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     try {
@@ -214,9 +230,28 @@ export const WelcomeScreen: React.FC = () => {
   };
 
   const loadSample = () => {
+    setAppMode('pr');
     setPRData(SAMPLE_PR);
     loadWalkthrough(SAMPLE_WALKTHROUGH);
   };
+
+  const ModeCard = ({ mode, icon: Icon, title, desc }: { mode: AppMode, icon: any, title: string, desc: string }) => (
+    <button
+      type="button"
+      onClick={() => setSelectedMode(mode)}
+      className={`flex-1 p-3 rounded-lg border text-left transition-all relative ${selectedMode === mode
+          ? "bg-blue-900/20 border-blue-500 ring-1 ring-blue-500/50"
+          : "bg-gray-950 border-gray-800 hover:border-gray-700 hover:bg-gray-900"
+        }`}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <Icon size={16} className={selectedMode === mode ? "text-blue-400" : "text-gray-500"} />
+        <span className={`text-sm font-bold ${selectedMode === mode ? "text-white" : "text-gray-400"}`}>{title}</span>
+      </div>
+      <p className="text-[10px] text-gray-500 leading-tight">{desc}</p>
+      {selectedMode === mode && <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-blue-500" />}
+    </button>
+  );
 
   return (
     <div className="min-h-screen w-screen bg-gray-950 flex flex-col items-center justify-center p-4 overflow-y-auto">
@@ -234,6 +269,33 @@ export const WelcomeScreen: React.FC = () => {
         <div className="p-8 space-y-6">
           <form onSubmit={(e) => handleLoad(e, false)} className="space-y-4">
             <div>
+              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                Analysis Mode
+              </label>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <ModeCard mode="pr" icon={GitPullRequest} title="PR Review" desc="Standard review of changes." />
+                <ModeCard mode="learn" icon={BookOpen} title="Learn Code Base" desc="Holistic architecture & structure." />
+                <ModeCard mode="dive" icon={Microscope} title="Code Dive" desc="Deep analysis of single modules." />
+                <ModeCard mode="custom" icon={Crosshair} title="Custom Focus" desc="Targeted review (Security, etc)." />
+              </div>
+
+              {selectedMode === 'custom' && (
+                <div>
+                  <label className="block text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1">
+                    Review Goal
+                  </label>
+                  <input
+                    type="text"
+                    value={customGoalInput}
+                    onChange={(e) => setCustomGoalInput(e.target.value)}
+                    placeholder="e.g., 'Find security vulnerabilities' or 'Suggest refactoring'"
+                    className="w-full bg-gray-950 border border-blue-900/50 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-gray-800 pt-4">
               <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
                 GitHub Repository or PR URL
               </label>

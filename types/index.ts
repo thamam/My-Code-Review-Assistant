@@ -1,4 +1,7 @@
 
+/** Review-intent mode: what the AI focuses on for this session (see src/prompts/modeInstructions.ts). */
+export type AppMode = 'pr' | 'learn' | 'dive' | 'custom';
+
 export interface PRData {
   id: string;
   title: string;

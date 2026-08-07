@@ -13,7 +13,7 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { ContextBrief } from "../types/contextBrief";
-import { ChatMessage } from "../../types";
+import { ChatMessage, AppMode } from "../../types";
 import { SpecAtom } from "../types/SpecTypes";
 import { DIRECTOR_SYSTEM_PROMPT, buildDirectorPrompt } from "../prompts/directorPrompt";
 
@@ -24,6 +24,9 @@ export interface DirectorInput {
     prDescription: string;
     /** Granular Spec Atoms (replaces legacy linearIssue) */
     specAtoms: SpecAtom[];
+    /** Review-intent mode: shapes what the brief focuses on (see src/prompts/modeInstructions.ts) */
+    appMode?: AppMode;
+    customReviewGoal?: string | null;
 }
 
 /**
@@ -47,7 +50,9 @@ export async function generateBrief(input: DirectorInput): Promise<ContextBrief 
             input.filePath,
             input.prTitle,
             input.prDescription,
-            input.specAtoms
+            input.specAtoms,
+            input.appMode,
+            input.customReviewGoal
         );
 
         const response = await ai.models.generateContent({

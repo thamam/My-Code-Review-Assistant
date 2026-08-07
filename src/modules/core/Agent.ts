@@ -14,6 +14,7 @@ import { sanitizeForVoice } from "../../utils/VoiceUtils";
 import { formatSearchCommand, formatWriteFileCommand } from "../runtime/ToolUtils";
 import { DiagramAgent } from "../../../services/diagramAgent";
 import { ContextSnapshot, ACTIVE_FILE_CONTENT_LIMIT } from "../../types/context";
+import { buildModeSection } from "../../prompts/modeInstructions";
 
 // --- Types ---
 
@@ -633,7 +634,9 @@ CRITICAL: You will receive a [SYSTEM_CONTEXT] block. This is the GROUND TRUTH ab
 - [ACTIVE FILE CONTENT] block: the actual source of ACTIVE_FILE, when available — read code from here instead of guessing or asking the user to paste it.
 NEVER guess filenames or line numbers. Use the context.
 
-Context: File: ${context?.activeFile || 'None'}, Lines: ${context?.viewportStartLine ?? '?'}–${context?.viewportEndLine ?? '?'}, Repo: ${prData?.title || 'Unknown'}`;
+Context: File: ${context?.activeFile || 'None'}, Lines: ${context?.viewportStartLine ?? '?'}–${context?.viewportEndLine ?? '?'}, Repo: ${prData?.title || 'Unknown'}
+
+${buildModeSection(context?.appMode ?? 'pr', context?.customReviewGoal)}`;
 
     let prompt = userMsg.content;
 
@@ -1461,6 +1464,8 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
     return `You are Theia, a Senior Staff Software Engineer reviewing code.
 PR: "${prData?.title || 'Unknown'}"
 Author: ${prData?.author || 'Unknown'}
+
+${buildModeSection(context?.appMode ?? 'pr', context?.customReviewGoal)}
 
 Be direct and professional. Use tools proactively to navigate and demonstrate.
 When discussing specific code, use navigate_to_code to show the user.

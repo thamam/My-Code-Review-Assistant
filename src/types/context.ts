@@ -5,7 +5,7 @@
  * Replaces `context: any` in AgentState so TypeScript catches mismatches
  * between what the UI sends and what Agent.buildContextEnvelope reads.
  */
-import type { FileChange } from '../../types';
+import type { FileChange, AppMode } from '../../types';
 import type { LazyFile } from '../modules/navigation/types';
 
 /** Max chars of active-file content injected into the AI prompt. Content beyond this is truncated. */
@@ -65,4 +65,8 @@ export interface ContextSnapshot {
   // F2: Hierarchical context — active walkthrough section (if any)
   activeSectionTitle: string | null;
   activeSectionDescription: string | null;
+
+  // Review-intent mode: shapes what the AI focuses on (see src/prompts/modeInstructions.ts)
+  appMode?: AppMode;
+  customReviewGoal?: string | null;
 }

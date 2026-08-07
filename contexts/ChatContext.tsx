@@ -61,6 +61,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     focusedLocation,
     walkthrough,
     activeSectionId,
+    appMode,
+    customReviewGoal,
   } = usePR();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -236,6 +238,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const walkthroughRef = useRef(walkthrough);
   const activeSectionIdRef = useRef(activeSectionId);
   const currentModelRef = useRef(currentModel);
+  const appModeRef = useRef(appMode);
+  const customReviewGoalRef = useRef(customReviewGoal);
 
   useEffect(() => {
     selectedFileRef.current = selectedFile;
@@ -247,7 +251,9 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     walkthroughRef.current = walkthrough;
     activeSectionIdRef.current = activeSectionId;
     currentModelRef.current = currentModel;
-  }, [selectedFile, focusedLocation, viewportState, selectionState, isDiffMode, prData, walkthrough, activeSectionId, currentModel]);
+    appModeRef.current = appMode;
+    customReviewGoalRef.current = customReviewGoal;
+  }, [selectedFile, focusedLocation, viewportState, selectionState, isDiffMode, prData, walkthrough, activeSectionId, currentModel, appMode, customReviewGoal]);
 
   // --- ACTIONS ---
 
@@ -309,6 +315,9 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // F2: Hierarchical context
       activeSectionTitle: activeSection?.title ?? null,
       activeSectionDescription: activeSection?.description ?? null,
+      // Review-intent mode
+      appMode: appModeRef.current,
+      customReviewGoal: customReviewGoalRef.current,
     };
 
     console.log('[UI_PROBE] Context snapshot:', contextSnapshot);
