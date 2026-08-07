@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ChatMessage as ChatMessageType } from '../../types';
 import clsx from 'clsx';
-import { Bot, User, Copy, Check, Volume2 } from 'lucide-react';
+import { Bot, User, Copy, Check, Volume2, Globe } from 'lucide-react';
 import { MermaidRenderer } from '../Diagrams/MermaidRenderer';
 
 const CodeBlock: React.FC<{ content: string }> = ({ content }) => {
@@ -119,6 +119,26 @@ export const ChatMessage: React.FC<{ message: ChatMessageType }> = ({ message })
         {message.context && !isUser && (
           <div className="mt-2 text-xs text-gray-500 border-t border-gray-700 pt-2">
             Reference: {message.context.file}
+          </div>
+        )}
+
+        {message.groundingChunks && message.groundingChunks.length > 0 && (
+          <div className="mt-3 pt-2 border-t border-gray-700 flex flex-wrap gap-2">
+            <div className="w-full text-[10px] uppercase text-gray-500 font-bold tracking-wider flex items-center gap-1">
+              <Globe size={10} /> Sources
+            </div>
+            {message.groundingChunks.map((chunk, i) => chunk.web ? (
+              <a
+                key={i}
+                href={chunk.web.uri}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[10px] bg-gray-900 hover:bg-gray-700 border border-gray-700 rounded-full px-2 py-1 text-blue-300 truncate max-w-[200px] transition-colors"
+                title={chunk.web.title}
+              >
+                {chunk.web.title}
+              </a>
+            ) : null)}
           </div>
         )}
       </div>

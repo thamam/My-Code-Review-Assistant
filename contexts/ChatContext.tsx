@@ -108,7 +108,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           id: `ai-${envelope.id}-${envelope.timestamp}`,
           role: 'assistant',
           content: content,
-          timestamp: envelope.timestamp
+          timestamp: envelope.timestamp,
+          ...(event.payload.groundingChunks?.length ? { groundingChunks: event.payload.groundingChunks } : {})
         };
         setMessages(prev => [...prev, msg]);
       }

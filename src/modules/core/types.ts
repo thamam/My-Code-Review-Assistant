@@ -4,6 +4,7 @@
  * Defines the contract between UI (Signals) and Agent (Actions).
  */
 import type { ContextSnapshot } from '../../types/context';
+import type { GroundingChunk } from '../../../types';
 
 // ============================================================================
 // INPUT SIGNALS (UserIntent) - UI -> Agent
@@ -109,6 +110,7 @@ export interface AgentSpeakEvent {
         mode?: 'tts' | 'text' | 'both';
         priority?: 'high' | 'normal' | 'low';
         timestamp?: number;
+        groundingChunks?: GroundingChunk[]; // Web sources from Google Search grounding (executor path only)
     };
 }
 
