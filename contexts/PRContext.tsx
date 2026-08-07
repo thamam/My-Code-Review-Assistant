@@ -4,7 +4,7 @@
  * Now delegates data fetching to useNavigationModule().
  */
 
-import React, { createContext, useContext, useState, ReactNode, useEffect, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect, useRef, useCallback, useMemo } from 'react';
 import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue, Diagram, NavigationTarget, Note, AppMode } from '../types';
 import { resolveFilePath } from '../utils/fileUtils';
 // NEW IMPORTS
@@ -53,7 +53,7 @@ interface PRContextType {
   setLeftTab: (tab: 'files' | 'annotations' | 'issue' | 'diagrams' | 'terminal' | 'notes') => void;
   leftTab: 'files' | 'annotations' | 'issue' | 'diagrams' | 'terminal' | 'notes';
   annotations: Annotation[];
-  addAnnotation: (file: string, line: number, type: 'marker' | 'label', text?: string) => void;
+  addAnnotation: (file: string, line: number, type: 'marker' | 'label', text?: string, side?: 'old' | 'new') => void;
   removeAnnotation: (id: string) => void;
   updateAnnotation: (id: string, updates: Partial<Annotation>) => void;
   linearIssue: LinearIssue | null;
@@ -366,10 +366,10 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   }, [navigateToCode]);
 
   const toggleDiffMode = () => setIsDiffMode(prev => !prev);
-  const addAnnotation = (file: string, line: number, type: 'marker' | 'label', text?: string) => {
+  const addAnnotation = (file: string, line: number, type: 'marker' | 'label', text?: string, side?: 'old' | 'new') => {
     const id = `${type}_${Date.now()}`;
     const title = text || (type === 'marker' ? `marker_${annotations.length + 1}` : 'New Label');
-    setAnnotations(prev => [...prev, { id, file, line, type, title, timestamp: Date.now() }]);
+    setAnnotations(prev => [...prev, { id, file, line, side: side ?? 'new', type, title, timestamp: Date.now() }]);
   };
 
   // --- DELEGATED METHODS ---
@@ -396,39 +396,56 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     return navModule.service.loadGhostFile(prData.owner, prData.repo, path, prData.headSha);
   }, [prData, navModule.service]);
 
+  const contextValue = useMemo<PRContextType>(() => ({
+    prData, setPRData: setPrData, selectedFile, selectFile, viewportState, updateViewport: (s) => setViewportState(v => ({ ...v, ...s })),
+    selectionState, setSelectionState, walkthrough, loadWalkthrough: setWalkthrough, activeSectionId, setActiveSectionId,
+    isDiffMode, setIsDiffMode, toggleDiffMode, focusedLocation, isFlashActive, scrollToLine, navigateToCode, leftTab, setLeftTab,
+    annotations, addAnnotation, removeAnnotation: (id) => setAnnotations(a => a.filter(x => x.id !== id)),
+    updateAnnotation: (id, u) => setAnnotations(a => a.map(x => x.id === id ? { ...x, ...u } : x)),
+    linearIssue, setLinearIssue, diagrams, activeDiagram, addDiagram: (d) => setDiagrams(p => [...p, d]),
+    removeDiagram: (id) => { setDiagrams(p => p.filter(d => d.id !== id)); if (activeDiagram?.id === id) setActiveDiagram(null); },
+    setActiveDiagram, diagramViewMode, setDiagramViewMode, diagramSplitPercent, setDiagramSplitPercent,
+    setDiagrams,
+    appMode, setAppMode, customReviewGoal, setCustomReviewGoal,
+    // Mapped Module State
+    repoTree: navModule.repoTree,
+    lazyFiles: navModule.lazyFiles,
+    isFullRepoMode: navModule.isFullRepoMode,
+    isLoadingRepoTree: navModule.isLoadingRepoTree,
+    toggleFullRepoMode,
+    loadGhostFile,
+    // F1: Review Map
+    fileVerificationStates,
+    setFileVerificationState,
+    // I1+I3: Risk scoring
+    fileRiskScores,
+    loadSessionFile,
+    hasSession,
+    // I2: Requirements
+    sessionRequirements,
+    // F3: Report
+    exportReviewReport,
+    // F5: Whiteboard
+    notes, addNote, updateNote, removeNote,
+  }), [
+    prData, selectedFile, selectFile, viewportState,
+    selectionState, walkthrough, activeSectionId,
+    isDiffMode, toggleDiffMode, focusedLocation, isFlashActive, scrollToLine, navigateToCode, leftTab,
+    annotations, addAnnotation,
+    linearIssue, diagrams, activeDiagram,
+    diagramViewMode, diagramSplitPercent,
+    appMode, customReviewGoal,
+    navModule.repoTree, navModule.lazyFiles, navModule.isFullRepoMode, navModule.isLoadingRepoTree,
+    toggleFullRepoMode, loadGhostFile,
+    fileVerificationStates, setFileVerificationState,
+    fileRiskScores, loadSessionFile, hasSession,
+    sessionRequirements,
+    exportReviewReport,
+    notes, addNote, updateNote, removeNote,
+  ]);
+
   return (
-    <PRContext.Provider value={{
-      prData, setPRData: setPrData, selectedFile, selectFile, viewportState, updateViewport: (s) => setViewportState(v => ({ ...v, ...s })),
-      selectionState, setSelectionState, walkthrough, loadWalkthrough: setWalkthrough, activeSectionId, setActiveSectionId,
-      isDiffMode, setIsDiffMode, toggleDiffMode, focusedLocation, isFlashActive, scrollToLine, navigateToCode, leftTab, setLeftTab,
-      annotations, addAnnotation, removeAnnotation: (id) => setAnnotations(a => a.filter(x => x.id !== id)),
-      updateAnnotation: (id, u) => setAnnotations(a => a.map(x => x.id === id ? { ...x, ...u } : x)),
-      linearIssue, setLinearIssue, diagrams, activeDiagram, addDiagram: (d) => setDiagrams(p => [...p, d]),
-      removeDiagram: (id) => { setDiagrams(p => p.filter(d => d.id !== id)); if (activeDiagram?.id === id) setActiveDiagram(null); },
-      setActiveDiagram, diagramViewMode, setDiagramViewMode, diagramSplitPercent, setDiagramSplitPercent,
-      setDiagrams,
-      appMode, setAppMode, customReviewGoal, setCustomReviewGoal,
-      // Mapped Module State
-      repoTree: navModule.repoTree,
-      lazyFiles: navModule.lazyFiles,
-      isFullRepoMode: navModule.isFullRepoMode,
-      isLoadingRepoTree: navModule.isLoadingRepoTree,
-      toggleFullRepoMode,
-      loadGhostFile,
-      // F1: Review Map
-      fileVerificationStates,
-      setFileVerificationState,
-      // I1+I3: Risk scoring
-      fileRiskScores,
-      loadSessionFile,
-      hasSession,
-      // I2: Requirements
-      sessionRequirements,
-      // F3: Report
-      exportReviewReport,
-      // F5: Whiteboard
-      notes, addNote, updateNote, removeNote,
-    }}>
+    <PRContext.Provider value={contextValue}>
       {children}
     </PRContext.Provider>
   );
