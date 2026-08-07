@@ -14,11 +14,15 @@ import { resolveActiveFileContent, type ContextSnapshot } from '../src/types/con
 // Event-Driven Architecture imports
 import { eventBus } from '../src/modules/core/EventBus';
 import { agent } from '../src/modules/core/Agent'; // Force instantiation (Polyfill enabled)
+import { simpleChat } from '../src/modules/core/SimpleChat'; // Force instantiation (Polyfill enabled)
 import { runtime } from '../src/modules/runtime'; // Force runtime instantiation (Phase 11)
 import { storageService } from '../src/modules/persistence'; // For clearing persisted state
+import { applyAgentSpeak } from '../src/lib/chat/applyAgentSpeak';
+import type { ChatEngine } from '../src/modules/core/types';
 
 // Force side-effect execution (prevent tree-shaking)
 void agent;
+void simpleChat;
 void runtime;
 
 export type LanguagePreference = 'English' | 'Hebrew' | 'Auto';
@@ -41,6 +45,8 @@ interface ChatContextType {
   setModel: (model: string) => void;
   language: LanguagePreference;
   setLanguage: (lang: LanguagePreference) => void;
+  engine: ChatEngine;
+  setEngine: (engine: ChatEngine) => void;
   updateUserContext: (state: Partial<UserContextState>) => void;
   exportSessionLogs: () => void;
 }
@@ -69,6 +75,18 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isTyping, setIsTyping] = useState(false);
   const [currentModel, setModel] = useState('gemini-3.1-pro-preview');
   const [language, setLanguage] = useState<LanguagePreference>('Auto');
+
+  // Engine (Q2): routing preference, same tier as currentModel/language.
+  // Persisted globally (not per-PR), default 'simple'.
+  const [engine, setEngine] = useState<ChatEngine>(() => {
+    try {
+      const saved = localStorage.getItem('theia_chat_engine');
+      if (saved === 'simple' || saved === 'agent') return saved;
+    } catch (e) {
+      console.warn('[ChatContext] Failed to read persisted engine preference');
+    }
+    return 'simple';
+  });
 
   // Phase 17: Focus Lock Tracker (FR-042)
   const lastUserInteractionRef = useRef<number>(0);
@@ -106,14 +124,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (content.includes('```mermaid')) {
           console.log('[ChatContext] Mermaid block detected in incoming message!');
         }
-        const msg: ChatMessage = {
-          id: `ai-${envelope.id}-${envelope.timestamp}`,
-          role: 'assistant',
-          content: content,
-          timestamp: envelope.timestamp,
-          ...(event.payload.groundingChunks?.length ? { groundingChunks: event.payload.groundingChunks } : {})
-        };
-        setMessages(prev => [...prev, msg]);
+        setMessages(prev => applyAgentSpeak(prev, event.payload, envelope));
       }
 
       // 2. Agent Thinking (Status)
@@ -225,6 +236,32 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     agent.loadSession();
   }, []);
 
+  // Engine toggle (Q7): persist preference + append a local divider message.
+  // Skip the divider on the initial mount — that's not a user-initiated switch.
+  const isFirstEngineEffectRef = useRef(true);
+  useEffect(() => {
+    try {
+      localStorage.setItem('theia_chat_engine', engine);
+    } catch (e) {
+      console.warn('[ChatContext] Failed to persist engine preference');
+    }
+
+    if (isFirstEngineEffectRef.current) {
+      isFirstEngineEffectRef.current = false;
+      return;
+    }
+
+    const divider: ChatMessage = {
+      id: `divider-${Date.now()}`,
+      role: 'system',
+      content: engine === 'agent'
+        ? 'Switched to Agent mode. The agent starts a fresh reasoning session and can navigate, run commands, and edit files.'
+        : 'Switched to Chat mode. Fast streaming answers; no navigation or terminal.',
+      timestamp: Date.now(),
+    };
+    setMessages(prev => [...prev, divider]);
+  }, [engine]);
+
   // Per-PR chat history persistence (UI message list, separate from agent state)
   const isLoadingChatRef = useRef(false);
 
@@ -238,6 +275,15 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (saved && saved.length > 0 && messages.length <= 1) {
       isLoadingChatRef.current = true;
       setMessages(saved);
+
+      // Q6: hydrate SimpleChat's in-memory transcript from the same restored
+      // history, mirroring agent.loadSession() above. System/divider
+      // messages are dropped — they're UI-only, not model turns.
+      simpleChat.hydrate(
+        saved
+          .filter(m => m.role === 'user' || m.role === 'assistant')
+          .map(m => ({ role: m.role === 'user' ? 'user' as const : 'model' as const, text: m.content }))
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prData?.id]);
@@ -267,6 +313,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const currentModelRef = useRef(currentModel);
   const appModeRef = useRef(appMode);
   const customReviewGoalRef = useRef(customReviewGoal);
+  const engineRef = useRef(engine);
+  const languageRef = useRef(language);
 
   useEffect(() => {
     selectedFileRef.current = selectedFile;
@@ -280,7 +328,9 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     currentModelRef.current = currentModel;
     appModeRef.current = appMode;
     customReviewGoalRef.current = customReviewGoal;
-  }, [selectedFile, focusedLocation, viewportState, selectionState, isDiffMode, prData, walkthrough, activeSectionId, currentModel, appMode, customReviewGoal]);
+    engineRef.current = engine;
+    languageRef.current = language;
+  }, [selectedFile, focusedLocation, viewportState, selectionState, isDiffMode, prData, walkthrough, activeSectionId, currentModel, appMode, customReviewGoal, engine, language]);
 
   // --- ACTIONS ---
 
@@ -357,6 +407,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         context: contextSnapshot,
         prData: prDataRef.current,
         model: currentModelRef.current,
+        engine: engineRef.current,
+        language: languageRef.current,
       },
     });
   }, []); // Stable reference - never changes
@@ -424,6 +476,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setModel,
       language,
       setLanguage,
+      engine,
+      setEngine,
       updateUserContext,
       exportSessionLogs
     }}>

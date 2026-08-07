@@ -178,6 +178,11 @@ export function init(): void {
         const event = envelope.event;
         if (event.type !== 'AGENT_SPEAK') return;
 
+        // Streaming partials (SimpleChat) carry cumulative text on every
+        // chunk — speaking each one would fire TTS dozens of times per
+        // turn. Only the final chunk (or a non-streaming legacy message) speaks.
+        if (event.payload.isStreaming && !event.payload.isFinal) return;
+
         const rawPayload = event.payload?.text || '';
 
         // Extract voice track from Dual-Track JSON (FR-038)

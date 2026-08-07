@@ -12,7 +12,7 @@
  * - Fail silently on errors (don't interrupt the live session).
  */
 
-import { GoogleGenAI } from "@google/genai";
+import { getGenAI } from "../modules/core/genaiClient";
 
 const BRAIN_SYSTEM_INSTRUCTION = "You are the 'Brain' of Theia. Your job is to analyze code deeply and provide concise, staff-level insights to the 'Voice' (a faster, conversational model). Do not address the user directly. Output only the analysis.";
 
@@ -35,7 +35,7 @@ export async function generateDeepInsight(filePath: string, content: string): Pr
     }
 
     try {
-        const ai = new GoogleGenAI({ apiKey });
+        const ai = getGenAI();
 
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',

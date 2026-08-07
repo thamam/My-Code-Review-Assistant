@@ -31,6 +31,9 @@ export interface UIContext {
     cursorLine?: number;
 }
 
+export type ChatEngine = 'simple' | 'agent';
+export type LanguagePref = 'English' | 'Hebrew' | 'Auto';
+
 export interface UserMessageEvent {
     type: 'USER_MESSAGE';
     payload: {
@@ -42,6 +45,11 @@ export interface UserMessageEvent {
         prData?: any; // PR Data snapshot
         model?: string; // Selected model for this turn
         timestamp?: number;
+
+        /** Which brain handles this turn. Absent ⇒ 'simple' (safe default). */
+        engine?: ChatEngine;
+        /** Response-language preference. Honored by simple mode; ignored by the agent. */
+        language?: LanguagePref;
     };
 }
 
@@ -110,7 +118,7 @@ export interface AgentSpeakEvent {
         mode?: 'tts' | 'text' | 'both';
         priority?: 'high' | 'normal' | 'low';
         timestamp?: number;
-        groundingChunks?: GroundingChunk[]; // Web sources from Google Search grounding (executor path only)
+        groundingChunks?: GroundingChunk[]; // Web sources from Google Search grounding (simple-chat path only)
     };
 }
 

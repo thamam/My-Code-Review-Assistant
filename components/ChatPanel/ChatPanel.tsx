@@ -2,12 +2,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useChat } from '../../contexts/ChatContext';
 import { ChatMessage } from './ChatMessage';
-import { Send, Sparkles, BrainCircuit, Zap, Globe, FileJson, BookOpen, Microscope, Crosshair, GitPullRequest } from 'lucide-react';
+import { Send, Sparkles, BrainCircuit, Zap, Globe, FileJson, BookOpen, Microscope, Crosshair, GitPullRequest, MessageSquare, Wrench } from 'lucide-react';
 import { usePR } from '../../contexts/PRContext';
 import { LanguagePreference } from '../../contexts/ChatContext';
 
 export const ChatPanel: React.FC = () => {
-  const { messages, sendMessage, isTyping, currentModel, setModel, language, setLanguage, exportSessionLogs } = useChat();
+  const { messages, sendMessage, isTyping, currentModel, setModel, language, setLanguage, engine, setEngine, exportSessionLogs } = useChat();
   const { viewportState, appMode } = usePR();
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -64,6 +64,26 @@ export const ChatPanel: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          <div className="flex items-center bg-gray-800 border border-gray-700 rounded overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setEngine('simple')}
+              data-testid="engine-toggle-simple"
+              title="Chat mode: fast streaming answers with web sources. Cannot navigate or run commands."
+              className={`flex items-center gap-1 px-2 py-1 text-[10px] transition-colors ${engine === 'simple' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+            >
+              <MessageSquare size={10} /> Chat
+            </button>
+            <button
+              type="button"
+              onClick={() => setEngine('agent')}
+              data-testid="engine-toggle-agent"
+              title="Agent mode: can navigate the viewer, run terminal commands, and edit files (with approval). Slower."
+              className={`flex items-center gap-1 px-2 py-1 text-[10px] transition-colors ${engine === 'agent' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+            >
+              <Wrench size={10} /> Agent
+            </button>
+          </div>
           <div className="flex items-center gap-1 bg-gray-800 border border-gray-700 rounded px-2 py-1">
             <Globe size={10} className="text-gray-500" />
             <select
