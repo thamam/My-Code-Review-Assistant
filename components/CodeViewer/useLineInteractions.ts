@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { usePR } from '../../contexts/PRContext';
 import {
   annotationMatchesCoord,
+  coordAttr,
   parseCoordAttr,
   resolveInteractionKind,
   resolveSelectionRange,
@@ -104,7 +105,8 @@ export function useLineInteractions({ filePath }: { filePath: string }) {
     const resolved = resolveSelectionRange(lines, startCoord, endCoord);
     if (!resolved) return;
 
-    setSelectionState({ file: filePath, ...resolved });
+    const { coords, ...rest } = resolved;
+    setSelectionState({ file: filePath, ...rest, selectedCoords: new Set(coords.map(coordAttr)) });
   }, [filePath, setSelectionState]);
 
   return {

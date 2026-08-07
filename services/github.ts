@@ -205,24 +205,42 @@ export class GitHubService {
         if (!res.ok) throw new Error(`Failed to fetch content for ${path} (${res.status})`);
         return await res.text();
       } else {
-        const res = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${sha}/${path}`);
+        // Encode each path segment (not the whole path — that would turn '/'
+        // into '%2F' and break the raw CDN's directory routing).
+        const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+        const res = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${sha}/${encodedPath}`);
         if (!res.ok) throw new Error(`Failed to fetch content for ${path} (${res.status})`);
         return await res.text();
       }
     };
 
-    // Helper to process a single file
+    // Helper to process a single file. A per-file content-fetch failure must
+    // not fail the whole PR load — it's marked contentUnavailable and the
+    // batch continues, rather than rejecting the Promise.all.
     const processFile = async (file: GitHubFile): Promise<FileChange> => {
-      let oldContent = '';
+      let oldContent: string | undefined = undefined;
       let newContent = '';
+      let contentUnavailable = false;
 
       if (file.status !== 'added') {
         const originalPath = file.previous_filename || file.filename;
-        oldContent = await fetchContent(prData.base.sha, originalPath);
+        try {
+          oldContent = await fetchContent(prData.base.sha, originalPath);
+        } catch (e) {
+          console.warn(`[GitHubService] Failed to fetch old content for ${originalPath}:`, e);
+          oldContent = '';
+          contentUnavailable = true;
+        }
       }
 
       if (file.status !== 'removed') {
-        newContent = await fetchContent(prData.head.sha, file.filename);
+        try {
+          newContent = await fetchContent(prData.head.sha, file.filename);
+        } catch (e) {
+          console.warn(`[GitHubService] Failed to fetch new content for ${file.filename}:`, e);
+          newContent = '';
+          contentUnavailable = true;
+        }
       }
 
       return {
@@ -230,8 +248,9 @@ export class GitHubService {
         status: this.mapStatus(file.status),
         additions: file.additions,
         deletions: file.deletions,
-        oldContent: oldContent || undefined,
-        newContent: newContent || ''
+        oldContent,
+        newContent,
+        ...(contentUnavailable ? { contentUnavailable: true as const } : {})
       };
     };
 

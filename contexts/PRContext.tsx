@@ -11,7 +11,7 @@ import { resolveFilePath } from '../utils/fileUtils';
 import { useNavigationModule } from '../src/modules/navigation/hooks';
 import { canFetchRemote } from '../src/modules/ingestion/PRSourceService';
 import { RepoNode, LazyFile } from '../src/modules/navigation/types';
-import { waitForLine } from '../src/modules/navigation/lineRegistry';
+import { waitForLine, findNearestLine } from '../src/modules/navigation/lineRegistry';
 import type { VerificationState } from '../src/types/review';
 import { storageService } from '../src/modules/persistence';
 import { parseSessionText } from '../src/lib/session-parser/index.js';
@@ -29,6 +29,7 @@ interface FocusedLocation {
   file: string;
   line: number;
   timestamp: number;
+  side?: 'old' | 'new';
 }
 
 interface PRContextType {
@@ -49,7 +50,7 @@ interface PRContextType {
   toggleDiffMode: () => void;
   focusedLocation: FocusedLocation | null;
   isFlashActive: boolean;
-  scrollToLine: (file: string, line: number) => void;
+  scrollToLine: (file: string, line: number, side?: 'old' | 'new') => void;
   navigateToCode: (target: NavigationTarget) => Promise<boolean>;
   setLeftTab: (tab: 'files' | 'annotations' | 'issue' | 'diagrams' | 'terminal' | 'notes') => void;
   leftTab: 'files' | 'annotations' | 'issue' | 'diagrams' | 'terminal' | 'notes';
@@ -340,19 +341,34 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       // Wait for the view to register the target line (resolves immediately
       // if already mounted, or the moment DiffView/SourceView registers it —
       // no polling).
-      const el = await waitForLine(fileToSelect.path, target.line, 3000);
-      if (!el) {
-        console.warn(`[PRContext] Navigation timed out waiting for ${fileToSelect.path}:${target.line}`);
-        return false;
+      const side = target.side ?? 'new';
+      const el = await waitForLine(fileToSelect.path, target.line, 3000, side);
+
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setFocusedLocation({ file: fileToSelect.path, line: target.line, timestamp: Date.now(), side });
+        return true;
       }
 
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setFocusedLocation({
-        file: fileToSelect.path,
-        line: target.line,
-        timestamp: Date.now()
-      });
+      // Fail-open: waitForLine timed out — markdown-preview files (zero
+      // registered lines), past-EOF targets, and other unregistered cases
+      // must never leave navigation a silent no-op. Try the nearest
+      // registered line on the same file/side first; if nothing is
+      // registered at all, still land on the file and scroll to top.
+      console.warn(`[PRContext] Navigation timed out waiting for ${fileToSelect.path}:${target.line}, falling back`);
+      const nearestLine = findNearestLine(fileToSelect.path, side, target.line);
+      if (nearestLine !== null) {
+        const nearestEl = await waitForLine(fileToSelect.path, nearestLine, 100, side);
+        if (nearestEl) {
+          nearestEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          setFocusedLocation({ file: fileToSelect.path, line: nearestLine, timestamp: Date.now(), side });
+          return true;
+        }
+      }
 
+      const scrollContainer = document.querySelector('[data-testid="code-viewer-scroll-container"]');
+      if (scrollContainer) scrollContainer.scrollTop = 0;
+      setFocusedLocation({ file: fileToSelect.path, line: target.line, timestamp: Date.now(), side });
       return true;
     } catch (e) {
       console.error("Navigation error", e);
@@ -362,16 +378,19 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     }
   }, [prData, isNavigating, leftTab, selectedFile, navModule.lazyFiles, navModule.service, selectFile]);
 
-  const scrollToLine = useCallback((file: string, line: number) => {
-    navigateToCode({ filepath: file, line, source: 'annotation' });
+  const scrollToLine = useCallback((file: string, line: number, side?: 'old' | 'new') => {
+    navigateToCode({ filepath: file, line, source: 'annotation', side });
   }, [navigateToCode]);
 
-  const toggleDiffMode = () => setIsDiffMode(prev => !prev);
-  const addAnnotation = (file: string, line: number, type: 'marker' | 'label', text?: string, side?: 'old' | 'new') => {
+  const toggleDiffMode = useCallback(() => setIsDiffMode(prev => !prev), []);
+
+  const addAnnotation = useCallback((file: string, line: number, type: 'marker' | 'label', text?: string, side?: 'old' | 'new') => {
     const id = `${type}_${Date.now()}`;
-    const title = text || (type === 'marker' ? `marker_${annotations.length + 1}` : 'New Label');
-    setAnnotations(prev => [...prev, { id, file, line, side: side ?? 'new', type, title, timestamp: Date.now() }]);
-  };
+    setAnnotations(prev => {
+      const title = text || (type === 'marker' ? `marker_${prev.length + 1}` : 'New Label');
+      return [...prev, { id, file, line, side: side ?? 'new', type, title, timestamp: Date.now() }];
+    });
+  }, []);
 
   // --- DELEGATED METHODS ---
 

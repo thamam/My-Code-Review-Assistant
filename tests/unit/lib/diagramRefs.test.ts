@@ -103,11 +103,23 @@ describe('buildBindingPlan', () => {
     expect(bindings[1]).toMatchObject({ labelIndex: 1, ref: refs[1], matchedBy: 'ordinal' });
   });
 
-  it('leaves duplicate-description refs unmatched when counts mismatch (no ordinal fallback)', () => {
+  it('falls back to min-count ordinal binding when counts mismatch, leaving the excess ref unmatched', () => {
     const refs = [ref('Save', 0), ref('Save', 1), ref('Save', 2)];
     // Mermaid dropped one element: only 2 rendered labels for 3 refs.
+    // The overlapping indices (0, 1) still bind ordinally; refs[2] has no
+    // corresponding rendered label and is left unmatched rather than misrouted.
     const bindings = buildBindingPlan(['Save', 'Save'], refs);
-    expect(bindings).toHaveLength(0);
+    expect(bindings).toHaveLength(2);
+    expect(bindings[0]).toMatchObject({ labelIndex: 0, ref: refs[0], matchedBy: 'ordinal' });
+    expect(bindings[1]).toMatchObject({ labelIndex: 1, ref: refs[1], matchedBy: 'ordinal' });
+  });
+
+  it('binds only the overlapping indices when there are more labels than refs', () => {
+    // No label text matches 'Alpha', so text-matching finds nothing and the
+    // single ref only binds via ordinal fallback at the overlapping index 0.
+    const refs = [ref('Alpha', 0)];
+    const bindings = buildBindingPlan(['Beta', 'Beta', 'Beta'], refs);
+    expect(bindings).toEqual([{ ref: refs[0], labelIndex: 0, matchedBy: 'ordinal' }]);
   });
 
   it('does not let an already text-matched ref be re-claimed by ordinal fallback', () => {

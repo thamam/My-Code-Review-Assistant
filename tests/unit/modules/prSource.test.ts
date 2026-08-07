@@ -168,15 +168,41 @@ describe('PRSourceService', () => {
     });
 
     describe('loadSample', () => {
-        it('returns PRData with canFetchRemote=false and never touches cache/history', async () => {
+        it('returns PRData with canFetchRemote=true (mock-backed full-repo demo) and never touches cache/history', async () => {
             const { prSourceService } = await loadService();
 
             const data = prSourceService.loadSample();
 
-            expect(data.canFetchRemote).toBe(false);
+            expect(data.canFetchRemote).toBe(true);
             expect(data.title).toBeTruthy();
             expect(mockStorage.setItem).not.toHaveBeenCalled();
             expect(prSourceService.getHistory()).toHaveLength(0);
+        });
+    });
+
+    describe('load — tokenOverride', () => {
+        it('constructs GitHubService with the override token instead of getGitHubToken()', async () => {
+            const { GitHubService } = await import('../../../services/github');
+            const { prSourceService } = await loadService();
+            const url = 'https://github.com/o/r/pull/1';
+            mockGithubInstance.detectUrlType.mockReturnValue('pr');
+            mockGithubInstance.fetchPR.mockResolvedValue(makePRData());
+
+            await prSourceService.load(url, false, 'typed-token');
+
+            expect(GitHubService).toHaveBeenCalledWith('typed-token');
+        });
+
+        it('falls back to getGitHubToken() when no override is given', async () => {
+            const { GitHubService } = await import('../../../services/github');
+            const { prSourceService } = await loadService();
+            const url = 'https://github.com/o/r/pull/2';
+            mockGithubInstance.detectUrlType.mockReturnValue('pr');
+            mockGithubInstance.fetchPR.mockResolvedValue(makePRData());
+
+            await prSourceService.load(url, false);
+
+            expect(GitHubService).toHaveBeenCalledWith('test-token');
         });
     });
 

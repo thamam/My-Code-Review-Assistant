@@ -8,8 +8,8 @@ import { LineMarker } from './LineMarker';
 import { arePathsEquivalent } from '../../utils/fileUtils';
 import { getLanguage, HighlightedText } from './syntaxHelpers';
 import { useViewportTracker } from './useViewportTracker';
-import { registerLine, unregisterLine } from '../../src/modules/navigation/lineRegistry';
 import { useLineInteractions } from './useLineInteractions';
+import { useLineRefCallback } from './useLineRefCallback';
 import { coordAttr, coordsEqual, type LineCoord, type LineEntry } from './lineCoord';
 import { LineGutterIndicator } from './LineGutterIndicator';
 
@@ -22,13 +22,15 @@ interface SourceViewProps {
 export const SourceView: React.FC<SourceViewProps> = ({ content, filePath, onViewportChange }) => {
     const { selectionState, focusedLocation, isFlashActive } = usePR();
     const interactions = useLineInteractions({ filePath });
+    const getLineRef = useLineRefCallback(filePath);
 
     const { handleLineVisibility } = useViewportTracker(filePath, onViewportChange);
 
     const language = getLanguage(filePath);
 
     const isLineFlashing = (lineNum: number) =>
-        isFlashActive && !!focusedLocation && arePathsEquivalent(focusedLocation.file, filePath) && lineNum === focusedLocation.line;
+        isFlashActive && !!focusedLocation && arePathsEquivalent(focusedLocation.file, filePath) &&
+        lineNum === focusedLocation.line && (focusedLocation.side ?? 'new') === 'new';
 
     const linesList = useMemo(() => content.split('\n'), [content]);
 
@@ -53,8 +55,8 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath, onVie
                     const isFlashing = isLineFlashing(lineNum);
                     const isHovered = !!interactions.hoveredCoord && coordsEqual(interactions.hoveredCoord, coord);
 
-                    const isSelected = selectionState && selectionState.file === filePath &&
-                        lineNum >= selectionState.startLine && lineNum <= selectionState.endLine;
+                    const isSelected = !!selectionState && selectionState.file === filePath &&
+                        !!selectionState.selectedCoords?.has(coordAttr(coord));
 
                     return (
                         <div
@@ -86,24 +88,15 @@ export const SourceView: React.FC<SourceViewProps> = ({ content, filePath, onVie
                         const lineNum = i + 1;
                         const coord: LineCoord = { side: 'new', line: lineNum };
                         const lineAnnotations = interactions.annotationsAt(coord);
-                        const isSelected = selectionState && selectionState.file === filePath &&
-                            lineNum >= selectionState.startLine && lineNum <= selectionState.endLine;
+                        const isSelected = !!selectionState && selectionState.file === filePath &&
+                            !!selectionState.selectedCoords?.has(coordAttr(coord));
                         const isFlashing = isLineFlashing(lineNum);
                         const isCreatingLabel = !!interactions.creatingLabelCoord && coordsEqual(interactions.creatingLabelCoord, coord);
-                        let registeredEl: HTMLElement | null = null;
 
                         return (
                             <div
                                 key={i}
-                                ref={(el) => {
-                                    if (el) {
-                                        registerLine(filePath, lineNum, el);
-                                        registeredEl = el;
-                                    } else if (registeredEl) {
-                                        unregisterLine(filePath, lineNum, registeredEl);
-                                        registeredEl = null;
-                                    }
-                                }}
+                                ref={getLineRef(coord)}
                                 className={clsx(
                                     "relative h-6 leading-6 whitespace-pre px-4 transition-colors duration-200 flex items-center cursor-text",
                                     isSelected && "bg-blue-500/10",

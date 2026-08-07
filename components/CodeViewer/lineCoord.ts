@@ -52,7 +52,7 @@ export function resolveSelectionRange(
   lines: LineEntry[],
   startCoord: LineCoord,
   endCoord: LineCoord
-): { startLine: number; endLine: number; content: string } | null {
+): { startLine: number; endLine: number; content: string; startSide: LineSide; endSide: LineSide; coords: LineCoord[] } | null {
   const startIdx = lines.findIndex(l => coordsEqual(l.coord, startCoord));
   const endIdx = lines.findIndex(l => coordsEqual(l.coord, endCoord));
   if (startIdx === -1 || endIdx === -1) return null;
@@ -65,6 +65,9 @@ export function resolveSelectionRange(
     startLine: slice[0].coord.line,
     endLine: slice[slice.length - 1].coord.line,
     content: slice.map(l => l.content).join('\n'),
+    startSide: slice[0].coord.side,
+    endSide: slice[slice.length - 1].coord.side,
+    coords: slice.map(l => l.coord),
   };
 }
 

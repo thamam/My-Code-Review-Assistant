@@ -9,8 +9,8 @@ import { Tag } from 'lucide-react';
 import { AnnotationInput } from './AnnotationInput';
 import { getLanguage, HighlightedText } from './syntaxHelpers';
 import { useViewportTracker } from './useViewportTracker';
-import { registerLine, unregisterLine } from '../../src/modules/navigation/lineRegistry';
 import { useLineInteractions } from './useLineInteractions';
+import { useLineRefCallback } from './useLineRefCallback';
 import { coordAttr, coordsEqual, type LineCoord, type LineEntry } from './lineCoord';
 import { LineGutterIndicator } from './LineGutterIndicator';
 
@@ -32,6 +32,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
   const { handleLineVisibility } = useViewportTracker(filePath, onViewportChange);
   const { walkthrough, activeSectionId, selectionState, focusedLocation, isFlashActive } = usePR();
   const interactions = useLineInteractions({ filePath });
+  const getLineRef = useLineRefCallback(filePath);
 
   const language = getLanguage(filePath);
 
@@ -68,34 +69,26 @@ export const DiffView: React.FC<DiffViewProps> = ({ oldContent, newContent, file
         const isAdded = line.type === 'add';
         const isRemoved = line.type === 'remove';
         const isHighlighted = isLineHighlighted(line.newLineNumber);
-        const isFlashing = isFlashActive && !!focusedLocation && arePathsEquivalent(focusedLocation.file, filePath) && line.newLineNumber === focusedLocation.line;
+        const coord = coordForLine(line);
+        const focusedSide = focusedLocation?.side ?? 'new';
+        const isFlashing = isFlashActive && !!focusedLocation && !!coord && arePathsEquivalent(focusedLocation.file, filePath) &&
+                           coord.side === focusedSide && coord.line === focusedLocation.line;
         const note = getHighlightNote(line.newLineNumber);
         const showNote = note && line.newLineNumber && highlights.find(h => h.lines[0] === line.newLineNumber);
 
-        const coord = coordForLine(line);
         const lineAnnotations = coord ? interactions.annotationsAt(coord) : [];
         const hasMarker = lineAnnotations.some(a => a.type === 'marker');
         const hasLabel = lineAnnotations.some(a => a.type === 'label');
         const isHovered = !!coord && !!interactions.hoveredCoord && coordsEqual(interactions.hoveredCoord, coord);
         const isCreatingLabel = !!coord && !!interactions.creatingLabelCoord && coordsEqual(interactions.creatingLabelCoord, coord);
 
-        const isSelected = line.newLineNumber && selectionState && selectionState.file === filePath &&
-                           line.newLineNumber >= selectionState.startLine && line.newLineNumber <= selectionState.endLine;
+        const isSelected = !!coord && !!selectionState && selectionState.file === filePath &&
+                           !!selectionState.selectedCoords?.has(coordAttr(coord));
 
-        let registeredEl: HTMLElement | null = null;
         return (
           <div
             key={`${filePath}-${idx}`}
-            ref={(el) => {
-              if (!line.newLineNumber) return;
-              if (el) {
-                registerLine(filePath, line.newLineNumber, el);
-                registeredEl = el;
-              } else if (registeredEl) {
-                unregisterLine(filePath, line.newLineNumber, registeredEl);
-                registeredEl = null;
-              }
-            }}
+            ref={coord ? getLineRef(coord) : undefined}
             className={clsx(
               "flex relative group hover:bg-white/5 transition-colors duration-200",
               isAdded && "bg-green-900/20",

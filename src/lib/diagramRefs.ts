@@ -65,10 +65,11 @@ export function extractRefs(mermaidCode: string): { cleanedCode: string; refs: D
 /**
  * Binds rendered SVG label text back to refs. Text match wins whenever a
  * label's trimmed text uniquely identifies one ref (robust to Mermaid
- * reordering elements). Ordinal (positional) fallback only applies when
- * svgLabels and refs are the same length — a count mismatch means Mermaid
- * dropped/added elements, so position can no longer be trusted, and those
- * refs are left unmatched rather than misrouted.
+ * reordering elements). Ordinal (positional) fallback then binds index-by-
+ * index over the overlapping min(labels, refs) range — a count mismatch
+ * means Mermaid dropped/added elements, so anything past the shorter list
+ * can no longer be trusted and is left unmatched rather than misrouted, but
+ * the overlapping indices still resolve instead of losing all binding.
  */
 export function buildBindingPlan(svgLabels: string[], refs: DiagramRef[]): Binding[] {
   const descriptionCounts = new Map<string, number>();
@@ -93,15 +94,14 @@ export function buildBindingPlan(svgLabels: string[], refs: DiagramRef[]): Bindi
     bindings.push({ ref, labelIndex, matchedBy: 'text' });
   });
 
-  if (svgLabels.length === refs.length) {
-    svgLabels.forEach((_label, labelIndex) => {
-      if (matchedLabelIndices.has(labelIndex)) return;
-      const ref = refs[labelIndex];
-      if (!ref || usedRefIds.has(ref.id)) return;
+  const overlap = Math.min(svgLabels.length, refs.length);
+  for (let labelIndex = 0; labelIndex < overlap; labelIndex++) {
+    if (matchedLabelIndices.has(labelIndex)) continue;
+    const ref = refs[labelIndex];
+    if (!ref || usedRefIds.has(ref.id)) continue;
 
-      usedRefIds.add(ref.id);
-      bindings.push({ ref, labelIndex, matchedBy: 'ordinal' });
-    });
+    usedRefIds.add(ref.id);
+    bindings.push({ ref, labelIndex, matchedBy: 'ordinal' });
   }
 
   return bindings.sort((a, b) => a.labelIndex - b.labelIndex);

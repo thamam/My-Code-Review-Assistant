@@ -12,25 +12,39 @@
 const GITHUB_TOKEN_KEY = 'vcr_gh_token';
 const LINEAR_KEY_KEY = 'vcr_linear_key';
 
-function safeGet(storage: Storage | null, key: string): string | null {
+type StorageKind = 'local' | 'session';
+
+// Resolves the storage object via globalThis *inside* the try — merely
+// referencing `localStorage`/`sessionStorage` can throw in some sandboxed
+// or privacy-locked-down contexts, so evaluating it outside a try (as a
+// bare argument) would escape the catch entirely.
+function getStorage(kind: StorageKind): Storage | null {
   try {
-    return storage?.getItem(key) ?? null;
+    return kind === 'local' ? globalThis.localStorage : globalThis.sessionStorage;
   } catch {
     return null;
   }
 }
 
-function safeSet(storage: Storage | null, key: string, value: string): void {
+function safeGet(kind: StorageKind, key: string): string | null {
   try {
-    storage?.setItem(key, value);
+    return getStorage(kind)?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function safeSet(kind: StorageKind, key: string, value: string): void {
+  try {
+    getStorage(kind)?.setItem(key, value);
   } catch {
     /* storage may be unavailable (private mode, quota) */
   }
 }
 
-function safeRemove(storage: Storage | null, key: string): void {
+function safeRemove(kind: StorageKind, key: string): void {
   try {
-    storage?.removeItem(key);
+    getStorage(kind)?.removeItem(key);
   } catch {
     /* noop */
   }
@@ -39,8 +53,8 @@ function safeRemove(storage: Storage | null, key: string): void {
 export function getGitHubToken(): string | undefined {
   return (
     import.meta.env.VITE_GITHUB_TOKEN ||
-    safeGet(localStorage, GITHUB_TOKEN_KEY) ||
-    safeGet(sessionStorage, GITHUB_TOKEN_KEY) ||
+    safeGet('local', GITHUB_TOKEN_KEY) ||
+    safeGet('session', GITHUB_TOKEN_KEY) ||
     undefined
   );
 }
@@ -48,7 +62,7 @@ export function getGitHubToken(): string | undefined {
 export function getLinearKey(): string | undefined {
   return (
     import.meta.env.VITE_LINEAR_API_KEY ||
-    safeGet(localStorage, LINEAR_KEY_KEY) ||
+    safeGet('local', LINEAR_KEY_KEY) ||
     undefined
   );
 }
@@ -59,12 +73,13 @@ export function getLinearKey(): string | undefined {
  * The opposite storage is always cleared so the two never diverge.
  */
 export function saveGitHubToken(token: string, remember: boolean): void {
+  const trimmed = token.trim();
   if (remember) {
-    safeSet(localStorage, GITHUB_TOKEN_KEY, token);
-    safeRemove(sessionStorage, GITHUB_TOKEN_KEY);
+    safeSet('local', GITHUB_TOKEN_KEY, trimmed);
+    safeRemove('session', GITHUB_TOKEN_KEY);
   } else {
-    safeSet(sessionStorage, GITHUB_TOKEN_KEY, token);
-    safeRemove(localStorage, GITHUB_TOKEN_KEY);
+    safeSet('session', GITHUB_TOKEN_KEY, trimmed);
+    safeRemove('local', GITHUB_TOKEN_KEY);
   }
 }
 
@@ -74,11 +89,11 @@ export function saveGitHubToken(token: string, remember: boolean): void {
  * (Linear does not have a session-vs-persistent toggle in the UI).
  */
 export function saveLinearKey(key: string): void {
-  safeSet(localStorage, LINEAR_KEY_KEY, key);
+  safeSet('local', LINEAR_KEY_KEY, key);
 }
 
 /** Remove a stored GitHub token from both storages. */
 export function clearGitHubToken(): void {
-  safeRemove(localStorage, GITHUB_TOKEN_KEY);
-  safeRemove(sessionStorage, GITHUB_TOKEN_KEY);
+  safeRemove('local', GITHUB_TOKEN_KEY);
+  safeRemove('session', GITHUB_TOKEN_KEY);
 }

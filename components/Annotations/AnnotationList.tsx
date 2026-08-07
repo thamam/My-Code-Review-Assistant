@@ -31,8 +31,8 @@ export const AnnotationList: React.FC = () => {
       setEditingId(null);
   };
 
-  const jumpTo = (file: string, line: number) => {
-      scrollToLine(file, line);
+  const jumpTo = (file: string, line: number, side?: 'old' | 'new') => {
+      scrollToLine(file, line, side);
   };
 
   return (
@@ -85,7 +85,7 @@ export const AnnotationList: React.FC = () => {
                    </div>
                    <div 
                         className="text-xs text-gray-500 cursor-pointer hover:text-blue-400 truncate flex items-center gap-1"
-                        onClick={() => jumpTo(a.file, a.line)}
+                        onClick={() => jumpTo(a.file, a.line, a.side)}
                    >
                        <span className="font-mono bg-gray-900 px-1 rounded">{a.line}</span>
                        <span className="truncate">{a.file}</span>

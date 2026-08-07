@@ -75,8 +75,10 @@ class PRSourceService {
   /**
    * Loads a PR or repo URL. Cache-hit short-circuits the network fetch unless
    * forceRefresh is set. A failed fetch rejects and is never written to cache.
+   * `tokenOverride`, when provided (e.g. a token just typed into the form),
+   * wins over the stored/env credential for this operation only.
    */
-  async load(url: string, forceRefresh: boolean = false): Promise<{ data: PRData; history: PRHistoryItem[] }> {
+  async load(url: string, forceRefresh: boolean = false, tokenOverride?: string): Promise<{ data: PRData; history: PRHistoryItem[] }> {
     if (!forceRefresh) {
       const cached = this.checkCache(url);
       if (cached) {
@@ -84,7 +86,7 @@ class PRSourceService {
       }
     }
 
-    const service = new GitHubService(getGitHubToken());
+    const service = new GitHubService(tokenOverride ?? getGitHubToken());
     const urlType = service.detectUrlType(url);
 
     let data: PRData;
@@ -102,11 +104,14 @@ class PRSourceService {
 
   /**
    * The sample PR as a true second source: it routes through the same
-   * PRData shape as a remote load, but is explicitly flagged as
-   * non-remote-fetchable and is exempt from cache/history.
+   * PRData shape as a remote load, and is exempt from cache/history. Its
+   * owner ('bmad-method') is mock-backed in GitHubService.fetchRepoTree/
+   * fetchFileContent, so canFetchRemote is true — Full Repo Mode and ghost
+   * file loads work against those mocks, demonstrating the feature without
+   * any real network calls.
    */
   loadSample(): PRData {
-    return { ...SAMPLE_PR, canFetchRemote: false };
+    return { ...SAMPLE_PR, canFetchRemote: true };
   }
 }
 

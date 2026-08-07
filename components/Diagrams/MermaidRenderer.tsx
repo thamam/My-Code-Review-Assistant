@@ -54,6 +54,11 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id 
 
   // 3. Enhance SVG with Hit Areas (Spec §3.6)
   const enhanceClickableAreas = useCallback((svgEl: SVGElement) => {
+    // Idempotence guard: the effect below re-runs whenever this callback's
+    // identity changes (references/id/navigateToCode/prData), which can
+    // happen while the same rendered SVG is still mounted — without this,
+    // every re-run would clone another layer of hit-areas on top.
+    if (svgEl.hasAttribute('data-theia-enhanced')) return;
     if (!references || references.length === 0) return;
 
     // Mermaid renders sequence messages as .messageLine0, .messageLine1, etc.
@@ -62,10 +67,16 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id 
 
     // Bind by the rendered label text (falling back to position only when
     // counts line up) instead of trusting DOM order, which Mermaid can
-    // reorder or drop elements from.
+    // reorder or drop elements from. Only trust a group's <text> as *this*
+    // path's label when the group has exactly one — a group with zero or
+    // several (shared/degenerate, e.g. identical text repeated) can't be
+    // attributed to one specific path, so it's left blank for the ordinal
+    // fallback to handle instead of risking a misbind.
     const svgLabels = messagePaths.map(path => {
       const group = path.closest('g') ?? path.parentElement;
-      return group?.querySelector('text')?.textContent ?? '';
+      if (!group) return '';
+      const texts = group.querySelectorAll('text');
+      return texts.length === 1 ? (texts[0].textContent ?? '') : '';
     });
 
     const diagramRefs: DiagramRef[] = references.map((ref, index) => ({
@@ -84,7 +95,8 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id 
     }
 
     bindings.forEach(({ ref, labelIndex }) => {
-      if (!ref.resolvedPath) return; // File no longer resolvable — skip rather than misroute.
+      const resolvedPath = ref.resolvedPath;
+      if (!resolvedPath) return; // File no longer resolvable — skip rather than misroute.
 
       const path = messagePaths[labelIndex];
 
@@ -104,7 +116,7 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id 
       hitArea.onclick = (e) => {
         e.stopPropagation();
         navigateToCode({
-          filepath: ref.filePath,
+          filepath: resolvedPath,
           line: ref.line,
           source: 'diagram',
           diagramId: id,
@@ -123,6 +135,7 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id 
       };
     });
 
+    svgEl.setAttribute('data-theia-enhanced', 'true');
   }, [references, id, navigateToCode, prData]);
 
   // 4. Apply Enhancement after Render

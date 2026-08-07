@@ -56,6 +56,8 @@ export interface FileChange {
   deletions: number;
   oldContent?: string;
   newContent: string;
+  /** Set when a per-file content fetch failed — newContent/oldContent are '' as a placeholder, not genuine empty files. */
+  contentUnavailable?: boolean;
 }
 
 export interface Walkthrough {
@@ -89,6 +91,11 @@ export interface SelectionState {
   startLine: number;
   endLine: number;
   content: string;
+  /** Which diff side each end of the selection anchored to — absent means 'new' (pre-existing single-side selections). */
+  startSide?: 'old' | 'new';
+  endSide?: 'old' | 'new';
+  /** 'side:line' keys of every rendered row the selection spans, for exact membership checks across mixed old/new selections. */
+  selectedCoords?: Set<string>;
 }
 
 export interface GroundingChunk {
@@ -163,6 +170,8 @@ export interface NavigationTarget {
   source: 'diagram' | 'walkthrough' | 'annotation' | 'search' | 'tree';
   diagramId?: string;
   referenceId?: string;
+  /** Which diff side to address `line` on. Defaults to 'new' when absent. */
+  side?: 'old' | 'new';
 }
 
 export type DiagramCategory = 'interaction' | 'structure';

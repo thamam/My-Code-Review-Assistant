@@ -7,13 +7,17 @@ import { PRData, Walkthrough, PRHistoryItem, AppMode } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 import { parseWalkthroughFile, parseWalkthroughFromText } from '../services/walkthroughParser';
 import { eventBus } from '../src/modules/core/EventBus';
-import { getGitHubToken, saveGitHubToken } from '../src/lib/credentials';
+import { getGitHubToken, saveGitHubToken, clearGitHubToken } from '../src/lib/credentials';
 import { prSourceService } from '../src/modules/ingestion/PRSourceService';
 
 const USER_CONFIG = {
   DEFAULT_PR_URL: import.meta.env.VITE_DEFAULT_PR_URL || '',
   DEFAULT_WALKTHROUGH_PATH: import.meta.env.VITE_DEFAULT_WALKTHROUGH_PATH || ''
 };
+
+// Marker written to the `?pr=` query param when the sample PR is loaded, so a
+// reload can restore it the same way a real PR URL restores on reload.
+const SAMPLE_URL_MARKER = 'sample';
 
 export const WelcomeScreen: React.FC = () => {
   const { setPRData, loadWalkthrough, setAppMode, setCustomReviewGoal } = usePR();
@@ -25,7 +29,9 @@ export const WelcomeScreen: React.FC = () => {
   const [url, setUrl] = useState(() => {
     try {
       const params = new URLSearchParams(window.location.search);
-      if (params.get('pr')) return params.get('pr') || '';
+      const prParam = params.get('pr');
+      if (prParam && prParam !== SAMPLE_URL_MARKER) return prParam;
+      if (prParam === SAMPLE_URL_MARKER) return '';
       const local = localStorage.getItem('vcr_last_url');
       if (local) return local;
       return USER_CONFIG.DEFAULT_PR_URL || '';
@@ -88,7 +94,11 @@ export const WelcomeScreen: React.FC = () => {
     const newValue = e.target.value;
     setToken(newValue);
     setError(null);
-    saveGitHubToken(newValue, rememberToken);
+    if (newValue.trim()) {
+      saveGitHubToken(newValue, rememberToken);
+    } else {
+      clearGitHubToken();
+    }
   };
 
   const toggleRemember = () => {
@@ -157,7 +167,7 @@ export const WelcomeScreen: React.FC = () => {
     setIsLoading(true);
     setError(null);
     try {
-      const { data, history: newHistory } = await prSourceService.load(url, forceRefresh);
+      const { data, history: newHistory } = await prSourceService.load(url, forceRefresh, token.trim() || undefined);
       setHistory(newHistory);
       processDataLoad(data);
     } catch (err: any) {
@@ -167,15 +177,36 @@ export const WelcomeScreen: React.FC = () => {
     }
   };
 
-  const loadSample = () => {
+  const loadSample = useCallback(() => {
     const data = prSourceService.loadSample();
     // Clear previous session's chat history before loading new data (mirrors processDataLoad above).
     eventBus.emit({ type: 'SESSION_RESET', payload: { reason: 'new_session', repoName: data.title } });
 
-    setAppMode('pr');
+    // Mode-card + custom goal parity with processDataLoad — the sample has PR files, so it's never repo-mode.
+    setAppMode(selectedMode);
+    setCustomReviewGoal(selectedMode === 'custom' ? customGoalInput : '');
+
     setPRData(data);
     loadWalkthrough(SAMPLE_WALKTHROUGH);
-  };
+
+    try {
+      const newUrl = new URL(window.location.href);
+      newUrl.searchParams.set('pr', SAMPLE_URL_MARKER);
+      window.history.replaceState({}, '', newUrl.toString());
+    } catch (e) { console.warn("Could not update URL history", e); }
+  }, [selectedMode, customGoalInput, setAppMode, setCustomReviewGoal, setPRData, loadWalkthrough]);
+
+  // Restore the sample on reload, mirroring the pre-fill-from-`?pr=` restore
+  // regular PR loads get for free from the `url` initializer above.
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('pr') === SAMPLE_URL_MARKER) {
+        loadSample();
+      }
+    } catch { }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const ModeCard = ({ mode, icon: Icon, title, desc }: { mode: AppMode, icon: any, title: string, desc: string }) => (
     <button

@@ -42,7 +42,7 @@ export const CodeViewer: React.FC = () => {
           )}
         </div>
       </div>
-      <div ref={containerRef} className="flex-1 overflow-auto custom-scrollbar relative">
+      <div ref={containerRef} data-testid="code-viewer-scroll-container" className="flex-1 overflow-auto custom-scrollbar relative">
         {isPreviewMode && selectedFile.path.endsWith('.md') ? (
           <div className="p-8"><MarkdownRenderer content={(selectedFile as any).newContent || (selectedFile as any).content || ''} /></div>
         ) : isSource ? (

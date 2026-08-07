@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Minimal storage mocks — vitest environment is 'node' so there are no globals.
 function createStorageMock() {
@@ -113,6 +113,63 @@ describe('credentials module', () => {
       const { saveLinearKey } = await loadModule();
       saveLinearKey('lin-key');
       expect(mockLocal.setItem).toHaveBeenCalledWith('vcr_linear_key', 'lin-key');
+    });
+  });
+
+  describe('saveGitHubToken trims the value', () => {
+    it('strips surrounding whitespace before persisting', async () => {
+      const { saveGitHubToken } = await loadModule();
+      saveGitHubToken('  spaced-token  ', true);
+      expect(mockLocal.setItem).toHaveBeenCalledWith('vcr_gh_token', 'spaced-token');
+    });
+  });
+
+  describe('clearGitHubToken', () => {
+    it('removes the token from both localStorage and sessionStorage', async () => {
+      const { clearGitHubToken } = await loadModule();
+      mockLocal.store['vcr_gh_token'] = 'a';
+      mockSession.store['vcr_gh_token'] = 'b';
+
+      clearGitHubToken();
+
+      expect(mockLocal.removeItem).toHaveBeenCalledWith('vcr_gh_token');
+      expect(mockSession.removeItem).toHaveBeenCalledWith('vcr_gh_token');
+      expect(mockLocal.store['vcr_gh_token']).toBeUndefined();
+      expect(mockSession.store['vcr_gh_token']).toBeUndefined();
+    });
+  });
+
+  describe('storage access resilience (LOW fix)', () => {
+    function makeStorageThrow() {
+      Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        get() { throw new Error('SecurityError: blocked'); },
+      });
+      Object.defineProperty(globalThis, 'sessionStorage', {
+        configurable: true,
+        get() { throw new Error('SecurityError: blocked'); },
+      });
+    }
+
+    // Restore plain, writable properties so the outer beforeEach's direct
+    // assignment (`globalThis.localStorage = mockLocal`) keeps working for
+    // every test that runs after these two.
+    afterEach(() => {
+      Object.defineProperty(globalThis, 'localStorage', { configurable: true, writable: true, value: mockLocal });
+      Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, writable: true, value: mockSession });
+    });
+
+    it('getGitHubToken returns undefined instead of throwing when merely referencing localStorage throws', async () => {
+      makeStorageThrow();
+      const { getGitHubToken } = await loadModule();
+      expect(() => getGitHubToken()).not.toThrow();
+      expect(getGitHubToken()).toBeUndefined();
+    });
+
+    it('saveGitHubToken does not throw when storage access itself throws', async () => {
+      makeStorageThrow();
+      const { saveGitHubToken } = await loadModule();
+      expect(() => saveGitHubToken('tok', true)).not.toThrow();
     });
   });
 });
