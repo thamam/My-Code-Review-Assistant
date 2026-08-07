@@ -39,6 +39,7 @@ export interface UserMessageEvent {
         mode?: 'voice' | 'text'; // Alias for source
         context?: ContextSnapshot | null;
         prData?: any; // PR Data snapshot
+        model?: string; // Selected model for this turn
         timestamp?: number;
     };
 }

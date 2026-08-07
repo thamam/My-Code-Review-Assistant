@@ -57,8 +57,9 @@ export const ChatPanel: React.FC = () => {
             onChange={(e) => setModel(e.target.value)}
             className="bg-gray-800 text-[10px] text-gray-300 border border-gray-700 rounded px-2 py-1 outline-none focus:border-blue-500 cursor-pointer hover:bg-gray-750"
           >
-            <option value="gemini-3-pro-preview">Pro 3 (Expert Reasoning)</option>
+            <option value="gemini-3.1-pro-preview">Pro 3.1 (Expert Reasoning)</option>
             <option value="gemini-3-flash-preview">Flash 3 (Fast Response)</option>
+            <option value="gemini-2.5-flash-lite-preview-02-05">Flash Lite 2.5 (Fastest)</option>
           </select>
           <button
             onClick={exportSessionLogs}

@@ -190,7 +190,7 @@ const SENSITIVE_TOOLS = ['run_terminal_command', 'write_file'];
 
 export class TheiaAgent {
   private ai: GoogleGenAI;
-  private model: string = 'gemini-3-pro-preview';
+  private model: string = 'gemini-3.1-pro-preview';
   private chatSession: any = null;
   private workflow: any;
   private unsubscribeTemp: (() => void) | null = null;
@@ -248,8 +248,10 @@ export class TheiaAgent {
     eventBus.subscribe('USER_MESSAGE', async (envelope) => {
       const event = envelope.event;
       if (event.type === 'USER_MESSAGE') {
-        const { content, text, context, prData } = event.payload;
+        const { content, text, context, prData, model } = event.payload;
         console.log('[AGENT_PROBE] Raw Payload:', event.payload);
+
+        this.model = model || 'gemini-3.1-pro-preview';
 
         // FR-039: Context Middleware - Inject "Ground Truth"
         const rawMessage = content || text || '';
@@ -285,6 +287,16 @@ export class TheiaAgent {
     });
 
     console.log('[TheiaAgent] Initialized with Planner + Executor Loop. Phase 17 (Shadow Partner) Active.');
+  }
+
+  /**
+   * Per-model generation config (e.g. extended thinking budget for Pro).
+   */
+  private getModelConfig(): Record<string, unknown> {
+    if (this.model === 'gemini-3.1-pro-preview') {
+      return { thinkingConfig: { thinkingBudget: 32768 } };
+    }
+    return {};
   }
 
   /**
@@ -653,7 +665,8 @@ Create a RECOVERY PLAN that:
       model: this.model,
       config: {
         systemInstruction,
-        tools: [{ functionDeclarations: plannerTools }]
+        tools: [{ functionDeclarations: plannerTools }],
+        ...this.getModelConfig()
       },
       contents: [{ role: 'user', parts: [{ text: prompt }] }]
     });
@@ -826,7 +839,8 @@ Context: ${context?.activeFile}
 
 FORCE: You MUST call a tool. DO NOT reply with text.
 PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_code) over run_terminal_command when possible.`,
-            tools: [{ functionDeclarations: executorTools }]
+            tools: [{ functionDeclarations: executorTools }],
+            ...this.getModelConfig()
           },
           contents: [{ role: 'user', parts: [{ text: "EXECUTE_NOW" }] }]
         }),

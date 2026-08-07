@@ -65,7 +65,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
-  const [currentModel, setModel] = useState('gemini-2.0-flash-exp');
+  const [currentModel, setModel] = useState('gemini-3.1-pro-preview');
   const [language, setLanguage] = useState<LanguagePreference>('Auto');
 
   // Phase 17: Focus Lock Tracker (FR-042)
@@ -234,6 +234,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const prDataRef = useRef(prData);
   const walkthroughRef = useRef(walkthrough);
   const activeSectionIdRef = useRef(activeSectionId);
+  const currentModelRef = useRef(currentModel);
 
   useEffect(() => {
     selectedFileRef.current = selectedFile;
@@ -244,7 +245,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     prDataRef.current = prData;
     walkthroughRef.current = walkthrough;
     activeSectionIdRef.current = activeSectionId;
-  }, [selectedFile, focusedLocation, viewportState, selectionState, isDiffMode, prData, walkthrough, activeSectionId]);
+    currentModelRef.current = currentModel;
+  }, [selectedFile, focusedLocation, viewportState, selectionState, isDiffMode, prData, walkthrough, activeSectionId, currentModel]);
 
   // --- ACTIONS ---
 
@@ -309,6 +311,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         mode: 'text',
         context: contextSnapshot,
         prData: prDataRef.current,
+        model: currentModelRef.current,
       },
     });
   }, []); // Stable reference - never changes
