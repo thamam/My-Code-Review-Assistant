@@ -3,6 +3,7 @@ import mermaid from 'mermaid';
 import { ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 import { usePR } from '../../contexts/PRContext';
 import { CodeReference } from '../../types';
+import { buildBindingPlan, resolveRefPaths, DiagramRef } from '../../src/lib/diagramRefs';
 
 interface MermaidRendererProps {
   code: string;
@@ -12,7 +13,7 @@ interface MermaidRendererProps {
 
 export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id = "", references = [] }) => {
   const contentRef = useRef<HTMLDivElement>(null);
-  const { navigateToCode } = usePR();
+  const { navigateToCode, prData } = usePR();
   const [svgContent, setSvgContent] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
@@ -55,16 +56,37 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id 
   const enhanceClickableAreas = useCallback((svgEl: SVGElement) => {
     if (!references || references.length === 0) return;
 
-    // A. Message Lines (Arrows)
     // Mermaid renders sequence messages as .messageLine0, .messageLine1, etc.
     // Flowcharts use .edgePath .path
-    // We map them by INDEX to the references array.
-    const messagePaths = svgEl.querySelectorAll('[class^="messageLine"], .edgePath .path');
+    const messagePaths = Array.from(svgEl.querySelectorAll('[class^="messageLine"], .edgePath .path'));
 
-    messagePaths.forEach((path, index) => {
-      // Safety check: ensure we have a reference for this arrow
-      const ref = references[index];
-      if (!ref || ref.status !== 'valid') return;
+    // Bind by the rendered label text (falling back to position only when
+    // counts line up) instead of trusting DOM order, which Mermaid can
+    // reorder or drop elements from.
+    const svgLabels = messagePaths.map(path => {
+      const group = path.closest('g') ?? path.parentElement;
+      return group?.querySelector('text')?.textContent ?? '';
+    });
+
+    const diagramRefs: DiagramRef[] = references.map((ref, index) => ({
+      id: ref.id,
+      description: ref.description,
+      filePath: ref.filepath,
+      line: ref.line,
+      ordinal: index
+    }));
+    const currentPaths = prData?.files.map(f => f.path) ?? [];
+    const resolvedRefs = resolveRefPaths(diagramRefs, currentPaths);
+    const bindings = buildBindingPlan(svgLabels, resolvedRefs);
+
+    if (bindings.length < resolvedRefs.length) {
+      console.warn(`[MermaidRenderer] ${resolvedRefs.length - bindings.length} reference(s) for diagram ${id} could not be matched to a rendered element and were skipped`);
+    }
+
+    bindings.forEach(({ ref, labelIndex }) => {
+      if (!ref.resolvedPath) return; // File no longer resolvable — skip rather than misroute.
+
+      const path = messagePaths[labelIndex];
 
       // Clone the path to create a wide, invisible hit area
       const hitArea = path.cloneNode(true) as SVGElement;
@@ -78,11 +100,11 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id 
       // Insert after the visible path so it is on top and captures clicks reliably
       path.parentNode?.insertBefore(hitArea, path.nextSibling);
 
-      // B. Attach React Handler (No window globals!)
+      // Attach React Handler (No window globals!)
       hitArea.onclick = (e) => {
         e.stopPropagation();
         navigateToCode({
-          filepath: ref.filepath,
+          filepath: ref.filePath,
           line: ref.line,
           source: 'diagram',
           diagramId: id,
@@ -90,7 +112,7 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id 
         });
       };
 
-      // C. Visual Feedback on Hover (Optional: manipulate the visible path)
+      // Visual Feedback on Hover (Optional: manipulate the visible path)
       hitArea.onmouseenter = () => {
         (path as SVGElement).style.stroke = '#60a5fa'; // Blue highlight
         (path as SVGElement).style.strokeWidth = '3px';
@@ -101,7 +123,7 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id 
       };
     });
 
-  }, [references, id, navigateToCode]);
+  }, [references, id, navigateToCode, prData]);
 
   // 4. Apply Enhancement after Render
   useEffect(() => {
