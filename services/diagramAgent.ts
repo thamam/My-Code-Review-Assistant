@@ -1,37 +1,17 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { PRData, Diagram, CodeReference, DiagramType } from '../types';
-import { resolveFilePath } from '../utils/fileUtils';
+import { extractRefs, resolveRefPaths, DiagramRef } from '../src/lib/diagramRefs';
 
-// Pattern: {description}§{filepath}:{line}
-// Matches in Sequence: User->>System: Label§file:10
-// Matches in Flowchart: A[Label§file:10]
-// Matches in Class: class MyClass["MyClass§file:10"]
-// Matches in State: state "Label§file:10" as s1
-export const REF_PATTERN = /([^:\n>\["]+)§([^:\n"\]]+):(\d+)/g;
-
-export function extractDiagramReferences(rawCode: string = "", prFiles: string[]): { cleanedCode: string, references: CodeReference[] } {
-  const references: CodeReference[] = [];
-  if (!rawCode) return { cleanedCode: "", references: [] };
-
-  const cleanedCode = rawCode.replace(REF_PATTERN, (match, description, filepath, lineStr) => {
-    const line = parseInt(lineStr, 10);
-    const refId = `ref-${Math.random().toString(36).substr(2, 9)}`;
-    const resolution = resolveFilePath(filepath.trim(), prFiles);
-
-    references.push({
-      id: refId,
-      description: description.trim(),
-      filepath: filepath.trim(),
-      line: isNaN(line) ? 1 : line,
-      resolvedPath: resolution.resolved,
-      status: resolution.resolved ? 'valid' : 'unresolved'
-    });
-
-    return description.trim();
-  });
-
-  return { cleanedCode, references };
+function toCodeReferences(refs: DiagramRef[], prFiles: string[]): CodeReference[] {
+  return resolveRefPaths(refs, prFiles).map(ref => ({
+    id: ref.id,
+    description: ref.description,
+    filepath: ref.filePath,
+    line: ref.line,
+    resolvedPath: ref.resolvedPath ?? null,
+    status: ref.resolvedPath ? 'valid' : 'unresolved'
+  }));
 }
 
 const DIAGRAM_TYPE_INSTRUCTIONS: Record<DiagramType, string> = {
@@ -124,7 +104,8 @@ export class DiagramAgent {
       if (!Array.isArray(rawDiagrams)) throw new Error("AI returned malformed diagram list");
 
       return rawDiagrams.map((d: any, idx: number) => {
-        const { cleanedCode, references } = extractDiagramReferences(d.mermaidCode || "", prFilePaths);
+        const { cleanedCode, refs } = extractRefs(d.mermaidCode || "");
+        const references = toCodeReferences(refs, prFilePaths);
         return {
           id: `auto-diagram-${Date.now()}-${idx}`,
           title: d.title || `Flow Analysis ${idx + 1}`,
@@ -187,7 +168,8 @@ export class DiagramAgent {
       if (!text) throw new Error("No response");
 
       const data = JSON.parse(text);
-      const { cleanedCode, references } = extractDiagramReferences(data.mermaidCode || "", prFilePaths);
+      const { cleanedCode, refs } = extractRefs(data.mermaidCode || "");
+      const references = toCodeReferences(refs, prFilePaths);
 
       return {
         id: `structure-diagram-${Date.now()}`,
