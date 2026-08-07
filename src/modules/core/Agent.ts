@@ -14,6 +14,7 @@ import { sanitizeForVoice } from "../../utils/VoiceUtils";
 import { formatSearchCommand, formatWriteFileCommand } from "../runtime/ToolUtils";
 import { DiagramAgent } from "../../../services/diagramAgent";
 import { ContextSnapshot, ACTIVE_FILE_CONTENT_LIMIT } from "../../types/context";
+import type { GroundingChunk } from "../../../types";
 
 // --- Types ---
 
@@ -290,13 +291,27 @@ export class TheiaAgent {
   }
 
   /**
-   * Per-model generation config (e.g. extended thinking budget for Pro).
+   * Per-model generation config (e.g. extended thinking budget for Pro,
+   * Google Search grounding for Flash). `allowSearch` is opt-in per call site
+   * so grounding only ever applies to the executor's final-response path,
+   * never the planner.
    */
-  private getModelConfig(): Record<string, unknown> {
+  private getModelConfig(functionTools?: FunctionDeclaration[], allowSearch = false): Record<string, unknown> {
+    const config: Record<string, unknown> = {};
+
     if (this.model === 'gemini-3.1-pro-preview') {
-      return { thinkingConfig: { thinkingBudget: 32768 } };
+      config.thinkingConfig = { thinkingBudget: 32768 };
     }
-    return {};
+
+    if (functionTools) {
+      const tools: Array<Record<string, unknown>> = [{ functionDeclarations: functionTools }];
+      if (allowSearch && this.model === 'gemini-3-flash-preview') {
+        tools.push({ googleSearch: {} });
+      }
+      config.tools = tools;
+    }
+
+    return config;
   }
 
   /**
@@ -666,8 +681,7 @@ Create a RECOVERY PLAN that:
       model: this.model,
       config: {
         systemInstruction,
-        tools: [{ functionDeclarations: plannerTools }],
-        ...this.getModelConfig()
+        ...this.getModelConfig(plannerTools)
       },
       contents: [{ role: 'user', parts: [{ text: prompt }] }]
     });
@@ -840,8 +854,7 @@ Context: ${context?.activeFile}
 
 FORCE: You MUST call a tool. DO NOT reply with text.
 PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_code) over run_terminal_command when possible.`,
-            tools: [{ functionDeclarations: executorTools }],
-            ...this.getModelConfig()
+            ...this.getModelConfig(executorTools, /* allowSearch */ true)
           },
           contents: [{ role: 'user', parts: [{ text: "EXECUTE_NOW" }] }]
         }),
@@ -882,6 +895,10 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
 
     // 3. ANALYZE RESPONSE
     const parts = response.candidates?.[0]?.content?.parts || [];
+    const groundingChunks: GroundingChunk[] | undefined =
+      this.model === 'gemini-3-flash-preview'
+        ? response.candidates?.[0]?.groundingMetadata?.groundingChunks
+        : undefined;
     let functionCall = null;
     let rawText = '';
 
@@ -977,7 +994,10 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
     // UX: Tell the user what we got
     eventBus.emit({
       type: 'AGENT_SPEAK',
-      payload: { text: formatDualTrack(`Step ${plan.activeStepIndex + 1} result received.`, `**Step ${plan.activeStepIndex + 1}:**\n${stepResult}`) }
+      payload: {
+        text: formatDualTrack(`Step ${plan.activeStepIndex + 1} result received.`, `**Step ${plan.activeStepIndex + 1}:**\n${stepResult}`),
+        ...(groundingChunks?.length ? { groundingChunks } : {})
+      }
     });
 
     // 5. Analyze Result (The Judge)

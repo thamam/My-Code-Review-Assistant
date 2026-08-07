@@ -83,6 +83,13 @@ export interface SelectionState {
   content: string;
 }
 
+export interface GroundingChunk {
+  web?: {
+    uri: string;
+    title: string;
+  };
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'system' | 'assistant';
@@ -92,6 +99,7 @@ export interface ChatMessage {
     file: string;
     lineRange?: [number, number];
   };
+  groundingChunks?: GroundingChunk[];
 }
 
 export interface FileTreeNode {
