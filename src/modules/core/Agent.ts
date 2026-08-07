@@ -13,7 +13,7 @@ import { storageService } from '../persistence';
 import { sanitizeForVoice } from "../../utils/VoiceUtils";
 import { formatSearchCommand, formatWriteFileCommand } from "../runtime/ToolUtils";
 import { DiagramAgent } from "../../../services/diagramAgent";
-import { ContextSnapshot } from "../../types/context";
+import { ContextSnapshot, ACTIVE_FILE_CONTENT_LIMIT } from "../../types/context";
 
 // --- Types ---
 
@@ -582,6 +582,7 @@ CRITICAL: You will receive a [SYSTEM_CONTEXT] block. This is the GROUND TRUTH ab
 - FOCUSED_LINE: the exact line scrolled to — use this for "this line".
 - SELECTED_CODE: code the user highlighted — use this for "this code", "this function", "explain this".
 - VIEW_MODE: diff or source — line numbers differ between modes.
+- [ACTIVE FILE CONTENT] block: the actual source of ACTIVE_FILE, when available — read code from here instead of guessing or asking the user to paste it.
 NEVER guess filenames or line numbers. Use the context.
 
 Context: File: ${context?.activeFile || 'None'}, Lines: ${context?.viewportStartLine ?? '?'}–${context?.viewportEndLine ?? '?'}, Repo: ${prData?.title || 'Unknown'}`;
@@ -1333,6 +1334,7 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
    *   - Text selection (code the reviewer highlighted — strongest signal)
    *   - View mode (diff vs source — changes what line numbers mean)
    *   - Active UI tab
+   *   - Active file content (full source, for grounding — see ACTIVE_FILE_CONTENT_LIMIT)
    */
   private buildContextEnvelope(message: string, context: ContextSnapshot | null): string {
     if (!context) {
@@ -1372,6 +1374,14 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
       lines.push(`SELECTED_CODE${selRange}:\n${preview}`);
     } else if (context.activeSelection) {
       lines.push(`ACTIVE_SELECTION: ${context.activeSelection}`);
+    }
+
+    // Active file content — grounds the AI in the actual code, not just its location
+    if (context.activeFileContent) {
+      const truncationNote = context.activeFileTruncated
+        ? ` — TRUNCATED AT ${ACTIVE_FILE_CONTENT_LIMIT} CHARS`
+        : '';
+      lines.push(`[ACTIVE FILE CONTENT — USE THIS FOR LINE REFERENCES${truncationNote}]\n${context.activeFileContent}\n[/ACTIVE FILE CONTENT]`);
     }
 
     // F2: Hierarchical context — active walkthrough section

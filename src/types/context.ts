@@ -5,10 +5,15 @@
  * Replaces `context: any` in AgentState so TypeScript catches mismatches
  * between what the UI sends and what Agent.buildContextEnvelope reads.
  */
+/** Max chars of active-file content injected into the AI prompt. Content beyond this is truncated. */
+export const ACTIVE_FILE_CONTENT_LIMIT = 100_000;
+
 export interface ContextSnapshot {
   // Tab and file identity
   activeTab: 'files' | 'annotations' | 'issue' | 'diagrams';
   activeFile: string | null;
+  activeFileContent?: string | null; // full content of activeFile, for grounding — see ACTIVE_FILE_CONTENT_LIMIT
+  activeFileTruncated?: boolean; // true when activeFileContent was cut at ACTIVE_FILE_CONTENT_LIMIT
   activeSelection: string | null; // legacy — prefer selectionText
   activeDiagram: string | null;
 

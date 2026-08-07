@@ -10,7 +10,7 @@ import { ChatMessage } from '../types';
 import { usePR } from './PRContext';
 import { getActiveSection } from '../utils/walkthroughUtils';
 import { downloadBlob } from '../utils/downloadUtils';
-import type { ContextSnapshot } from '../src/types/context';
+import { ACTIVE_FILE_CONTENT_LIMIT, type ContextSnapshot } from '../src/types/context';
 // Event-Driven Architecture imports
 import { eventBus } from '../src/modules/core/EventBus';
 import { agent } from '../src/modules/core/Agent'; // Force instantiation (Polyfill enabled)
@@ -282,11 +282,21 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // F2: Resolve active walkthrough section (if any)
     const activeSection = getActiveSection(walkthroughRef.current, activeSectionIdRef.current);
 
+    // Grounding: pull the active file's content from the PR data so the AI can see the code
+    const activeFileData = prDataRef.current?.files.find(f => f.path === activeFile);
+    const rawContent = activeFileData?.newContent ?? activeFileData?.oldContent ?? null;
+    const activeFileTruncated = rawContent != null && rawContent.length > ACTIVE_FILE_CONTENT_LIMIT;
+    const activeFileContent = rawContent != null
+      ? (activeFileTruncated ? rawContent.slice(0, ACTIVE_FILE_CONTENT_LIMIT) : rawContent)
+      : null;
+
     // Exclude activeFile from the base spread — it's set explicitly below with higher-priority logic
     const { activeFile: _af, ...baseContext } = userContextRef.current;
     const contextSnapshot: ContextSnapshot = {
       ...baseContext,
       activeFile,
+      activeFileContent,
+      activeFileTruncated,
       viewportStartLine,
       viewportEndLine,
       focusedLine,

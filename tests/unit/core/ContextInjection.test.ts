@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { agent } from '../../../src/modules/core/Agent';
+import { ACTIVE_FILE_CONTENT_LIMIT } from '../../../src/types/context';
 
 // Access private method via 'any' casting for testing purposes
 const agentAny = agent as any;
@@ -186,6 +187,46 @@ describe('Agent Context Injection (buildContextEnvelope)', () => {
     });
     expect(envelope).toContain('ACTIVE_SECTION: Database Layer');
     expect(envelope).not.toContain('SECTION_DESCRIPTION');
+  });
+
+  // ── ACTIVE FILE CONTENT (grounding) ──────────────────────────────────────
+
+  it('injects ACTIVE FILE CONTENT block when activeFileContent is present', () => {
+    const envelope = agentAny.buildContextEnvelope('Q', {
+      activeFile: 'src/main.ts',
+      activeFileContent: 'export const x = 1;',
+    });
+    expect(envelope).toContain('[ACTIVE FILE CONTENT — USE THIS FOR LINE REFERENCES]');
+    expect(envelope).toContain('export const x = 1;');
+    expect(envelope).toContain('[/ACTIVE FILE CONTENT]');
+    expect(envelope).not.toContain('TRUNCATED');
+  });
+
+  it('notes truncation in the block header when activeFileTruncated is true', () => {
+    const truncatedContent = 'x'.repeat(ACTIVE_FILE_CONTENT_LIMIT);
+    const envelope = agentAny.buildContextEnvelope('Q', {
+      activeFile: 'src/main.ts',
+      activeFileContent: truncatedContent,
+      activeFileTruncated: true,
+    });
+    expect(envelope).toContain(`TRUNCATED AT ${ACTIVE_FILE_CONTENT_LIMIT} CHARS`);
+    expect(envelope).toContain(truncatedContent);
+  });
+
+  it('omits the ACTIVE FILE CONTENT block when there is no active file', () => {
+    const envelope = agentAny.buildContextEnvelope('Q', {
+      activeFile: null,
+      activeFileContent: null,
+    });
+    expect(envelope).not.toContain('ACTIVE FILE CONTENT');
+  });
+
+  it('omits the ACTIVE FILE CONTENT block when content is empty', () => {
+    const envelope = agentAny.buildContextEnvelope('Q', {
+      activeFile: 'src/main.ts',
+      activeFileContent: '',
+    });
+    expect(envelope).not.toContain('ACTIVE FILE CONTENT');
   });
 
   // ── Edge cases ────────────────────────────────────────────────────────────
