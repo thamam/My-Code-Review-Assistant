@@ -10,6 +10,7 @@ import { resolveFilePath } from '../utils/fileUtils';
 // NEW IMPORTS
 import { useNavigationModule } from '../src/modules/navigation/hooks';
 import { RepoNode, LazyFile } from '../src/modules/navigation/types';
+import { waitForLine } from '../src/modules/navigation/lineRegistry';
 import type { VerificationState } from '../src/types/review';
 import { storageService } from '../src/modules/persistence';
 import { parseSessionText } from '../src/lib/session-parser/index.js';
@@ -46,12 +47,11 @@ interface PRContextType {
   setIsDiffMode: (value: boolean) => void;
   toggleDiffMode: () => void;
   focusedLocation: FocusedLocation | null;
+  isFlashActive: boolean;
   scrollToLine: (file: string, line: number) => void;
   navigateToCode: (target: NavigationTarget) => Promise<boolean>;
   setLeftTab: (tab: 'files' | 'annotations' | 'issue' | 'diagrams' | 'terminal' | 'notes') => void;
   leftTab: 'files' | 'annotations' | 'issue' | 'diagrams' | 'terminal' | 'notes';
-  isCodeViewerReady: boolean;
-  setIsCodeViewerReady: (ready: boolean) => void;
   annotations: Annotation[];
   addAnnotation: (file: string, line: number, type: 'marker' | 'label', text?: string) => void;
   removeAnnotation: (id: string) => void;
@@ -114,10 +114,10 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const [isDiffMode, setIsDiffMode] = useState(true);
   const [leftTab, setLeftTab] = useState<'files' | 'annotations' | 'issue' | 'diagrams' | 'terminal' | 'notes'>('files');
-  const [isCodeViewerReady, setIsCodeViewerReady] = useState(false);
   const [viewportState, setViewportState] = useState<ViewportState>({ file: null, startLine: 0, endLine: 0 });
   const [selectionState, setSelectionState] = useState<SelectionState | null>(null);
   const [focusedLocation, setFocusedLocation] = useState<FocusedLocation | null>(null);
+  const [isFlashActive, setIsFlashActive] = useState(false);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [linearIssue, setLinearIssue] = useState<LinearIssue | null>(null);
   const [diagrams, setDiagrams] = useState<Diagram[]>([]);
@@ -251,10 +251,16 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // NEW: Hook into the Navigation Module
   const navModule = useNavigationModule();
 
-  const isCodeViewerReadyRef = useRef(false);
   const [isNavigating, setIsNavigating] = useState(false);
 
-  useEffect(() => { isCodeViewerReadyRef.current = isCodeViewerReady; }, [isCodeViewerReady]);
+  // Single highlight owner: one timer, driven off focusedLocation, consumed by
+  // both DiffView and SourceView instead of each keeping its own flash timer.
+  useEffect(() => {
+    if (!focusedLocation) return;
+    setIsFlashActive(true);
+    const timer = setTimeout(() => setIsFlashActive(false), 1500);
+    return () => clearTimeout(timer);
+  }, [focusedLocation]);
 
   // Expose PR State for test verification (Phase 10.4 Smoke Test Hook)
   useEffect(() => {
@@ -262,11 +268,10 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       (window as any).__THEIA_PR_STATE__ = {
         isDiffMode,
         leftTab,
-        selectedFile: selectedFile?.path || null,
-        isCodeViewerReady
+        selectedFile: selectedFile?.path || null
       };
     }
-  }, [isDiffMode, leftTab, selectedFile, isCodeViewerReady]);
+  }, [isDiffMode, leftTab, selectedFile]);
 
   // FR-043: Auto-trigger Full Repo Mode when in Repo Mode (no PR files)
   useEffect(() => {
@@ -328,17 +333,19 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
       // Switch File
       if (selectedFile?.path !== fileToSelect.path) {
-        setIsCodeViewerReady(false);
         selectFile(fileToSelect); // Recurse to our now-memoized selectFile
-
-        let attempts = 0;
-        while (!isCodeViewerReadyRef.current && attempts < 50) {
-          await new Promise(r => setTimeout(r, 100));
-          attempts++;
-        }
       }
 
-      // Scroll
+      // Wait for the view to register the target line (resolves immediately
+      // if already mounted, or the moment DiffView/SourceView registers it —
+      // no polling).
+      const el = await waitForLine(fileToSelect.path, target.line, 3000);
+      if (!el) {
+        console.warn(`[PRContext] Navigation timed out waiting for ${fileToSelect.path}:${target.line}`);
+        return false;
+      }
+
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       setFocusedLocation({
         file: fileToSelect.path,
         line: target.line,
@@ -393,7 +400,7 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     <PRContext.Provider value={{
       prData, setPRData: setPrData, selectedFile, selectFile, viewportState, updateViewport: (s) => setViewportState(v => ({ ...v, ...s })),
       selectionState, setSelectionState, walkthrough, loadWalkthrough: setWalkthrough, activeSectionId, setActiveSectionId,
-      isDiffMode, setIsDiffMode, toggleDiffMode, focusedLocation, scrollToLine, navigateToCode, leftTab, setLeftTab, isCodeViewerReady, setIsCodeViewerReady,
+      isDiffMode, setIsDiffMode, toggleDiffMode, focusedLocation, isFlashActive, scrollToLine, navigateToCode, leftTab, setLeftTab,
       annotations, addAnnotation, removeAnnotation: (id) => setAnnotations(a => a.filter(x => x.id !== id)),
       updateAnnotation: (id, u) => setAnnotations(a => a.map(x => x.id === id ? { ...x, ...u } : x)),
       linearIssue, setLinearIssue, diagrams, activeDiagram, addDiagram: (d) => setDiagrams(p => [...p, d]),
