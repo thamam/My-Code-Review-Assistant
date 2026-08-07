@@ -127,18 +127,40 @@ export const ChatMessage: React.FC<{ message: ChatMessageType }> = ({ message })
             <div className="w-full text-[10px] uppercase text-gray-500 font-bold tracking-wider flex items-center gap-1">
               <Globe size={10} /> Sources
             </div>
-            {message.groundingChunks.map((chunk, i) => chunk.web ? (
-              <a
-                key={i}
-                href={chunk.web.uri}
-                target="_blank"
-                rel="noreferrer"
-                className="text-[10px] bg-gray-900 hover:bg-gray-700 border border-gray-700 rounded-full px-2 py-1 text-blue-300 truncate max-w-[200px] transition-colors"
-                title={chunk.web.title}
-              >
-                {chunk.web.title}
-              </a>
-            ) : null)}
+            {message.groundingChunks.map((chunk, i) => {
+              if (!chunk.web) return null;
+
+              let isSafeLink = false;
+              try {
+                const scheme = new URL(chunk.web.uri).protocol;
+                isSafeLink = scheme === 'http:' || scheme === 'https:';
+              } catch {
+                isSafeLink = false;
+              }
+
+              const chipClassName = "text-[10px] bg-gray-900 hover:bg-gray-700 border border-gray-700 rounded-full px-2 py-1 text-blue-300 truncate max-w-[200px] transition-colors";
+
+              if (isSafeLink) {
+                return (
+                  <a
+                    key={i}
+                    href={chunk.web.uri}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={chipClassName}
+                    title={chunk.web.title}
+                  >
+                    {chunk.web.title}
+                  </a>
+                );
+              }
+
+              return (
+                <span key={i} className={chipClassName} title={chunk.web.title}>
+                  {chunk.web.title}
+                </span>
+              );
+            })}
           </div>
         )}
       </div>

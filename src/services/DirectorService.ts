@@ -51,7 +51,7 @@ export async function generateBrief(input: DirectorInput): Promise<ContextBrief 
         );
 
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             config: {
                 systemInstruction: DIRECTOR_SYSTEM_PROMPT,
                 responseMimeType: 'application/json',
@@ -197,7 +197,7 @@ RESPONSE FORMAT (strict JSON):
         console.log('[DirectorService] Sending user message:', userText);
 
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             config: {
                 systemInstruction: systemPrompt,
                 responseMimeType: 'application/json',
@@ -270,7 +270,7 @@ ${context.relevantAtomIds?.length ? `\nRelevant Requirements: ${context.relevant
         ];
 
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             config: {
                 systemInstruction: systemPrompt,
             },

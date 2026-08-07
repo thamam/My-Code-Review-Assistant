@@ -5,7 +5,7 @@
  */
 
 import { StateGraph, START, END } from "@langchain/langgraph";
-import { GoogleGenAI, FunctionDeclaration, Type } from "@google/genai";
+import { GoogleGenAI, FunctionDeclaration, Type, ThinkingLevel, type GenerateContentConfig } from "@google/genai";
 import { eventBus } from "./EventBus";
 import { AgentPlan, PlanStep } from "../planner/types";
 import { searchService } from '../search';
@@ -14,7 +14,6 @@ import { sanitizeForVoice } from "../../utils/VoiceUtils";
 import { formatSearchCommand, formatWriteFileCommand } from "../runtime/ToolUtils";
 import { DiagramAgent } from "../../../services/diagramAgent";
 import { ContextSnapshot, ACTIVE_FILE_CONTENT_LIMIT } from "../../types/context";
-import type { GroundingChunk } from "../../../types";
 
 // --- Types ---
 
@@ -252,7 +251,17 @@ export class TheiaAgent {
         const { content, text, context, prData, model } = event.payload;
         console.log('[AGENT_PROBE] Raw Payload:', event.payload);
 
-        this.model = model || 'gemini-3.1-pro-preview';
+        const requestedModel = model || 'gemini-3.1-pro-preview';
+
+        // Never mutate the shared `this.model` while a turn is in flight — planner/executor
+        // nodes read it live on every step, so swapping it under a running turn would
+        // silently change models mid-plan. Wait for the current turn to finish (it's
+        // already serialized via isBusy), then apply the new model only for this turn.
+        if (this.isBusy) {
+          console.log('[Agent] Turn in flight; deferring model change until it completes.');
+          await this.waitUntilIdle();
+        }
+        this.setModel(requestedModel);
 
         // FR-039: Context Middleware - Inject "Ground Truth"
         const rawMessage = content || text || '';
@@ -291,24 +300,36 @@ export class TheiaAgent {
   }
 
   /**
-   * Per-model generation config (e.g. extended thinking budget for Pro,
-   * Google Search grounding for Flash). `allowSearch` is opt-in per call site
-   * so grounding only ever applies to the executor's final-response path,
-   * never the planner.
+   * Applies a model switch. Resets the lazily-created chat session whenever the model
+   * actually changes — otherwise `reasoningNode` would keep reusing a session bound to
+   * whichever model was active when it was first created.
    */
-  private getModelConfig(functionTools?: FunctionDeclaration[], allowSearch = false): Record<string, unknown> {
-    const config: Record<string, unknown> = {};
+  private setModel(newModel: string): void {
+    if (this.model !== newModel) {
+      this.model = newModel;
+      this.chatSession = null;
+    }
+  }
+
+  /** Polls until the current turn (if any) finishes. */
+  private async waitUntilIdle(): Promise<void> {
+    while (this.isBusy) {
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+  }
+
+  /**
+   * Per-model generation config (e.g. extended thinking level for Pro).
+   */
+  private getModelConfig(functionTools?: FunctionDeclaration[]): Partial<GenerateContentConfig> {
+    const config: Partial<GenerateContentConfig> = {};
 
     if (this.model === 'gemini-3.1-pro-preview') {
-      config.thinkingConfig = { thinkingBudget: 32768 };
+      config.thinkingConfig = { thinkingLevel: ThinkingLevel.HIGH };
     }
 
     if (functionTools) {
-      const tools: Array<Record<string, unknown>> = [{ functionDeclarations: functionTools }];
-      if (allowSearch && this.model === 'gemini-3-flash-preview') {
-        tools.push({ googleSearch: {} });
-      }
-      config.tools = tools;
+      config.tools = [{ functionDeclarations: functionTools }];
     }
 
     return config;
@@ -854,7 +875,7 @@ Context: ${context?.activeFile}
 
 FORCE: You MUST call a tool. DO NOT reply with text.
 PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_code) over run_terminal_command when possible.`,
-            ...this.getModelConfig(executorTools, /* allowSearch */ true)
+            ...this.getModelConfig(executorTools)
           },
           contents: [{ role: 'user', parts: [{ text: "EXECUTE_NOW" }] }]
         }),
@@ -895,10 +916,6 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
 
     // 3. ANALYZE RESPONSE
     const parts = response.candidates?.[0]?.content?.parts || [];
-    const groundingChunks: GroundingChunk[] | undefined =
-      this.model === 'gemini-3-flash-preview'
-        ? response.candidates?.[0]?.groundingMetadata?.groundingChunks
-        : undefined;
     let functionCall = null;
     let rawText = '';
 
@@ -995,8 +1012,7 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
     eventBus.emit({
       type: 'AGENT_SPEAK',
       payload: {
-        text: formatDualTrack(`Step ${plan.activeStepIndex + 1} result received.`, `**Step ${plan.activeStepIndex + 1}:**\n${stepResult}`),
-        ...(groundingChunks?.length ? { groundingChunks } : {})
+        text: formatDualTrack(`Step ${plan.activeStepIndex + 1} result received.`, `**Step ${plan.activeStepIndex + 1}:**\n${stepResult}`)
       }
     });
 

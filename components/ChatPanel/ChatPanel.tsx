@@ -59,7 +59,7 @@ export const ChatPanel: React.FC = () => {
           >
             <option value="gemini-3.1-pro-preview">Pro 3.1 (Expert Reasoning)</option>
             <option value="gemini-3-flash-preview">Flash 3 (Fast Response)</option>
-            <option value="gemini-2.5-flash-lite-preview-02-05">Flash Lite 2.5 (Fastest)</option>
+            <option value="gemini-2.5-flash-lite">Flash Lite 2.5 (Fastest)</option>
           </select>
           <button
             onClick={exportSessionLogs}

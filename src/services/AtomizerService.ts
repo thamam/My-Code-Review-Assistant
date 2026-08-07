@@ -3,11 +3,11 @@
  * 
  * The "Brain" of Phase 7: Spec-Driven Traceability
  * 
- * Uses Gemini 3 Pro (Preview) to break down raw requirement documents
+ * Uses Gemini 3.1 Pro (Preview) to break down raw requirement documents
  * into atomic, testable assertions (SpecAtom[]).
- * 
+ *
  * Design decisions:
- * - Model: gemini-3-pro-preview (mandated by architecture constraints)
+ * - Model: gemini-3.1-pro-preview (mandated by architecture constraints)
  * - Output: Structured JSON for reliable parsing
  * - Fail gracefully: Returns empty atoms array on error, not crash
  */
@@ -41,7 +41,7 @@ OUTPUT FORMAT (JSON):
 Return ONLY valid JSON. No markdown, no explanation.`;
 
 /**
- * Atomizes raw requirement content into structured SpecAtoms using Gemini 3 Pro.
+ * Atomizes raw requirement content into structured SpecAtoms using Gemini 3.1 Pro.
  */
 export async function atomize(input: AtomizerInput): Promise<AtomizerResult> {
     try {
@@ -60,7 +60,7 @@ export async function atomize(input: AtomizerInput): Promise<AtomizerResult> {
             : input.content;
 
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             config: {
                 systemInstruction: ATOMIZER_SYSTEM_PROMPT,
                 responseMimeType: 'application/json',
