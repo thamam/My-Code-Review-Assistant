@@ -1,3 +1,45 @@
+# Theia v1.2 — Fusion (Beta)
+
+**Version:** v1.2
+**Status:** Beta
+**Date:** 2026-08-08
+**Known Issues:** QA-001 (P1 — planner JSON leaking into chat) remains open in Agent mode; the new default Simple Mode bypasses it rather than fixing it.
+
+## 🚀 Release Overview
+This release merges five phases of work from the sibling fork back into the main line. The headline change is a simpler default experience: plain streaming chat is now the standard path for PR review, with the full agent loop available as an explicit opt-in.
+
+---
+
+## 🆕 New
+
+- **Simple Mode (default)** — Plain streaming chat is now the default for PR review: faster and cheaper, with Google Search grounding and source-citation chips. The full agent loop (navigation, terminal, file edits with approval) is an explicit opt-in via the header toggle.
+- **Review-intent modes** — PR Review / Learn Code Base / Code Dive / Custom Focus mode cards shape the AI's focus in both chat and voice.
+- **Structure diagrams** — Class / state / flowchart generation joins sequence diagrams, with clickable code references.
+- **Proactive voice Brain** — During live voice sessions, opening a file triggers a background analysis whispered to the voice agent.
+- **Per-PR persistence** — Diagrams and chat history survive reloads, keyed per PR.
+
+## 🐛 Fixed
+
+- **Chat context regression** — The chat AI sees file contents again (a regression had reduced its context to file paths/line numbers only).
+- **Model selector** — Actually selects models now (was dead UI). Current roster: Gemini 3.1 Pro (thinking), Gemini 3 Flash, Gemini 2.5 Flash Lite.
+- **Diagram-to-code clicks** — Deterministic reference IDs and explicit label binding replace index-guessing; persisted diagrams re-resolve paths.
+- **Code navigation** — Registration-based handshake replaces three polling timers; one highlight; deleted lines are now annotatable and navigable; navigation falls back gracefully instead of silently failing.
+- **Partial fetch failures** — One unfetchable file (e.g. a >1MB lockfile) no longer fails the whole PR load; failed fetches are marked unavailable instead of cached as empty.
+- **Credentials** — One resolver (env → saved → session) for GitHub/Linear tokens everywhere. Tokens entered in the UI now reach repo browsing; the token field overrides env for that load.
+
+## 🔀 Changed
+
+- **Sample PR** — Loads through the real ingestion pipeline (its full-repo demo remains, mock-backed).
+
+## 🧹 Internal
+
+- Dead experiment modules removed.
+- Repo hygiene: session artifacts and debug scripts pruned; handovers archived to `docs/history/`.
+- Prompt assembly centralized.
+- Unit tests: 102 → 265.
+
+---
+
 # Theia v1.0 Beta - Release Notes
 
 **Version:** v1.0
