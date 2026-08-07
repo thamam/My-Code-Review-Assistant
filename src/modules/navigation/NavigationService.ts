@@ -8,6 +8,7 @@ import { GitHubService } from '../../../services/github';
 import { NavigationState, RepoNode, LazyFile } from './types';
 import { eventBus } from '../core/EventBus';
 import { searchService } from '../search';
+import { getGitHubToken } from '../../lib/credentials';
 
 class NavigationService {
     // Initial State
@@ -19,10 +20,14 @@ class NavigationService {
     };
 
     private listeners: Set<(state: NavigationState) => void> = new Set();
-    private github: GitHubService;
 
-    constructor() {
-        this.github = new GitHubService(import.meta.env.VITE_GITHUB_TOKEN);
+    /**
+     * Resolves the GitHubService at call time so a token saved to
+     * localStorage/sessionStorage after boot is honored.
+     * The token is never captured at module-init.
+     */
+    private getGithub(): GitHubService {
+        return new GitHubService(getGitHubToken());
     }
 
     // --- Reactive State Management ---
@@ -57,7 +62,7 @@ class NavigationService {
             this.setState({ isLoadingRepoTree: true });
             try {
                 console.log(`[NavigationService] Fetching repo tree for ${owner}/${repo}...`);
-                const tree = await this.github.fetchRepoTree(owner, repo, headSha);
+                const tree = await this.getGithub().fetchRepoTree(owner, repo, headSha);
                 this.setState({ repoTree: tree });
                 console.log(`[NavigationService] Loaded repo tree: ${tree.length} items`);
 
@@ -114,7 +119,7 @@ class NavigationService {
         try {
             // 3. Fetch Content with timing (NFR-006: Latency < 2s)
             console.time('GhostFetch');
-            const content = await this.github.fetchFileContent(owner, repo, path, headSha);
+            const content = await this.getGithub().fetchFileContent(owner, repo, path, headSha);
             console.timeEnd('GhostFetch');
 
             const lazyFile: LazyFile = {

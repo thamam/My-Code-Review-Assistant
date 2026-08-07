@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { usePR } from '../contexts/PRContext';
 import { LinearService } from '../services/linear';
+import { getLinearKey, saveLinearKey } from '../src/lib/credentials';
 import { X, Check, Loader2, AlertCircle, Link, Key } from 'lucide-react';
 
 const USER_CONFIG = {
-    LINEAR_API_KEY: import.meta.env.VITE_LINEAR_API_KEY || '',
     DEFAULT_LINEAR_ISSUE: ''
 };
 
@@ -16,9 +16,7 @@ interface LinearModalProps {
 export const LinearModal: React.FC<LinearModalProps> = ({ isOpen, onClose }) => {
     const { setLinearIssue } = usePR();
 
-    const [apiKey, setApiKey] = useState(() => {
-        return USER_CONFIG.LINEAR_API_KEY || localStorage.getItem('vcr_linear_key') || '';
-    });
+    const [apiKey, setApiKey] = useState(() => getLinearKey() || '');
 
     const [issueId, setIssueId] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -29,14 +27,14 @@ export const LinearModal: React.FC<LinearModalProps> = ({ isOpen, onClose }) => 
             setIssueId(USER_CONFIG.DEFAULT_LINEAR_ISSUE || '');
             setError(null);
             // Refresh key from config/storage in case it changed externally
-            setApiKey(USER_CONFIG.LINEAR_API_KEY || localStorage.getItem('vcr_linear_key') || '');
+            setApiKey(getLinearKey() || '');
         }
     }, [isOpen]);
 
     const handleSaveKey = () => {
-        // Only save to localStorage if it's not coming from config
-        if (!USER_CONFIG.LINEAR_API_KEY) {
-            localStorage.setItem('vcr_linear_key', apiKey);
+        // Only persist to localStorage if the key is not coming from env config
+        if (!import.meta.env.VITE_LINEAR_API_KEY) {
+            saveLinearKey(apiKey);
         }
     };
 
@@ -61,7 +59,7 @@ export const LinearModal: React.FC<LinearModalProps> = ({ isOpen, onClose }) => 
 
     if (!isOpen) return null;
 
-    const isConfigKey = !!USER_CONFIG.LINEAR_API_KEY;
+    const isConfigKey = !!import.meta.env.VITE_LINEAR_API_KEY;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">

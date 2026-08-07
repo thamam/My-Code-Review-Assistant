@@ -1,15 +1,19 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { navigationService } from '../../../src/modules/navigation/NavigationService';
-import { GitHubService } from '../../../services/github';
 
-// Mock Dependencies
-vi.mock('../../../src/services/github', () => {
+// Shared mock instance — NavigationService now constructs GitHubService lazily
+// via getGithub(), so every call must return the same mock object.
+const mockGithubInstance = {
+    fetchRepoTree: vi.fn(),
+    fetchFileContent: vi.fn()
+};
+
+// Mock Dependencies — paths must match the actual import specifiers in NavigationService.ts
+vi.mock('../../../services/github', () => {
     return {
-        GitHubService: vi.fn().mockImplementation(() => ({
-            fetchRepoTree: vi.fn(),
-            fetchFileContent: vi.fn()
-        }))
+        GitHubService: vi.fn().mockImplementation(function () {
+            return mockGithubInstance;
+        })
     };
 });
 
@@ -25,6 +29,10 @@ vi.mock('../../../src/modules/search', () => ({
     }
 }));
 
+vi.mock('../../../src/lib/credentials', () => ({
+    getGitHubToken: vi.fn(() => 'test-token')
+}));
+
 // Setup Environment for Singleton
 // Since navigationService is a singleton instantiated at module load, 
 // we need to be careful about state contamination. 
@@ -35,26 +43,21 @@ describe('NavigationService (Headless Guard)', () => {
     
     beforeEach(() => {
         vi.clearAllMocks();
-        // Reset state if possible? 
-        // We can't easily reset private state of the singleton without extra code in the service.
-        // For Phase 9.5, we will test the flow assuming clean slate or idempotent ops.
     });
 
     it('should fetch repo tree when toggling full repo mode ON', async () => {
         // Setup Mock
-        const mockFetchTree = vi.fn().mockResolvedValue([
+        mockGithubInstance.fetchRepoTree = vi.fn().mockResolvedValue([
             { path: 'src/ghost.ts', type: 'blob', sha: 'sha123', size: 500 }
         ]);
-        
-        // Access the mocked instance method
-        // @ts-ignore
-        navigationService['github'].fetchRepoTree = mockFetchTree;
+
+        const { navigationService } = await import('../../../src/modules/navigation/NavigationService');
 
         // Execute
         await navigationService.toggleFullRepoMode('test-owner', 'test-repo', 'head-sha');
 
         // Assert
-        expect(mockFetchTree).toHaveBeenCalledWith('test-owner', 'test-repo', 'head-sha');
+        expect(mockGithubInstance.fetchRepoTree).toHaveBeenCalledWith('test-owner', 'test-repo', 'head-sha');
         const state = navigationService.getState();
         expect(state.isFullRepoMode).toBe(true);
         expect(state.repoTree).toHaveLength(1);
@@ -63,8 +66,9 @@ describe('NavigationService (Headless Guard)', () => {
 
     it('should NOT fetch tree if already loaded', async () => {
          const mockFetchTree = vi.fn();
-         // @ts-ignore
-         navigationService['github'].fetchRepoTree = mockFetchTree;
+         mockGithubInstance.fetchRepoTree = mockFetchTree;
+
+         const { navigationService } = await import('../../../src/modules/navigation/NavigationService');
 
          // Execute (State is preserved from previous test, so tree is already loaded)
          // Note: This relies on test order which is bad practice, but unavoidable with Singletons 
@@ -94,9 +98,9 @@ describe('NavigationService (Headless Guard)', () => {
 
     it('should fetch and cache ghost file content', async () => {
         // Setup
-        const mockFetchContent = vi.fn().mockResolvedValue('console.log("ghost");');
-        // @ts-ignore
-        navigationService['github'].fetchFileContent = mockFetchContent;
+        mockGithubInstance.fetchFileContent = vi.fn().mockResolvedValue('console.log("ghost");');
+
+        const { navigationService } = await import('../../../src/modules/navigation/NavigationService');
 
         const path = 'src/ghost.ts'; // Must match the tree from test 1
 
@@ -106,16 +110,17 @@ describe('NavigationService (Headless Guard)', () => {
         expect(file1).not.toBeNull();
         expect(file1?.content).toBe('console.log("ghost");');
         expect(file1?.status).toBe('warm');
-        expect(mockFetchContent).toHaveBeenCalledTimes(1);
+        expect(mockGithubInstance.fetchFileContent).toHaveBeenCalledTimes(1);
 
         // Execute 2: Cache Hit
         const file2 = await navigationService.loadGhostFile('o', 'r', path, 's');
         
         expect(file2?.content).toBe('console.log("ghost");');
-        expect(mockFetchContent).toHaveBeenCalledTimes(1); // Call count remains 1
+        expect(mockGithubInstance.fetchFileContent).toHaveBeenCalledTimes(1); // Call count remains 1
     });
 
     it('should return null for non-existent files', async () => {
+        const { navigationService } = await import('../../../src/modules/navigation/NavigationService');
         const file = await navigationService.loadGhostFile('o', 'r', 'does/not/exist.ts', 's');
         expect(file).toBeNull();
     });

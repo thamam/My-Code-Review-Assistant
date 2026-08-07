@@ -8,9 +8,9 @@ import { PRData, Walkthrough, PRHistoryItem, AppMode } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 import { parseWalkthroughFile, parseWalkthroughFromText } from '../services/walkthroughParser';
 import { eventBus } from '../src/modules/core/EventBus';
+import { getGitHubToken, saveGitHubToken } from '../src/lib/credentials';
 
 const USER_CONFIG = {
-  GITHUB_TOKEN: import.meta.env.VITE_GITHUB_TOKEN || '',
   DEFAULT_PR_URL: import.meta.env.VITE_DEFAULT_PR_URL || '',
   DEFAULT_WALKTHROUGH_PATH: import.meta.env.VITE_DEFAULT_WALKTHROUGH_PATH || ''
 };
@@ -39,12 +39,7 @@ export const WelcomeScreen: React.FC = () => {
     } catch { return true; }
   });
 
-  const [token, setToken] = useState(() => {
-    try {
-      if (USER_CONFIG.GITHUB_TOKEN) return USER_CONFIG.GITHUB_TOKEN;
-      return localStorage.getItem('vcr_gh_token') || sessionStorage.getItem('vcr_gh_token') || '';
-    } catch { return ''; }
-  });
+  const [token, setToken] = useState(() => getGitHubToken() || '');
 
   const [history, setHistory] = useState<PRHistoryItem[]>(() => {
     try {
@@ -98,10 +93,7 @@ export const WelcomeScreen: React.FC = () => {
     const newValue = e.target.value;
     setToken(newValue);
     setError(null);
-    try {
-      if (rememberToken) localStorage.setItem('vcr_gh_token', newValue);
-      else sessionStorage.setItem('vcr_gh_token', newValue);
-    } catch { }
+    saveGitHubToken(newValue, rememberToken);
   };
 
   const toggleRemember = () => {
@@ -109,13 +101,7 @@ export const WelcomeScreen: React.FC = () => {
     setRememberToken(newState);
     try {
       localStorage.setItem('vcr_remember_pref', String(newState));
-      if (newState) {
-        localStorage.setItem('vcr_gh_token', token);
-        sessionStorage.removeItem('vcr_gh_token');
-      } else {
-        localStorage.removeItem('vcr_gh_token');
-        if (token) sessionStorage.setItem('vcr_gh_token', token);
-      }
+      saveGitHubToken(token, newState);
     } catch { }
   };
 
@@ -324,8 +310,8 @@ export const WelcomeScreen: React.FC = () => {
                 type="password"
                 value={token}
                 onChange={handleTokenChange}
-                placeholder={USER_CONFIG.GITHUB_TOKEN ? "Loaded from userConfig.ts" : "github_pat_..."}
-                className={`w-full bg-gray-950 border rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors ${USER_CONFIG.GITHUB_TOKEN ? 'border-green-900 text-green-400' : 'border-gray-700'}`}
+                placeholder={import.meta.env.VITE_GITHUB_TOKEN ? "Loaded from userConfig.ts" : "github_pat_..."}
+                className={`w-full bg-gray-950 border rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors ${import.meta.env.VITE_GITHUB_TOKEN ? 'border-green-900 text-green-400' : 'border-gray-700'}`}
                 disabled={isLoading}
               />
               <div className="flex items-center mt-3 gap-2">

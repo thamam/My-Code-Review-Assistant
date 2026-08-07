@@ -10,6 +10,7 @@ import React from 'react';
 import { useSpec } from '../../contexts/SpecContext';
 import { AtomItem } from './AtomItem';
 import { FileUp, Link, Loader2, AlertCircle, FileText, X, RefreshCw } from 'lucide-react';
+import { getLinearKey } from '../../src/lib/credentials';
 import clsx from 'clsx';
 
 interface SpecPanelProps {
@@ -18,7 +19,7 @@ interface SpecPanelProps {
 
 /** Check if Linear API key is configured */
 const hasLinearAPIKey = () => {
-    return !!(import.meta.env.VITE_LINEAR_API_KEY || localStorage.getItem('vcr_linear_key'));
+    return !!getLinearKey();
 };
 
 export const SpecPanel: React.FC<SpecPanelProps> = ({ onLinkLinear }) => {

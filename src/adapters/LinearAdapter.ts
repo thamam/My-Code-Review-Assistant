@@ -8,6 +8,7 @@
  */
 
 import { SpecAdapter } from "../types/SpecTypes";
+import { getLinearKey } from "../lib/credentials";
 
 interface LinearIssueRaw {
     identifier: string;
@@ -112,10 +113,10 @@ export class LinearAdapter implements SpecAdapter {
 }
 
 /**
- * Factory function for creating LinearAdapter with env API key.
+ * Factory function for creating LinearAdapter with resolved API key.
  */
 export function createLinearAdapter(): LinearAdapter | null {
-    const apiKey = import.meta.env.VITE_LINEAR_API_KEY;
+    const apiKey = getLinearKey();
     if (!apiKey) {
         console.warn('[LinearAdapter] No API key configured');
         return null;
