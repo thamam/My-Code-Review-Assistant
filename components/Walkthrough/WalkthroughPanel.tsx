@@ -4,6 +4,7 @@ import { usePR } from '../../contexts/PRContext';
 import { Map, ChevronDown, ChevronUp, Expand, Minimize2 } from 'lucide-react';
 import clsx from 'clsx';
 import { arePathsEquivalent } from '../../utils/fileUtils';
+import { getActiveSection } from '../../utils/walkthroughUtils';
 
 export const WalkthroughPanel: React.FC = () => {
   const { walkthrough, activeSectionId, setActiveSectionId, navigateToCode, prData } = usePR();
@@ -13,7 +14,7 @@ export const WalkthroughPanel: React.FC = () => {
 
   const handleSectionClick = async (sectionId: string) => {
     setActiveSectionId(sectionId);
-    const section = walkthrough.sections.find(s => s.id === sectionId);
+    const section = getActiveSection(walkthrough, sectionId);
     if (section && section.highlights && section.highlights.length > 0) {
         const highlight = section.highlights[0];
         await navigateToCode({

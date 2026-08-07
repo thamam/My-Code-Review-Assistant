@@ -47,8 +47,8 @@ export const UserContextMonitor: React.FC = () => {
 
     // Monitor Tab Changes
     useEffect(() => {
-        // Filter out terminal tab since UserContextState only supports the 4 main tabs
-        const validTab = leftTab === 'terminal' ? 'files' : leftTab;
+        // 'terminal' and 'notes' are UI-only tabs with no AI context mapping — collapse to 'files'
+        const validTab = (leftTab === 'terminal' || leftTab === 'notes') ? 'files' : leftTab;
         updateUserContext({ activeTab: validTab });
     }, [leftTab, updateUserContext]);
 

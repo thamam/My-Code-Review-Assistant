@@ -5,11 +5,20 @@
  */
 
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef, useCallback } from 'react';
-import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue, Diagram, NavigationTarget } from '../types';
+import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue, Diagram, NavigationTarget, Note } from '../types';
 import { resolveFilePath } from '../utils/fileUtils';
 // NEW IMPORTS
 import { useNavigationModule } from '../src/modules/navigation/hooks';
 import { RepoNode, LazyFile } from '../src/modules/navigation/types';
+import type { VerificationState } from '../src/types/review';
+import { storageService } from '../src/modules/persistence';
+import { parseSessionText } from '../src/lib/session-parser/index.js';
+import { scoreFiles } from '../src/lib/risk-scoring/index.js';
+import type { FileRiskScore } from '../src/lib/risk-scoring/index.js';
+import { generateReport, renderReportMarkdown } from '../src/lib/report/index.js';
+import { extractRequirements } from '../src/lib/requirements/index.js';
+import type { Requirement } from '../src/types/review';
+import { downloadBlob } from '../utils/downloadUtils';
 
 // Phase 9: Unify Selection Type
 export type SelectedFile = FileChange | LazyFile;
@@ -39,8 +48,8 @@ interface PRContextType {
   focusedLocation: FocusedLocation | null;
   scrollToLine: (file: string, line: number) => void;
   navigateToCode: (target: NavigationTarget) => Promise<boolean>;
-  setLeftTab: (tab: 'files' | 'annotations' | 'issue' | 'diagrams' | 'terminal') => void;
-  leftTab: 'files' | 'annotations' | 'issue' | 'diagrams' | 'terminal';
+  setLeftTab: (tab: 'files' | 'annotations' | 'issue' | 'diagrams' | 'terminal' | 'notes') => void;
+  leftTab: 'files' | 'annotations' | 'issue' | 'diagrams' | 'terminal' | 'notes';
   isCodeViewerReady: boolean;
   setIsCodeViewerReady: (ready: boolean) => void;
   annotations: Annotation[];
@@ -67,6 +76,27 @@ interface PRContextType {
   isLoadingRepoTree: boolean;
   toggleFullRepoMode: () => Promise<void>;
   loadGhostFile: (path: string) => Promise<LazyFile | null>;
+
+  // F1: Review Map — per-file verification states
+  fileVerificationStates: Map<string, VerificationState>;
+  setFileVerificationState: (path: string, state: VerificationState) => void;
+
+  // I1+I3: Session parser risk scoring
+  fileRiskScores: Map<string, FileRiskScore>;
+  loadSessionFile: (file: File) => Promise<void>;
+  hasSession: boolean;
+
+  // I2: Extracted requirements from session prompts
+  sessionRequirements: Requirement[];
+
+  // F3: Review Report
+  exportReviewReport: () => void;
+
+  // F5: Whiteboard notes
+  notes: Note[];
+  addNote: (text: string) => string;
+  updateNote: (id: string, text: string) => void;
+  removeNote: (id: string) => void;
 }
 
 const PRContext = createContext<PRContextType | undefined>(undefined);
@@ -77,7 +107,7 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [walkthrough, setWalkthrough] = useState<Walkthrough | null>(null);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const [isDiffMode, setIsDiffMode] = useState(true);
-  const [leftTab, setLeftTab] = useState<'files' | 'annotations' | 'issue' | 'diagrams' | 'terminal'>('files');
+  const [leftTab, setLeftTab] = useState<'files' | 'annotations' | 'issue' | 'diagrams' | 'terminal' | 'notes'>('files');
   const [isCodeViewerReady, setIsCodeViewerReady] = useState(false);
   const [viewportState, setViewportState] = useState<ViewportState>({ file: null, startLine: 0, endLine: 0 });
   const [selectionState, setSelectionState] = useState<SelectionState | null>(null);
@@ -88,6 +118,100 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [activeDiagram, setActiveDiagram] = useState<Diagram | null>(null);
   const [diagramViewMode, setDiagramViewMode] = useState<'full' | 'split'>('full');
   const [diagramSplitPercent, setDiagramSplitPercent] = useState(50);
+
+  // F1+F4: Review Map — per-file verification states, persisted per PR
+  const [fileVerificationStates, setFileVerificationStates] = useState<Map<string, VerificationState>>(new Map());
+  const isLoadingStatesRef = useRef(false);
+
+  // F4: Load saved review state when a new PR is opened
+  useEffect(() => {
+    if (prData?.id) {
+      isLoadingStatesRef.current = true;
+      setFileVerificationStates(storageService.loadReviewState(prData.id));
+    } else {
+      setFileVerificationStates(new Map());
+    }
+  }, [prData?.id]);
+
+  // F4: Persist review state whenever it changes (no size guard — must persist empty state too)
+  useEffect(() => {
+    if (prData?.id) {
+      if (isLoadingStatesRef.current) { isLoadingStatesRef.current = false; return; }
+      storageService.saveReviewState(prData.id, fileVerificationStates);
+    }
+  }, [prData?.id, fileVerificationStates]);
+
+  const setFileVerificationState = useCallback((path: string, state: VerificationState) => {
+    setFileVerificationStates(prev => new Map(prev).set(path, state));
+  }, []);
+
+  // I1+I3: Session file risk scores
+  const [fileRiskScores, setFileRiskScores] = useState<Map<string, FileRiskScore>>(new Map());
+  const [hasSession, setHasSession] = useState(false);
+  // I2: Requirements extracted from session prompts
+  const [sessionRequirements, setSessionRequirements] = useState<Requirement[]>([]);
+
+  const loadSessionFile = useCallback(async (file: File) => {
+    const text = await file.text();
+    const session = parseSessionText(text, file.name);
+    const filePaths = prData?.files.map(f => f.path) ?? [];
+
+    // I3: Risk scores
+    const riskReport = scoreFiles(session, filePaths);
+    setFileRiskScores(new Map(riskReport.files.map(s => [s.filePath, s])));
+
+    // I2: Extract requirements from prompts
+    const { requirements } = extractRequirements(session);
+    setSessionRequirements(requirements.map(r => ({
+      ...r,
+      codeSections: [],
+      verificationState: 'unreviewed' as const,
+    })));
+
+    setHasSession(true);
+  }, [prData?.files]);
+
+  // F5: Whiteboard notes — persisted per PR
+  const [notes, setNotes] = useState<Note[]>([]);
+  const isLoadingNotesRef = useRef(false);
+
+  useEffect(() => {
+    if (prData?.id) {
+      isLoadingNotesRef.current = true;
+      setNotes(storageService.loadNotes(prData.id));
+    } else {
+      setNotes([]);
+    }
+  }, [prData?.id]);
+
+  useEffect(() => {
+    if (prData?.id) {
+      if (isLoadingNotesRef.current) { isLoadingNotesRef.current = false; return; }
+      storageService.saveNotes(prData.id, notes);
+    }
+  }, [prData?.id, notes]);
+
+  const addNote = useCallback((text: string): string => {
+    const id = `note-${Date.now()}`;
+    setNotes(prev => [...prev, { id, text, timestamp: Date.now() }]);
+    return id;
+  }, []);
+
+  const updateNote = useCallback((id: string, text: string) => {
+    setNotes(prev => prev.map(n => n.id === id ? { ...n, text } : n));
+  }, []);
+
+  const removeNote = useCallback((id: string) => {
+    setNotes(prev => prev.filter(n => n.id !== id));
+  }, []);
+
+  // F3: Export review report as markdown download
+  const exportReviewReport = useCallback(() => {
+    if (!prData) return;
+    const report = generateReport({ prData, fileVerificationStates, annotations });
+    const markdown = renderReportMarkdown(report, { prData, fileVerificationStates, annotations });
+    downloadBlob(new Blob([markdown], { type: 'text/markdown' }), `review-${prData.id}-${new Date().toISOString().slice(0, 10)}.md`);
+  }, [prData, fileVerificationStates, annotations]);
 
   // NEW: Hook into the Navigation Module
   const navModule = useNavigationModule();
@@ -247,7 +371,20 @@ export const PRProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       isFullRepoMode: navModule.isFullRepoMode,
       isLoadingRepoTree: navModule.isLoadingRepoTree,
       toggleFullRepoMode,
-      loadGhostFile
+      loadGhostFile,
+      // F1: Review Map
+      fileVerificationStates,
+      setFileVerificationState,
+      // I1+I3: Risk scoring
+      fileRiskScores,
+      loadSessionFile,
+      hasSession,
+      // I2: Requirements
+      sessionRequirements,
+      // F3: Report
+      exportReviewReport,
+      // F5: Whiteboard
+      notes, addNote, updateNote, removeNote,
     }}>
       {children}
     </PRContext.Provider>
