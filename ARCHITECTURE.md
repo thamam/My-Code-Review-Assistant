@@ -67,7 +67,7 @@ Both engines call Gemini through the single lazy client in `genaiClient.ts` (`ge
 
 ## API keys — what needs one and what doesn't
 
-`src/lib/credentials.ts` covers only `VITE_GITHUB_TOKEN` and `VITE_LINEAR_API_KEY`: it reads each, in order, from a Vite env var, then `localStorage`, then `sessionStorage` (`getGitHubToken`/`getLinearKey`), and offers `saveGitHubToken`/`saveLinearKey`/`clearGitHubToken` to persist or clear them.
+`src/lib/credentials.ts` covers only `VITE_GITHUB_TOKEN` and `VITE_LINEAR_API_KEY`, and the two fall back asymmetrically: `getGitHubToken` reads, in order, a Vite env var, then `localStorage`, then `sessionStorage`; `getLinearKey` reads a Vite env var then `localStorage` only (no `sessionStorage` fallback — `saveLinearKey` only ever writes `localStorage`, matching the existing LinearModal policy of no session-vs-persistent toggle). The module offers `saveGitHubToken`/`saveLinearKey`/`clearGitHubToken` to persist or clear them.
 
 `VITE_GEMINI_API_KEY` and `VITE_GOOGLE_CLOUD_API_KEY` do **not** go through `credentials.ts` — every caller (`genaiClient.ts`, `LiveContext.tsx`, `AtomizerService.ts`, `BrainService.ts`, `DirectorService.ts`, `TTSService.ts`) reads `import.meta.env.VITE_GEMINI_API_KEY` / `VITE_GOOGLE_CLOUD_API_KEY` directly. There is no `localStorage`/`sessionStorage` fallback for either — they must be set as a Vite env var (`.env`) or the corresponding Gemini/TTS feature fails. See `.env.example` for all four vars.
 
