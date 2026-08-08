@@ -27,7 +27,7 @@ There is one `src/` root — no client/server split, no second app tree.
 - **`services/`** — `AtomizerService.ts` (spec-to-requirements atomization), `BrainService.ts` and `DirectorService.ts` (context-brief generation for the Live voice session), `diagramAgent.ts` (Mermaid diagram generation), `VoiceService.ts` (Web Speech API + AGENT_SPEAK), `github.ts` / `linear.ts` (REST clients), `walkthroughParser.ts`.
 - **`adapters/`** — `FileAdapter.ts` / `LinearAdapter.ts`: hexagonal ports that feed spec content into the Atomizer.
 - **`prompts/`** — prompt-building functions: `systemPrompt.ts`, `contextEnvelope.ts`, `directorPrompt.ts`, `modeInstructions.ts`.
-- **`lib/`** — `credentials.ts` (single source of truth for API-key/token lookup — see below), plus `chat/`, `diagramRefs.ts`, `report/`, `requirements/`, `risk-scoring/`, `session-parser/` helper modules.
+- **`lib/`** — `credentials.ts` (GitHub token / Linear key lookup and persistence — see below; the Gemini/Google Cloud keys are not part of it), plus `chat/`, `diagramRefs.ts`, `report/`, `requirements/`, `risk-scoring/`, `session-parser/` helper modules.
 - **`types/`** — shared TypeScript types (`domain.ts`, `context.ts`, `contextBrief.ts`, `review.ts`, `SpecTypes.ts`, `session-parser.ts`).
 - **`utils/`** — small pure helpers (`fileUtils.ts`, `diffUtils.ts`, `colorUtils.ts`, `downloadUtils.ts`, `VoiceUtils.ts`, `walkthroughUtils.ts`).
 - **`mock/samplePR.ts`** — the fixture behind the "Load Sample PR" button; entirely local, no network.
@@ -67,7 +67,9 @@ Both engines call Gemini through the single lazy client in `genaiClient.ts` (`ge
 
 ## API keys — what needs one and what doesn't
 
-Credential lookup (`src/lib/credentials.ts`) reads, in order: a Vite env var, then `localStorage`, then `sessionStorage`. Relevant vars (see `.env.example`): `VITE_GEMINI_API_KEY`, `VITE_GITHUB_TOKEN`, `VITE_LINEAR_API_KEY`, `VITE_GOOGLE_CLOUD_API_KEY`.
+`src/lib/credentials.ts` covers only `VITE_GITHUB_TOKEN` and `VITE_LINEAR_API_KEY`: it reads each, in order, from a Vite env var, then `localStorage`, then `sessionStorage` (`getGitHubToken`/`getLinearKey`), and offers `saveGitHubToken`/`saveLinearKey`/`clearGitHubToken` to persist or clear them.
+
+`VITE_GEMINI_API_KEY` and `VITE_GOOGLE_CLOUD_API_KEY` do **not** go through `credentials.ts` — every caller (`genaiClient.ts`, `LiveContext.tsx`, `AtomizerService.ts`, `BrainService.ts`, `DirectorService.ts`, `TTSService.ts`) reads `import.meta.env.VITE_GEMINI_API_KEY` / `VITE_GOOGLE_CLOUD_API_KEY` directly. There is no `localStorage`/`sessionStorage` fallback for either — they must be set as a Vite env var (`.env`) or the corresponding Gemini/TTS feature fails. See `.env.example` for all four vars.
 
 **Needs `VITE_GEMINI_API_KEY`:** anything that calls Gemini — Chat mode, Agent mode, Live voice, diagram generation, spec atomization (`AtomizerService`), context-brief generation (`BrainService`/`DirectorService`). Without it, those features fail with a friendly "API key missing or rejected" message (`describeChatError` in `simpleChatConfig.ts`) — they do not crash the app.
 
