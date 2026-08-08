@@ -32,6 +32,7 @@ There is one `src/` root — no client/server split, no second app tree.
 - **`utils/`** — small pure helpers (`fileUtils.ts`, `diffUtils.ts`, `colorUtils.ts`, `downloadUtils.ts`, `VoiceUtils.ts`, `walkthroughUtils.ts`).
 - **`mock/samplePR.ts`** — the fixture behind the "Load Sample PR" button; entirely local, no network.
 - **`polyfills/`** — a browser polyfill for `node:async_hooks` (aliased in `vite.config.ts`) so a Node-targeting dependency doesn't break the browser build.
+- **`check_env.js`** — a standalone Node diagnostic script (prints the Node version and cwd). Verified dead: not imported by any module, not referenced by `vite.config.ts` or `index.html`, and no `package.json` script runs it. Left in place, not deleted, per the project's convention of flagging rather than silently removing dead code.
 
 ## The EventBus spine
 
@@ -69,11 +70,13 @@ Both engines call Gemini through the single lazy client in `genaiClient.ts` (`ge
 
 `src/lib/credentials.ts` covers only `VITE_GITHUB_TOKEN` and `VITE_LINEAR_API_KEY`, and the two fall back asymmetrically: `getGitHubToken` reads, in order, a Vite env var, then `localStorage`, then `sessionStorage`; `getLinearKey` reads a Vite env var then `localStorage` only (no `sessionStorage` fallback — `saveLinearKey` only ever writes `localStorage`, matching the existing LinearModal policy of no session-vs-persistent toggle). The module offers `saveGitHubToken`/`saveLinearKey`/`clearGitHubToken` to persist or clear them.
 
-`VITE_GEMINI_API_KEY` and `VITE_GOOGLE_CLOUD_API_KEY` do **not** go through `credentials.ts` — every caller (`genaiClient.ts`, `LiveContext.tsx`, `AtomizerService.ts`, `BrainService.ts`, `DirectorService.ts`, `TTSService.ts`) reads `import.meta.env.VITE_GEMINI_API_KEY` / `VITE_GOOGLE_CLOUD_API_KEY` directly. There is no `localStorage`/`sessionStorage` fallback for either — they must be set as a Vite env var (`.env`) or the corresponding Gemini/TTS feature fails. See `.env.example` for all four vars.
+`VITE_GEMINI_API_KEY` and `VITE_GOOGLE_CLOUD_API_KEY` do **not** go through `credentials.ts` — every caller (`genaiClient.ts`, `LiveContext.tsx`, `AtomizerService.ts`, `BrainService.ts`, `DirectorService.ts`, `TTSService.ts`) reads `import.meta.env.VITE_GEMINI_API_KEY` / `VITE_GOOGLE_CLOUD_API_KEY` directly. There is no `localStorage`/`sessionStorage` fallback for either — they must be set as a Vite env var (`.env`) or the corresponding Gemini feature fails. See `.env.example` for all four vars.
 
 **Needs `VITE_GEMINI_API_KEY`:** anything that calls Gemini — Chat mode, Agent mode, Live voice, diagram generation, spec atomization (`AtomizerService`), context-brief generation (`BrainService`/`DirectorService`). Without it, those features fail with a friendly "API key missing or rejected" message (`describeChatError` in `simpleChatConfig.ts`) — they do not crash the app.
 
-**Does not need any key:** booting the app, loading the sample PR (`mock/samplePR.ts`), browsing the file tree, viewing diffs/source, the file-tree/annotation/spec/diagram *panels themselves* (as opposed to the AI features that populate them from scratch). Fetching a *real* public GitHub PR also works without `VITE_GITHUB_TOKEN` (unauthenticated GitHub API rate limits apply); the token only raises those limits. `VITE_LINEAR_API_KEY` is only needed for Linear issue linking.
+**`VITE_GOOGLE_CLOUD_API_KEY` is currently dead weight, not a feature gate.** `TTSService.ts`'s Cloud TTS path is only reachable through `VoiceService.speak(text, useCloudTTS)`, and every call site in the app (`VoiceService.init`'s `AGENT_SPEAK` subscription, `LiveContext.tsx`'s welcome message) calls it with `useCloudTTS` defaulted to `false`. So voice narration of `AGENT_SPEAK` output always uses the browser's native `SpeechSynthesisUtterance` — it needs no key at all, Gemini or Cloud, and does not fail without one. Even on the code path that *does* attempt Cloud TTS, a failure (missing key or otherwise) is caught and silently falls back to the same browser TTS, so "the TTS feature fails" was never accurate even in principle.
+
+**Does not need any key:** booting the app, loading the sample PR (`mock/samplePR.ts`), browsing the file tree, viewing diffs/source, the file-tree/annotation/spec/diagram *panels themselves* (as opposed to the AI features that populate them from scratch), and voice narration of agent/chat responses (browser TTS, see above). Fetching a *real* public GitHub PR also works without `VITE_GITHUB_TOKEN` (unauthenticated GitHub API rate limits apply); the token only raises those limits. `VITE_LINEAR_API_KEY` is only needed for Linear issue linking.
 
 ## Running with no key
 
