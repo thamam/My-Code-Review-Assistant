@@ -283,6 +283,10 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // this effect's own state, so switching PRs must always drop the old
     // one — even when the new PR has no saved history to hydrate from.
     simpleChat.reset();
+    // A turn in flight for the old PR is now stale (epoch bumped above) and
+    // its 'completed' AGENT_THINKING is suppressed, so isTyping would
+    // otherwise be stranded at true — dead send button, no persistence.
+    setIsTyping(false);
 
     const saved = storageService.loadChatHistory(prId);
     if (saved && saved.length > 0 && messages.length <= 1) {
@@ -446,6 +450,11 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   const resetChat = useCallback(() => {
+    simpleChat.reset();
+    // See the mirrored comment in the PR-load effect above: a stale
+    // in-flight turn's 'completed' event is suppressed by the epoch bump,
+    // so isTyping must be cleared here or it's stranded at true forever.
+    setIsTyping(false);
     setMessages([]);
   }, []);
 
