@@ -1,9 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 /**
- * Boot gate (Stage A, step 2): with no VITE_GEMINI_API_KEY set (the
- * authentic state of this worktree — no .env present), the app's module
- * graph must import without throwing.
+ * Boot gate (Stage A, step 2): with no VITE_GEMINI_API_KEY set, the app's
+ * module graph must import without throwing.
  *
  * Before the fix, `TheiaAgent`'s constructor eagerly called `getGenAI()`,
  * which constructs `new GoogleGenAI({ apiKey: undefined })`. In the real
@@ -17,10 +16,20 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  * hit that browser-only guard, so an import-only test can't reproduce the
  * throw here. The deterministic regression guard is: constructing
  * TheiaAgent must not eagerly touch the GenAI client at all.
+ *
+ * The "no key" condition is stubbed explicitly via `vi.stubEnv` rather than
+ * relying on this worktree having no .env — later stages need a real .env
+ * present, which would otherwise false-green this gate regardless of
+ * whether the lazy fix still holds.
  */
 describe('TheiaAgent boot without an API key', () => {
   beforeEach(() => {
     vi.resetModules();
+    vi.stubEnv('VITE_GEMINI_API_KEY', undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('does not construct the GenAI client during TheiaAgent construction', async () => {
