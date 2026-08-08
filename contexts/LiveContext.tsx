@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useState, useRef, ReactNode, useEffect } from 'react';
+import React, { createContext, useContext, useState, useRef, ReactNode, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Blob, FunctionDeclaration, Type } from "@google/genai";
 import { usePR } from './PRContext';
 import { useChat } from './ChatContext';
@@ -501,7 +501,7 @@ IF THE USER ASKS ABOUT THE LINEAR ISSUE...`;
     }
   };
 
-  const sendTextToSession = async (text: string) => {
+  const sendTextToSession = useCallback(async (text: string) => {
     if (!sessionPromiseRef.current) return;
     try {
       const session = await sessionPromiseRef.current;
@@ -509,13 +509,13 @@ IF THE USER ASKS ABOUT THE LINEAR ISSUE...`;
     } catch (e) {
       console.warn('[Theia] Failed to send context update', e);
     }
-  };
+  }, []);
 
   /**
    * Inject a ContextBrief from the Director into the live session.
    * Uses the "silent whisper" strategy - appears in context but Actor won't read it aloud.
    */
-  const injectBrief = (brief: ContextBrief) => {
+  const injectBrief = useCallback((brief: ContextBrief) => {
     if (!sessionPromiseRef.current || !isActiveRef.current) {
       console.debug('[Director] Cannot inject brief - no active session');
       return;
@@ -524,7 +524,7 @@ IF THE USER ASKS ABOUT THE LINEAR ISSUE...`;
     const whisper = formatBriefAsWhisper(brief);
     console.debug('[Director] Injecting brief for:', brief.activeFile?.path);
     sendTextToSession(whisper);
-  };
+  }, [sendTextToSession]);
 
   // --- Brain-to-Voice Bridge ---
   // When the user focuses a new file while the live session is active, run a
@@ -555,8 +555,21 @@ IF THE USER ASKS ABOUT THE LINEAR ISSUE...`;
     return () => disconnect();
   }, []);
 
+  const contextValue = useMemo<LiveContextType>(() => ({
+    isActive,
+    isConnecting,
+    connect,
+    disconnect,
+    error,
+    volume,
+    sendText: sendTextToSession,
+    injectBrief,
+    mode,
+    setMode,
+  }), [isActive, isConnecting, connect, disconnect, error, volume, sendTextToSession, injectBrief, mode, setMode]);
+
   return (
-    <LiveContext.Provider value={{ isActive, isConnecting, connect, disconnect, error, volume, sendText: sendTextToSession, injectBrief, mode, setMode }}>
+    <LiveContext.Provider value={contextValue}>
       {children}
     </LiveContext.Provider>
   );

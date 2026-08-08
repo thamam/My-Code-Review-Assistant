@@ -25,12 +25,32 @@ export const UserContextMonitor: React.FC = () => {
     // Track the current file path for race condition handling (latest-wins)
     const currentFileRef = useRef<string | null>(null);
 
-    // FR-041/FR-042: Global User Activity Tracker
+    // Guard: only send an anchor when the resolved filePath actually changes,
+    // preventing duplicate injections across effect re-runs.
+    const lastAnchorRef = useRef<string | null>(null);
+
+    // Guard: only send a diagram anchor when the title actually changes.
+    const lastDiagramAnchorRef = useRef<string | null>(null);
+
+    // Reset anchor guards when the live session goes inactive so a new session
+    // is re-grounded even if the user is still on the same file/diagram.
     useEffect(() => {
+        if (!isLiveActive) {
+            lastAnchorRef.current = null;
+            lastDiagramAnchorRef.current = null;
+        }
+    }, [isLiveActive]);
+
+    // FR-041/FR-042: Global User Activity Tracker (throttled ~100ms leading edge)
+    useEffect(() => {
+        let lastEventTime = 0;
         const handleActivity = () => {
+            const now = Date.now();
+            if (now - lastEventTime < 100) return;
+            lastEventTime = now;
             eventBus.emit({
                 type: 'USER_ACTIVITY',
-                payload: { timestamp: Date.now() }
+                payload: { timestamp: now }
             });
         };
 
@@ -62,7 +82,8 @@ export const UserContextMonitor: React.FC = () => {
 
         // S2S Grounding: Send INSTANT Visual Anchor to the live session
         // This bypasses the Director's analysis latency for immediate filename awareness.
-        if (filePath && isLiveActive) {
+        if (filePath && isLiveActive && filePath !== lastAnchorRef.current) {
+            lastAnchorRef.current = filePath;
             console.debug('[ShadowPartner] Sending Instant Anchor:', filePath);
             sendLiveText(`[CONTEXT UPDATE] VISUAL_ANCHOR: ${filePath}`);
         }
@@ -147,8 +168,9 @@ export const UserContextMonitor: React.FC = () => {
         const diagramTitle = activeDiagram?.title || null;
         updateUserContext({ activeDiagram: diagramTitle });
 
-        // S2S Grounding: Immediate diagram awareness
-        if (diagramTitle && isLiveActive) {
+        // S2S Grounding: Immediate diagram awareness (only on actual change)
+        if (diagramTitle && isLiveActive && diagramTitle !== lastDiagramAnchorRef.current) {
+            lastDiagramAnchorRef.current = diagramTitle;
             sendLiveText(`[CONTEXT UPDATE] ACTIVE_DIAGRAM: ${diagramTitle}`);
         }
     }, [activeDiagram, updateUserContext, isLiveActive, sendLiveText]);
