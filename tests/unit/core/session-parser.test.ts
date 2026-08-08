@@ -7,8 +7,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseSessionText, summarizeSession } from '../../../src/lib/session-parser/parser.js';
-import type { ParsedSession } from '../../../src/lib/session-parser/index.js';
+import { parseSessionText, summarizeSession } from '../../../src/lib/session-parser/parser';
+import type { ParsedSession } from '../../../src/lib/session-parser/index';
 
 // ─── Test Fixture Helpers ─────────────────────────────────────────────────────
 

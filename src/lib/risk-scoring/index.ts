@@ -11,7 +11,7 @@
  *   - error_nearby  (+0.20): An error occurred within 3 turns of a write to this file
  */
 
-import type { ParsedSession, FileWrite } from '../session-parser/types.js';
+import type { ParsedSession, FileWrite } from '../session-parser/types';
 
 // ─── Output Types ─────────────────────────────────────────────────────────────
 

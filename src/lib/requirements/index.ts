@@ -7,8 +7,8 @@
  * No LLM call — rule-based for zero latency.
  */
 
-import type { ParsedSession } from '../session-parser/types.js';
-import type { Requirement } from '../../types/review.js';
+import type { ParsedSession } from '../session-parser/types';
+import type { Requirement } from '../../types/review';
 
 // Sentence patterns that signal a requirement
 const REQUIREMENT_PATTERNS: RegExp[] = [
