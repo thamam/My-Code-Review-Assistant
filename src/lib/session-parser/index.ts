@@ -16,6 +16,6 @@ export type {
   ErrorSequence,
   ThinkingTrace,
   RawSessionRecord,
-} from './types.js';
+} from './types';
 
-export { parseSessionFile, parseSessionText, summarizeSession } from './parser.js';
+export { parseSessionFile, parseSessionText, summarizeSession } from './parser';

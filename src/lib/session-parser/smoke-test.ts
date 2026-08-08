@@ -7,7 +7,7 @@
  * ~/.claude/projects/ as a default test target.
  */
 
-import { parseSessionFile, summarizeSession } from './parser.js';
+import { parseSessionFile, summarizeSession } from './parser';
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';

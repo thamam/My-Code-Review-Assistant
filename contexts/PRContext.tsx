@@ -14,11 +14,11 @@ import { RepoNode, LazyFile } from '../src/modules/navigation/types';
 import { waitForLine, findNearestLine } from '../src/modules/navigation/lineRegistry';
 import type { VerificationState } from '../src/types/review';
 import { storageService } from '../src/modules/persistence';
-import { parseSessionText } from '../src/lib/session-parser/index.js';
-import { scoreFiles } from '../src/lib/risk-scoring/index.js';
-import type { FileRiskScore } from '../src/lib/risk-scoring/index.js';
-import { generateReport, renderReportMarkdown } from '../src/lib/report/index.js';
-import { extractRequirements } from '../src/lib/requirements/index.js';
+import { parseSessionText } from '../src/lib/session-parser/index';
+import { scoreFiles } from '../src/lib/risk-scoring/index';
+import type { FileRiskScore } from '../src/lib/risk-scoring/index';
+import { generateReport, renderReportMarkdown } from '../src/lib/report/index';
+import { extractRequirements } from '../src/lib/requirements/index';
 import type { Requirement } from '../src/types/review';
 import { downloadBlob } from '../utils/downloadUtils';
 

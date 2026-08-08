@@ -8,7 +8,7 @@
 import type { PRData, Annotation } from '../../../types';
 import type { VerificationState } from '../../types/review';
 import type { ReviewReport } from '../../types/review';
-import type { FileRiskScore } from '../risk-scoring/index.js';
+import type { FileRiskScore } from '../risk-scoring/index';
 
 export interface ReportInput {
   prData: PRData;

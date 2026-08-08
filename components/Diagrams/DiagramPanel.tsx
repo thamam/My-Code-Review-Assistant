@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { usePR } from '../../contexts/PRContext';
 import { DiagramAgent } from '../../services/diagramAgent';
 import { DiagramType } from '../../types';
@@ -20,7 +20,10 @@ export const DiagramPanel: React.FC = () => {
     const [showPromptInput, setShowPromptInput] = useState(false);
     const [diagramType, setDiagramType] = useState<DiagramType>('sequence');
 
-    const agent = new DiagramAgent();
+    // DiagramAgent itself is lazy internally (no GenAI client construction
+    // until first use), but there is no reason to allocate a fresh instance
+    // on every render either.
+    const agent = useMemo(() => new DiagramAgent(), []);
 
     const handleAutoGenerate = async () => {
         if (!prData) return;

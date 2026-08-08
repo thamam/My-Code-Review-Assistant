@@ -2,6 +2,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { PRData, Diagram, CodeReference, DiagramType } from '../types';
 import { extractRefs, resolveRefPaths, DiagramRef } from '../src/lib/diagramRefs';
+import { getGenAI } from '../src/modules/core/genaiClient';
 
 function toCodeReferences(refs: DiagramRef[], prFiles: string[]): CodeReference[] {
   return resolveRefPaths(refs, prFiles).map(ref => ({
@@ -22,10 +23,16 @@ const DIAGRAM_TYPE_INSTRUCTIONS: Record<DiagramType, string> = {
 };
 
 export class DiagramAgent {
-  private ai: GoogleGenAI;
-
-  constructor() {
-    this.ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+  // Lazy: constructing GoogleGenAI eagerly throws when no API key is set.
+  // DiagramPanel builds a DiagramAgent in its render body, so an eager
+  // `new GoogleGenAI(...)` here would crash on render for anyone without
+  // VITE_GEMINI_API_KEY set — the same class of boot-time throw that
+  // TheiaAgent's lazy `ai` getter (src/modules/core/genaiClient.ts) exists
+  // to prevent. Routed through the shared singleton for consistency.
+  private _ai: GoogleGenAI | null = null;
+  private get ai(): GoogleGenAI {
+    if (!this._ai) this._ai = getGenAI();
+    return this._ai;
   }
 
   private buildManifest(prData: PRData): string {
