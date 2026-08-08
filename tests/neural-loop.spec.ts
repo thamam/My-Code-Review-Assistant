@@ -47,6 +47,12 @@ test.describe('Phase 10: The Neural Loop', () => {
     });
 
     test('AGENT_NAVIGATE event triggers file navigation', async ({ page }) => {
+        // FR-042 Focus Lock: ChatContext suppresses AGENT_NAVIGATE for 3s after
+        // the last tracked USER_ACTIVITY (mousemove/mousedown/keydown), and the
+        // "Load Sample PR" click in beforeEach counts as activity. Wait it out
+        // so this test exercises the navigation handler, not the focus lock.
+        await page.waitForTimeout(3100);
+
         // Inject AGENT_NAVIGATE event directly into the EventBus
         await page.evaluate(() => {
             (window as any).__THEIA_EVENT_BUS__.emit({
@@ -68,6 +74,10 @@ test.describe('Phase 10: The Neural Loop', () => {
     });
 
     test('AGENT_TAB_SWITCH event triggers tab change', async ({ page }) => {
+        // FR-042 Focus Lock (see AGENT_NAVIGATE test above) also guards
+        // AGENT_TAB_SWITCH — wait it out before injecting the event.
+        await page.waitForTimeout(3100);
+
         // Inject AGENT_TAB_SWITCH event
         await page.evaluate(() => {
             (window as any).__THEIA_EVENT_BUS__.emit({
