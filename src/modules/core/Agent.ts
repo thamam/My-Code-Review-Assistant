@@ -28,6 +28,20 @@ export interface PendingAction {
   rationale: string; // "I need to edit this file to fix the bug..."
 }
 
+/**
+ * The Judge's verdict for one tool invocation.
+ * Success is decided structurally, not by sniffing the output string: a tool that
+ * throws can never be scored as exit 0.
+ */
+interface ToolOutcome {
+  /** Human-readable output — shown to the user and fed back to the Planner on repair. */
+  output: string;
+  /** True only when the tool returned without throwing and reported no non-zero exit code. */
+  ok: boolean;
+  /** Exit code from an `[Exit Code: N]` marker; null when the tool threw or emitted no marker. */
+  exitCode: number | null;
+}
+
 export interface AgentState {
   messages: { role: string; content: string }[];
   context: ContextSnapshot | null; // The UserContextState passed from UI
@@ -191,6 +205,38 @@ const executorTools = [...uiTools, ...knowledgeTools];
 
 // Phase 15: The Gatekeeper - Sensitive tools require human approval
 const SENSITIVE_TOOLS = ['run_terminal_command', 'write_file'];
+
+// Terminal commands that only read. This list was dead until the executor started
+// forwarding the model's real arguments — `args.command` was always undefined, so
+// every terminal command fell through into the approval modal.
+const READ_ONLY_COMMANDS = ['ls', 'find', 'grep', 'cat'];
+
+// `find` can run arbitrary programs, delete files, or write output via its own
+// primitives (-exec, -delete, -fprintf, -fls, ...). Deny-listing each mutating flag
+// individually is a losing game, so only known-safe filtering/traversal flags are
+// permitted; anything else re-arms the approval gate.
+const FIND_SAFE_FLAGS = new Set(['-name', '-iname', '-type', '-maxdepth', '-path']);
+
+/**
+ * True when a terminal invocation is safe to run without asking the user.
+ * Both the executable AND its arguments must be read-only: WebContainer spawns
+ * (command, argv) directly with no shell, so argv is the only remaining escape hatch.
+ */
+function isReadOnlyInvocation(name: string, args: any): boolean {
+  if (name !== 'run_terminal_command') return false;
+  if (!READ_ONLY_COMMANDS.includes(args?.command)) return false;
+
+  // A non-array `args.args` isn't a shape the scan below understands — fail closed
+  // rather than silently treating it as "no arguments" and skipping the scan.
+  if (args?.args !== undefined && !Array.isArray(args.args)) return false;
+  const argv: unknown[] = Array.isArray(args?.args) ? args.args : [];
+
+  if (args.command === 'find') {
+    return !argv.some(a => typeof a === 'string' && a.startsWith('-') && !FIND_SAFE_FLAGS.has(a));
+  }
+
+  return true;
+}
 
 export class TheiaAgent {
   private ai: GoogleGenAI;
@@ -501,17 +547,11 @@ export class TheiaAgent {
         payload: { text: formatDualTrack('Executing the approved action now.', `Executing \`${pendingAction.tool}\`...`) }
       });
 
-      let stepResult: string;
-      try {
-        stepResult = await this.executeTool(pendingAction.tool, pendingAction.args, prData);
-      } catch (err: any) {
-        stepResult = `Error: ${err.message}`;
-      }
-
-      // Analyze result (replicate "The Judge" logic)
-      const exitCodeMatch = stepResult.match(/\[Exit Code: (\d+)\]/);
-      const exitCode = exitCodeMatch ? parseInt(exitCodeMatch[1], 10) : 0;
-      const isSuccess = exitCode === 0;
+      // Execute the exact tool + arguments the user saw in the approval modal, and
+      // score the outcome with the same Judge the executor uses.
+      const outcome = await this.runTool(pendingAction.tool, pendingAction.args, prData);
+      const stepResult = outcome.output;
+      const isSuccess = outcome.ok;
 
       // Update Plan
       const currentStep = plan.steps[plan.activeStepIndex];
@@ -537,10 +577,15 @@ export class TheiaAgent {
         status: nextStatus
       };
 
-      // UX: Report result
+      // UX: Report result (an approved action that failed must not read as a success)
       eventBus.emit({
         type: 'AGENT_SPEAK',
-        payload: { text: formatDualTrack(`Step ${plan.activeStepIndex + 1} completed.`, `**Step ${plan.activeStepIndex + 1}:**\n${stepResult}`) }
+        payload: {
+          text: formatDualTrack(
+            `Step ${plan.activeStepIndex + 1} ${isSuccess ? 'completed' : 'failed'}.`,
+            `**Step ${plan.activeStepIndex + 1}${isSuccess ? '' : ' (Failed)'}:**\n${stepResult}`
+          )
+        }
       });
 
       // Resume graph with updated state (clear pendingAction)
@@ -980,16 +1025,30 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
     }
 
     // SCENARIO C: SUCCESS (Proceed to Gatekeeper)
-    const name = currentStep.tool;
-    const args = currentStep.args || {};
+    // Take the tool AND its arguments from the call the model was just forced to make.
+    // The plan step is not a source of arguments: submit_plan's schema declares only
+    // `description` and `tool`, so `currentStep.args` is structurally always undefined.
+    // `currentStep.tool` remains a fallback for a call that arrives without a name.
+    const name = functionCall.name || currentStep.tool;
+    const args = (functionCall.args || {}) as Record<string, any>;
+
+    if (!name) {
+      console.warn('[Executor] Function call carried no tool name and the step suggested none.');
+      return {
+        plan: {
+          ...plan,
+          status: 'failed' as const,
+          steps: plan.steps.map((s, i) => i === plan.activeStepIndex ?
+            { ...s, status: 'failed' as const, result: 'Error: Tool call had no resolvable name.' } : s)
+        },
+        lastError: 'Executor received a function call with no tool name.'
+      };
+    }
 
     // Phase 15: The Gatekeeper - Sensitive tools require human approval
     // FR-011: Interception Logic
     // Optimization: Read-only commands are SAFE
-    const isReadOnlyCommand = name === 'run_terminal_command' && 
-      (args.command === 'ls' || args.command === 'find' || args.command === 'grep' || args.command === 'cat');
-    
-    const isSensitive = SENSITIVE_TOOLS.includes(name) && !isReadOnlyCommand;
+    const isSensitive = SENSITIVE_TOOLS.includes(name) && !isReadOnlyInvocation(name, args);
 
     if (isSensitive) {
       console.log(`[Gatekeeper] Intercepting sensitive tool: ${name}`);
@@ -1011,8 +1070,6 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
     }
     // -----------------------------------
 
-    let stepResult = "No tool execution needed.";
-
     // 4. Execute Tool (if not sensitive or already approved)
     console.log(`[Executor] Calling ${name} with`, args);
 
@@ -1021,12 +1078,8 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
       payload: { text: formatDualTrack(`Running ${name}.`, `Running: \`${name}\``) }
     });
 
-    try {
-      const output = await this.executeTool(name, args, prData);
-      stepResult = output;
-    } catch (err: any) {
-      stepResult = `Error: ${err.message}`;
-    }
+    const outcome = await this.runTool(name, args, prData);
+    const stepResult = outcome.output;
 
     // UX: Tell the user what we got
     eventBus.emit({
@@ -1036,22 +1089,20 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
       }
     });
 
-    // 5. Analyze Result (The Judge)
-    const exitCodeMatch = stepResult.match(/\[Exit Code: (\d+)\]/);
-    const exitCode = exitCodeMatch ? parseInt(exitCodeMatch[1], 10) : 0;
-
-    const isSuccess = exitCode === 0;
+    // 5. Analyze Result (The Judge) — already scored structurally by runTool.
+    const isSuccess = outcome.ok;
     const stepStatus: PlanStep['status'] = isSuccess ? 'completed' : 'failed';
+    const failureReason = outcome.exitCode === null ? 'tool error' : `Exit Code: ${outcome.exitCode}`;
 
     if (!isSuccess) {
-      console.log(`[Executor] Step failed with exit code ${exitCode}. Emitting tool_error.`);
+      console.log(`[Executor] Step failed (${failureReason}). Emitting tool_error.`);
       eventBus.emit({
         type: 'AGENT_THINKING',
-        payload: { 
-          stage: 'tool_error', 
-          message: `Step failed (Exit Code: ${exitCode}).`, 
+        payload: {
+          stage: 'tool_error',
+          message: `Step failed (${failureReason}).`,
           timestamp: Date.now(),
-          error: stepResult 
+          error: stepResult
         }
       });
     }
@@ -1072,7 +1123,7 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
         nextStatus = 'completed';
       }
     } else {
-      console.warn(`[Executor] Step ${plan.activeStepIndex + 1} Failed with Exit Code ${exitCode}. Stopping.`);
+      console.warn(`[Executor] Step ${plan.activeStepIndex + 1} Failed (${failureReason}). Stopping.`);
       nextStatus = 'failed';
     }
 
@@ -1280,6 +1331,33 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
         payload: { command, args, timestamp: Date.now() }
       });
     });
+  }
+
+  /**
+   * Runs a tool and scores the outcome (The Judge).
+   *
+   * The score is structural, not textual. A tool that throws is a failure by
+   * construction — it never reaches the exit-code parser, so it can no longer be
+   * silently read as exit 0 and marked `completed`. Only a clean return is eligible
+   * for success, and an explicit `[Exit Code: N]` marker downgrades it when N != 0.
+   */
+  private async runTool(name: string, args: any, prData?: any): Promise<ToolOutcome> {
+    let output: string;
+    try {
+      output = await this.executeTool(name, args, prData);
+    } catch (err: any) {
+      return { output: `Error: ${err?.message ?? String(err)}`, ok: false, exitCode: null };
+    }
+
+    // A safety-timeout resolves (it does not throw) so the partial output survives,
+    // but it must never be scored as success — the command never actually finished.
+    if (output.includes('[Error: Command timed out')) {
+      return { output, ok: false, exitCode: null };
+    }
+
+    const exitCodeMatch = output.match(/\[Exit Code: (\d+)\]/);
+    const exitCode = exitCodeMatch ? parseInt(exitCodeMatch[1], 10) : null;
+    return { output, ok: exitCode === null || exitCode === 0, exitCode };
   }
 
   /**
