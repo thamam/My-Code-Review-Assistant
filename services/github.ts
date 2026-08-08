@@ -363,8 +363,10 @@ export class GitHubService {
 
     // GitHub returns content as base64 encoded
     if (data.encoding === 'base64' && data.content) {
-      // Decode base64 content
-      return atob(data.content.replace(/\n/g, ''));
+      // Decode base64 content as UTF-8 (GitHub encodes UTF-8 bytes)
+      const bin = atob(data.content.replace(/\n/g, ''));
+      const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+      return new TextDecoder('utf-8').decode(bytes);
     }
 
     // If content is not base64 (shouldn't happen for normal files)

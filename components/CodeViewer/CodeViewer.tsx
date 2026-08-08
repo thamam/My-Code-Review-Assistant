@@ -17,7 +17,8 @@ export const CodeViewer: React.FC = () => {
 
   if (!selectedFile) return <div className="h-full flex items-center justify-center text-gray-500 bg-gray-950"><FileCode2 size={48} /></div>;
 
-  const isSource = selectedFile.status === 'unchanged' || !isDiffMode || isPreviewMode;
+  const previewActive = isPreviewMode && selectedFile.path.endsWith('.md');
+  const isSource = selectedFile.status === 'unchanged' || !isDiffMode || previewActive;
   return (
     <div className="h-full flex flex-col bg-gray-950 overflow-hidden relative" data-testid="code-viewer-container">
       <div className="flex items-center justify-between p-3 border-b border-gray-800 bg-gray-900 shrink-0">
@@ -43,7 +44,7 @@ export const CodeViewer: React.FC = () => {
         </div>
       </div>
       <div ref={containerRef} data-testid="code-viewer-scroll-container" className="flex-1 overflow-auto custom-scrollbar relative">
-        {isPreviewMode && selectedFile.path.endsWith('.md') ? (
+        {previewActive ? (
           <div className="p-8"><MarkdownRenderer content={(selectedFile as any).newContent || (selectedFile as any).content || ''} /></div>
         ) : isSource ? (
           <SourceView
