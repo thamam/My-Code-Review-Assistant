@@ -239,7 +239,18 @@ function isReadOnlyInvocation(name: string, args: any): boolean {
 }
 
 export class TheiaAgent {
-  private ai: GoogleGenAI;
+  // Lazy: constructing GoogleGenAI eagerly throws when no API key is set,
+  // and `agent` below is a module-scope singleton — an eager `this.ai =
+  // getGenAI()` in the constructor would crash the whole module graph on
+  // import (white screen) for anyone without VITE_GEMINI_API_KEY set.
+  private _ai: GoogleGenAI | null = null;
+  private get ai(): GoogleGenAI {
+    if (!this._ai) this._ai = getGenAI();
+    return this._ai;
+  }
+  private set ai(value: GoogleGenAI) {
+    this._ai = value;
+  }
   private model: string = 'gemini-3.1-pro-preview';
   private chatSession: any = null;
   private workflow: any;
@@ -249,8 +260,6 @@ export class TheiaAgent {
   private isBusy: boolean = false;
 
   constructor() {
-    this.ai = getGenAI();
-
     // 1. Define the Graph
     const graph = new StateGraph<AgentState>({
       channels: {
