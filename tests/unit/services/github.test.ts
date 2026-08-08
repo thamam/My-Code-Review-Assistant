@@ -120,3 +120,27 @@ describe('GitHubService.fetchPR — unauthenticated raw URL path encoding', () =
     expect(contentUrl).toBe('https://raw.githubusercontent.com/o/r/headsha/src/my%20file.ts');
   });
 });
+
+describe('GitHubService.fetchFileContent — UTF-8 base64 decode', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('decodes non-ASCII (Hebrew + emoji + em-dash) content without mojibake', async () => {
+    const service = new GitHubService('tok');
+    const original = 'שלום 🌍 — unicode test';
+
+    // Pre-encode the same way GitHub does: UTF-8 bytes -> base64
+    const utf8Bytes = new TextEncoder().encode(original);
+    let binary = '';
+    for (const b of utf8Bytes) binary += String.fromCharCode(b);
+    const b64 = btoa(binary);
+
+    global.fetch = vi.fn(async () => {
+      return response({ encoding: 'base64', content: b64 });
+    }) as any;
+
+    const result = await service.fetchFileContent('o', 'r', 'file.md', 'main');
+    expect(result).toBe(original);
+  });
+});

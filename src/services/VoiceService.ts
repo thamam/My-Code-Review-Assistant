@@ -12,6 +12,7 @@
 
 import { eventBus } from '../modules/core/EventBus';
 import { speakWithCloudTTS } from '../modules/voice/TTSService';
+import { sanitizeForVoice } from '../utils/VoiceUtils';
 
 // Voice state
 let isSpeaking = false;
@@ -136,7 +137,7 @@ export async function speak(text: string, useCloudTTS = false): Promise<void> {
  * @param payload - Either Dual-Track JSON string or plain text
  * @returns The voice track to speak
  */
-function extractVoiceTrack(payload: string): string {
+export function extractVoiceTrack(payload: string): string {
     try {
         const parsed = JSON.parse(payload);
         if (parsed && typeof parsed.voice === 'string') {
@@ -144,10 +145,10 @@ function extractVoiceTrack(payload: string): string {
             return parsed.voice;
         }
     } catch {
-        // Not JSON - use as-is (legacy fallback)
+        // Not JSON - sanitize code blocks/inline code and cap length
         console.log('[VoiceService] Plain text detected (legacy mode)');
     }
-    return payload;
+    return sanitizeForVoice(payload).substring(0, 400);
 }
 
 /**
