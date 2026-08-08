@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { GitHubService } from '../../../services/github';
+import { GitHubService } from '../../../src/services/github';
 
 function response(body: any, ok = true, status = 200): Response {
   return {

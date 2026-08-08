@@ -4,7 +4,7 @@
  * Defines the contract between UI (Signals) and Agent (Actions).
  */
 import type { ContextSnapshot } from '../../types/context';
-import type { GroundingChunk } from '../../../types';
+import type { GroundingChunk } from '../../types/domain';
 
 // ============================================================================
 // INPUT SIGNALS (UserIntent) - UI -> Agent

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { extractRequirements } from '../../../src/lib/requirements/index.js';
-import type { ParsedSession } from '../../../src/lib/session-parser/types.js';
+import { extractRequirements } from '../../../src/lib/requirements/index';
+import type { ParsedSession } from '../../../src/lib/session-parser/types';
 
 function makeSession(prompts: Array<{ index: number; text: string }>): ParsedSession {
   return {

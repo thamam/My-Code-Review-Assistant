@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { resolveActiveFileContent, ACTIVE_FILE_CONTENT_LIMIT } from '../../../src/types/context';
-import type { FileChange } from '../../../types';
+import type { FileChange } from '../../../src/types/domain';
 import type { LazyFile } from '../../../src/modules/navigation/types';
 
 describe('resolveActiveFileContent', () => {

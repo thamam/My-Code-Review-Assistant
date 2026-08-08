@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { simpleChat } from '../../../src/modules/core/SimpleChat';
 import { eventBus } from '../../../src/modules/core/EventBus';
-import type { ChatMessage } from '../../../types';
+import type { ChatMessage } from '../../../src/types/domain';
 
 // Hoisted so the vi.mock factory below (itself hoisted above imports by
 // vitest) can reference it. Lets tests control exactly what

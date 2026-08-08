@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { scoreFiles } from '../../../src/lib/risk-scoring/index.js';
-import type { ParsedSession } from '../../../src/lib/session-parser/types.js';
+import { scoreFiles } from '../../../src/lib/risk-scoring/index';
+import type { ParsedSession } from '../../../src/lib/session-parser/types';
 
 // Minimal ParsedSession factory
 function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {

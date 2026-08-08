@@ -7,7 +7,7 @@
  */
 
 import { SpecAtom } from '../types/SpecTypes';
-import { AppMode } from '../../types';
+import { AppMode } from '../types/domain';
 import { buildModeLine } from './modeInstructions';
 
 export const DIRECTOR_SYSTEM_PROMPT = `You are the "Director" in a code review assistant. Your job is to analyze source code and produce a structured JSON summary called a "ContextBrief".

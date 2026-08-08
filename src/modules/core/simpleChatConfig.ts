@@ -3,7 +3,7 @@
  * Pure, side-effect-free helpers for SimpleChat. Unit-test target — no
  * network calls, no EventBus, no GoogleGenAI construction.
  */
-import type { GroundingChunk } from '../../../types';
+import type { GroundingChunk } from '../../types/domain';
 
 export interface SimpleTurn {
   role: 'user' | 'model';

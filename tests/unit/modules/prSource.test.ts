@@ -1,6 +1,6 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { PRData } from '../../../types';
+import type { PRData } from '../../../src/types/domain';
 
 // Shared mock instance — PRSourceService constructs GitHubService lazily via
 // getGitHubToken(), so every `new GitHubService(...)` call must return this.
@@ -10,7 +10,7 @@ const mockGithubInstance = {
     fetchRepoMode: vi.fn(),
 };
 
-vi.mock('../../../services/github', () => ({
+vi.mock('../../../src/services/github', () => ({
     GitHubService: vi.fn().mockImplementation(function () {
         return mockGithubInstance;
     })
@@ -182,7 +182,7 @@ describe('PRSourceService', () => {
 
     describe('load — tokenOverride', () => {
         it('constructs GitHubService with the override token instead of getGitHubToken()', async () => {
-            const { GitHubService } = await import('../../../services/github');
+            const { GitHubService } = await import('../../../src/services/github');
             const { prSourceService } = await loadService();
             const url = 'https://github.com/o/r/pull/1';
             mockGithubInstance.detectUrlType.mockReturnValue('pr');
@@ -194,7 +194,7 @@ describe('PRSourceService', () => {
         });
 
         it('falls back to getGitHubToken() when no override is given', async () => {
-            const { GitHubService } = await import('../../../services/github');
+            const { GitHubService } = await import('../../../src/services/github');
             const { prSourceService } = await loadService();
             const url = 'https://github.com/o/r/pull/2';
             mockGithubInstance.detectUrlType.mockReturnValue('pr');

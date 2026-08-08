@@ -20,7 +20,7 @@ import type {
   FileWrite,
   ErrorSequence,
   ThinkingTrace,
-} from './types.js';
+} from './types';
 
 // ─── Tool Classification ──────────────────────────────────────────────────────
 

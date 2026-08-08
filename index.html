@@ -5,23 +5,17 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Visual Code Review</title>
-  <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            gray: {
-              750: '#2d3748',
-              850: '#1a202c',
-              950: '#0f131a',
-            }
-          }
-        }
-      }
-    }
-  </script>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+  <!-- Styling decision: Tailwind is built locally (tailwind.config.js,
+       postcss.config.js, src/styles/tailwind.css imported from
+       src/index.tsx) via the tailwindcss/postcss/autoprefixer/
+       @tailwindcss/typography devDependencies, and Vite's dev/build
+       pipeline runs it through PostCSS. The custom gray-750/850/950
+       shades and the typography plugin (used by MarkdownRenderer's
+       `prose` classes) live in tailwind.config.js. Prism's theme CSS is
+       imported from the prismjs package (also in src/index.tsx) rather
+       than a CDN link. Neither depends on network access at dev, build,
+       or runtime — see tests/boot-smoke.spec.ts, which asserts exactly
+       that. Do not reintroduce a CDN <script>/<link> for either. -->
   <style>
     /* Custom scrollbar for webkit */
     ::-webkit-scrollbar {
@@ -67,29 +61,11 @@
       cursor: pointer;
     }
   </style>
-  <script type="importmap">
-{
-  "imports": {
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "lucide-react": "https://esm.sh/lucide-react@^0.561.0",
-    "clsx": "https://esm.sh/clsx@^2.1.1",
-    "diff": "https://esm.sh/diff@^5.2.0",
-    "date-fns": "https://esm.sh/date-fns@^4.1.0",
-    "@google/genai": "https://esm.sh/@google/genai@^1.33.0",
-    "prismjs": "https://esm.sh/prismjs@1.29.0",
-    "react-markdown": "https://esm.sh/react-markdown@9.0.1?bundle",
-    "remark-gfm": "https://esm.sh/remark-gfm@4.0.0?bundle",
-    "mermaid": "https://esm.sh/mermaid@10.9.0"
-  }
-}
-</script>
 </head>
 
 <body class="bg-gray-900 text-white overflow-hidden h-screen w-screen">
   <div id="root"></div>
-  <script type="module" src="/index.tsx"></script>
+  <script type="module" src="/src/index.tsx"></script>
 </body>
 
 </html>

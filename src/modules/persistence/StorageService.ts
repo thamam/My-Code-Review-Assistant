@@ -10,7 +10,7 @@
 
 import { AgentState } from "../core/Agent";
 import type { VerificationState } from "../../types/review";
-import type { Note, Diagram, ChatMessage } from "../../../types";
+import type { Note, Diagram, ChatMessage } from "../../types/domain";
 
 const STORAGE_KEY = 'THEIA_AGENT_STATE_V1';
 const REVIEW_STATE_PREFIX = 'THEIA_REVIEW_STATE_V1_';
