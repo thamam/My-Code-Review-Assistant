@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateReport, renderReportMarkdown } from '../../../src/lib/report/index';
-import type { PRData } from '../../../types/index';
+import type { PRData } from '../../../src/types/domain';
 
 function makePR(): PRData {
   return {

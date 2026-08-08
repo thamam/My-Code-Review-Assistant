@@ -3,7 +3,7 @@
  * Single source of truth for what each AppMode means, shared by Agent.ts
  * (system + planner prompts) and DirectorService.ts (voice brief prompt).
  */
-import { AppMode } from '../../types';
+import { AppMode } from '../types/domain';
 
 interface ModeInstruction {
   label: string;

@@ -5,7 +5,7 @@
  * Pure function — no side effects.
  */
 
-import type { PRData, Annotation } from '../../../types';
+import type { PRData, Annotation } from '../../types/domain';
 import type { VerificationState } from '../../types/review';
 import type { ReviewReport } from '../../types/review';
 import type { FileRiskScore } from '../risk-scoring/index';

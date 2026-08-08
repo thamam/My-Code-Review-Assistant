@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { HIT_CANDIDATE_SELECTOR, extractLabelText, getHitCandidates } from '../../../../components/Diagrams/MermaidRenderer';
+import { HIT_CANDIDATE_SELECTOR, extractLabelText, getHitCandidates } from '../../../../src/components/Diagrams/MermaidRenderer';
 import { buildBindingPlan, resolveRefPaths, DiagramRef } from '../../../../src/lib/diagramRefs';
 
 const OLD_V8_SELECTOR = '[class^="messageLine"], .edgePath .path';

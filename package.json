@@ -29,7 +29,8 @@
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
     "test:e2e": "npx playwright test",
-    "test:e2e:director": "npx playwright test tests/director-actor.spec.ts"
+    "test:e2e:director": "npx playwright test tests/director-actor.spec.ts",
+    "check:paths": "node tools/check-paths.mjs"
   },
   "devDependencies": {
     "@google/genai": "^1.34.0",

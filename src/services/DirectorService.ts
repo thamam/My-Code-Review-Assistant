@@ -13,7 +13,7 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { ContextBrief } from "../types/contextBrief";
-import { ChatMessage, AppMode } from "../../types";
+import { ChatMessage, AppMode } from "../types/domain";
 import { SpecAtom } from "../types/SpecTypes";
 import { DIRECTOR_SYSTEM_PROMPT, buildDirectorPrompt } from "../prompts/directorPrompt";
 

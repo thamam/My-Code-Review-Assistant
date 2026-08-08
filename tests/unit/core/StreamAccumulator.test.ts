@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { applyAgentSpeak } from '../../../src/lib/chat/applyAgentSpeak';
-import type { ChatMessage } from '../../../types';
+import type { ChatMessage } from '../../../src/types/domain';
 
 describe('applyAgentSpeak', () => {
   it('appends with the legacy ai-<id>-<ts> id when messageId is absent (agent-path regression lock)', () => {

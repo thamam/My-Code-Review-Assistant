@@ -10,7 +10,7 @@
  * appends; subsequent events upsert in place with cumulative content, so a
  * growing partial reads as one bubble instead of N.
  */
-import type { ChatMessage } from '../../../types';
+import type { ChatMessage } from '../../types/domain';
 import type { AgentSpeakEvent } from '../../modules/core/types';
 
 export function applyAgentSpeak(

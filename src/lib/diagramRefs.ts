@@ -6,7 +6,7 @@
  * plan instead of trusting DOM ordering to stay stable across renders.
  */
 
-import { resolveFilePath } from '../../utils/fileUtils';
+import { resolveFilePath } from '../utils/fileUtils';
 
 // Pattern: {description}§{filepath}:{line}
 // Matches in Sequence: User->>System: Label§file:10

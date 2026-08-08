@@ -5,7 +5,7 @@
  * Replaces `context: any` in AgentState so TypeScript catches mismatches
  * between what the UI sends and what Agent.buildContextEnvelope reads.
  */
-import type { FileChange, AppMode } from '../../types';
+import type { FileChange, AppMode } from './domain';
 import type { LazyFile } from '../modules/navigation/types';
 
 /** Max chars of active-file content injected into the AI prompt. Content beyond this is truncated. */
