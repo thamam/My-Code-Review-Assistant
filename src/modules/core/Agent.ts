@@ -8,70 +8,26 @@ import { StateGraph, START, END } from "@langchain/langgraph";
 import { GoogleGenAI, FunctionDeclaration, Type, ThinkingLevel, type GenerateContentConfig } from "@google/genai";
 import { eventBus } from "./EventBus";
 import { AgentPlan, PlanStep } from "../planner/types";
-import { searchService } from '../search';
 import { storageService } from '../persistence';
-import { sanitizeForVoice } from "../../utils/VoiceUtils";
-import { formatSearchCommand, formatWriteFileCommand } from "../runtime/ToolUtils";
-import { DiagramAgent } from "../../services/diagramAgent";
 import { ContextSnapshot } from "../../types/context";
 import { buildModeSection } from "../../prompts/modeInstructions";
 import { buildContextEnvelope } from "../../prompts/contextEnvelope";
 import { buildSystemPrompt } from "../../prompts/systemPrompt";
 import { getGenAI } from "./genaiClient";
+import type { AgentState, PendingAction, ToolOutcome } from "./agent/types";
+import { formatDualTrack, type DualTrackResponse } from "./agent/dualTrack";
+import {
+  uiTools,
+  executorTools,
+  SENSITIVE_TOOLS,
+  isReadOnlyInvocation,
+  dispatchTool,
+  scoreToolOutcome,
+  type ToolDispatchContext,
+} from "./agent/toolRegistry";
 
-// --- Types ---
-
-// Phase 15: Define the structure of an action waiting for approval
-export interface PendingAction {
-  tool: string;
-  args: any;
-  rationale: string; // "I need to edit this file to fix the bug..."
-}
-
-/**
- * The Judge's verdict for one tool invocation.
- * Success is decided structurally, not by sniffing the output string: a tool that
- * throws can never be scored as exit 0.
- */
-interface ToolOutcome {
-  /** Human-readable output — shown to the user and fed back to the Planner on repair. */
-  output: string;
-  /** True only when the tool returned without throwing and reported no non-zero exit code. */
-  ok: boolean;
-  /** Exit code from an `[Exit Code: N]` marker; null when the tool threw or emitted no marker. */
-  exitCode: number | null;
-}
-
-export interface AgentState {
-  messages: { role: string; content: string }[];
-  context: ContextSnapshot | null; // The UserContextState passed from UI
-  prData: any;  // PR metadata
-  plan?: AgentPlan; // The Cortex - Deliberative Reasoning
-  lastError?: string; // Phase 13: The reason for failure (Trauma Memory)
-  pendingAction?: PendingAction; // Phase 15: The "Held" action awaiting approval
-}
-
-// --- FR-038: Dual-Track Protocol (Voice-First) ---
-// The "News Anchor" pattern: voice track for TTS, screen track for UI
-export interface DualTrackResponse {
-  voice: string;  // Spoken summary - NO code, NO markdown, natural English only
-  screen: string; // Visual detail - Markdown, Code, Mermaid diagrams
-}
-
-/**
- * Helper: Formats a message into Dual-Track JSON format.
- * Voice track is sanitized for TTS (no code, no special chars).
- * Screen track retains full markdown/code formatting.
- */
-function formatDualTrack(voice: string, screen?: string): string {
-  const cleanVoice = sanitizeForVoice(voice).substring(0, 200); // Max 2 sentences (~200 chars)
-
-  const response: DualTrackResponse = {
-    voice: cleanVoice || 'Action completed.',
-    screen: screen || voice
-  };
-  return JSON.stringify(response);
-}
+// --- Types (re-exported for existing consumers of "./Agent") ---
+export type { AgentState, PendingAction, ToolOutcome, DualTrackResponse };
 
 // --- Planner Tools (Forces Structured Output) ---
 const plannerTools: FunctionDeclaration[] = [
@@ -99,144 +55,10 @@ const plannerTools: FunctionDeclaration[] = [
   }
 ];
 
-// --- Executor Tools (The Hands) ---
-const uiTools: FunctionDeclaration[] = [
-  {
-    name: "navigate_to_code",
-    description: "Navigate to a specific file and line number in the code viewer.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        filepath: { type: Type.STRING, description: "The file path to navigate to" },
-        line: { type: Type.NUMBER, description: "The line number to jump to" }
-      },
-      required: ["filepath"]
-    }
-  },
-  {
-    name: "change_tab",
-    description: "Switch the application sidebar tab.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        tab_name: { type: Type.STRING, enum: ["files", "annotations", "issue", "diagrams", "terminal"] }
-      },
-      required: ["tab_name"]
-    }
-  },
-  {
-    name: "toggle_diff_mode",
-    description: "Enable or disable diff mode to show/hide code changes.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        enable: { type: Type.BOOLEAN, description: "True to show diff, false to hide" }
-      },
-      required: ["enable"]
-    }
-  },
-  {
-    name: "run_terminal_command",
-    description: "Execute a shell command in the runtime terminal. Use this to run tests, install packages, check node version, or verify builds.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        command: { type: Type.STRING, description: "The command to run (e.g., 'npm', 'node', 'ls')" },
-        args: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Arguments for the command" }
-      },
-      required: ["command"]
-    }
-  },
-  {
-    name: "write_file",
-    description: "Create or overwrite a file with the specified content. Use this to create new files or modify existing ones.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        path: { type: Type.STRING, description: "The file path relative to the project root (e.g., 'src/test.txt')" },
-        content: { type: Type.STRING, description: "The content to write to the file" }
-      },
-      required: ["path", "content"]
-    }
-  }
-];
-
-// --- Knowledge Tools (The Librarian - Phase 14) ---
-const knowledgeTools: FunctionDeclaration[] = [
-  // Tool 1: Surface Search (MiniSearch) - Finds files by name
-  {
-    name: "find_file",
-    description: "Find a file by its name. Use this to locate files when you know part of the filename.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        name: { type: Type.STRING, description: "The filename fragment (e.g., 'Agent', 'Service')" }
-      },
-      required: ["name"]
-    }
-  },
-  // Tool 2: Deep Search (Grep) - Searches file content
-  {
-    name: "search_text",
-    description: "Search for a text string or symbol inside ALL files. Use this to find where a class, function, or variable is defined.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        query: { type: Type.STRING, description: "The exact string to search for (e.g., 'interface AgentState', 'function run')" }
-      },
-      required: ["query"]
-    }
-  },
-  // Tool 3: Diagram Generation (Phase 8)
-  {
-    name: "propose_diagrams",
-    description: "Generate high-value Mermaid.js diagrams for the current PR or codebase. Use this when the user asks for architecture, flow, or visualization.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        prompt: { type: Type.STRING, description: "Specific instructions for the diagram (optional)" }
-      }
-    }
-  }
-];
-
-// Combined Tools for Executor (The Full Toolset)
-const executorTools = [...uiTools, ...knowledgeTools];
-
-// Phase 15: The Gatekeeper - Sensitive tools require human approval
-const SENSITIVE_TOOLS = ['run_terminal_command', 'write_file'];
-
-// Terminal commands that only read. This list was dead until the executor started
-// forwarding the model's real arguments — `args.command` was always undefined, so
-// every terminal command fell through into the approval modal.
-const READ_ONLY_COMMANDS = ['ls', 'find', 'grep', 'cat'];
-
-// `find` can run arbitrary programs, delete files, or write output via its own
-// primitives (-exec, -delete, -fprintf, -fls, ...). Deny-listing each mutating flag
-// individually is a losing game, so only known-safe filtering/traversal flags are
-// permitted; anything else re-arms the approval gate.
-const FIND_SAFE_FLAGS = new Set(['-name', '-iname', '-type', '-maxdepth', '-path']);
-
-/**
- * True when a terminal invocation is safe to run without asking the user.
- * Both the executable AND its arguments must be read-only: WebContainer spawns
- * (command, argv) directly with no shell, so argv is the only remaining escape hatch.
- */
-function isReadOnlyInvocation(name: string, args: any): boolean {
-  if (name !== 'run_terminal_command') return false;
-  if (!READ_ONLY_COMMANDS.includes(args?.command)) return false;
-
-  // A non-array `args.args` isn't a shape the scan below understands — fail closed
-  // rather than silently treating it as "no arguments" and skipping the scan.
-  if (args?.args !== undefined && !Array.isArray(args.args)) return false;
-  const argv: unknown[] = Array.isArray(args?.args) ? args.args : [];
-
-  if (args.command === 'find') {
-    return !argv.some(a => typeof a === 'string' && a.startsWith('-') && !FIND_SAFE_FLAGS.has(a));
-  }
-
-  return true;
-}
+// Executor Tools (The Hands), Knowledge Tools (The Librarian), the Gatekeeper's
+// SENSITIVE_TOOLS/isReadOnlyInvocation classification, and their dispatch
+// implementations all now live together in ./agent/toolRegistry (Concern 1,
+// Stage F) — imported above as uiTools/executorTools/SENSITIVE_TOOLS/isReadOnlyInvocation.
 
 export class TheiaAgent {
   // Lazy: constructing GoogleGenAI eagerly throws when no API key is set,
@@ -254,7 +76,6 @@ export class TheiaAgent {
   private model: string = 'gemini-3.1-pro-preview';
   private chatSession: any = null;
   private workflow: any;
-  private unsubscribeTemp: (() => void) | null = null;
   private state: AgentState | null = null; // Phase 15.2: Persisted state for resumption
   private lastUserInteraction: number = 0; // Phase 17: User Activity Tracker (FR-041/FR-042)
   private isBusy: boolean = false;
@@ -1285,70 +1106,16 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
   }
 
   /**
-   * Helper: Executes a runtime command and waits for the exit signal.
-   * Captures stdout/stderr into a single string.
-   */
-  private async executeCommandAndWait(command: string, args: string[]): Promise<string> {
-    const TIMEOUT_MS = 15000; // 15s timeout for any shell command
-
-    return new Promise((resolve) => {
-      let outputBuffer = '';
-      let timer: any;
-
-      // Definition of handlers
-      const onOutput = (envelope: any) => {
-        const event = envelope.event || envelope;
-        if (event.type === 'RUNTIME_OUTPUT') {
-          outputBuffer += event.payload.data;
-        }
-      };
-
-      const onExit = (envelope: any) => {
-        const event = envelope.event || envelope;
-        if (event.type === 'RUNTIME_EXIT') {
-          cleanup();
-          const exitMsg = event.payload.exitCode === 0 ? '' : `\n[Exit Code: ${event.payload.exitCode}]`;
-          resolve(outputBuffer + exitMsg);
-        }
-      };
-
-      // Cleanup to prevent memory leaks
-      const cleanup = () => {
-        this.unsubscribeTemp?.();
-        clearTimeout(timer);
-      };
-
-      // Subscribe to EventBus (using wildcard to catch all events)
-      const unsubOutput = eventBus.subscribe('RUNTIME_OUTPUT', onOutput);
-      const unsubExit = eventBus.subscribe('RUNTIME_EXIT', onExit);
-
-      this.unsubscribeTemp = () => {
-        unsubOutput();
-        unsubExit();
-      };
-
-      // Safety Timeout
-      timer = setTimeout(() => {
-        console.warn(`[Agent] Command timed out: ${command} ${args.join(' ')}`);
-        cleanup();
-        resolve(outputBuffer + `\n[Error: Command timed out after ${TIMEOUT_MS}ms]`);
-      }, TIMEOUT_MS);
-
-      // Trigger the Nervous System
-      eventBus.emit({
-        type: 'AGENT_EXEC_CMD',
-        payload: { command, args, timestamp: Date.now() }
-      });
-    });
-  }
-
-  /**
    * Runs a tool and scores the outcome (The Judge).
    *
    * The score is structural, not textual. A tool that throws is a failure by
    * construction — it never reaches the exit-code parser, so it can no longer be
    * silently read as exit 0 and marked `completed`. Only a clean return is eligible
    * for success, and an explicit `[Exit Code: N]` marker downgrades it when N != 0.
+   *
+   * Deliberately calls `this.executeTool` (not the registry's `dispatchTool`
+   * directly) so a test that does `vi.spyOn(inst, 'executeTool')` still
+   * intercepts dispatch — see tests/unit/core/AgentExecutor.test.ts.
    */
   private async runTool(name: string, args: any, prData?: any): Promise<ToolOutcome> {
     let output: string;
@@ -1357,127 +1124,23 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
     } catch (err: any) {
       return { output: `Error: ${err?.message ?? String(err)}`, ok: false, exitCode: null };
     }
-
-    // A safety-timeout resolves (it does not throw) so the partial output survives,
-    // but it must never be scored as success — the command never actually finished.
-    if (output.includes('[Error: Command timed out')) {
-      return { output, ok: false, exitCode: null };
-    }
-
-    const exitCodeMatch = output.match(/\[Exit Code: (\d+)\]/);
-    const exitCode = exitCodeMatch ? parseInt(exitCodeMatch[1], 10) : null;
-    return { output, ok: exitCode === null || exitCode === 0, exitCode };
+    return scoreToolOutcome(output);
   }
 
   /**
-   * Execute a tool by emitting the corresponding event
-   * Returns a Promise<string> for async tools like terminal commands
+   * Execute a tool by name. Thin delegator to ./agent/toolRegistry's
+   * dispatchTool — the schema+handler registry for all eight Executor tools
+   * (Concern 1, Stage F). Kept as an instance method (rather than calling
+   * dispatchTool directly from executorNode/resolvePendingAction) so it
+   * remains spy-able in tests.
    */
   private async executeTool(name: string, args: any, prData?: any): Promise<string> {
-    const timestamp = Date.now();
-
-    // 1. Runtime Tools (Async/Observed)
-    if (name === 'run_terminal_command') {
-      return this.executeCommandAndWait(args.command, args.args || []);
-    }
-
-    // 2. Knowledge Tools (The Librarian - Phase 14)
-
-    // Layer 1 (Surface Search): find_file -> Uses MiniSearch (UI) to find filenames
-    if (name === 'find_file') {
-      // Map 'name' arg to 'query' for searchService
-      const results = searchService.search(args.name);
-
-      if (results.length === 0) {
-        return "No files found with that name.";
-      }
-
-      return `Found files:\n` + results.map(r => `- ${r.id}`).join('\n');
-    }
-
-    // Layer 2 (Deep Search): search_text -> Uses Node.js (Runtime) to find code symbols
-    if (name === 'search_text') {
-      const nodeScript = formatSearchCommand(args.query);
-      return this.executeCommandAndWait('node', ['-e', nodeScript]);
-    }
-
-    // Tool 3: Diagram Generation (Phase 8)
-    if (name === 'propose_diagrams') {
-      const diagramAgent = new DiagramAgent();
-      try {
-        const targetPR = prData || this.state?.prData;
-        if (!targetPR) return "Error: No PR data available for diagram generation.";
-        
-        let diagrams = [];
-        if (args.prompt) {
-          const custom = await diagramAgent.generateCustomDiagram(targetPR, args.prompt);
-          diagrams = [custom];
-        } else {
-          diagrams = await diagramAgent.proposeDiagrams(targetPR);
-        }
-
-        const mermaidBlocks = diagrams.map(d => `### ${d.title}\n${d.description}\n\n\`\`\`mermaid\n${d.mermaidCode}\n\`\`\``).join('\n\n');
-        return `Generated ${diagrams.length} diagrams:\n\n${mermaidBlocks}`;
-      } catch (e: any) {
-        return `Diagram generation failed: ${e.message}`;
-      }
-    }
-
-    // Phase 15: write_file tool - Creates/overwrites files via Node.js
-    if (name === 'write_file') {
-      const nodeScript = formatWriteFileCommand(args.path, args.content);
-      return this.executeCommandAndWait('node', ['-e', nodeScript]);
-    }
-
-    // 2. UI Tools (Sync/Fire-and-Forget)
-    switch (name) {
-      case 'navigate_to_code':
-        // FR-042: Focus Lock - Don't steal focus if user was active in last 3 seconds
-        if (Date.now() - this.lastUserInteraction < 3000) {
-          console.log('[Focus Lock] Navigation skipped - user is active');
-          return 'Navigation skipped (Focus Locked by User)';
-        }
-        eventBus.emit({
-          type: 'AGENT_NAVIGATE',
-          payload: {
-            target: {
-              file: args.filepath,
-              line: args.line || 1
-            },
-            reason: 'Tool execution',
-            highlight: true,
-            timestamp
-          }
-        });
-        console.log(`[TheiaAgent] AGENT_NAVIGATE emitted: ${args.filepath}:${args.line || 1}`);
-        return `Mapped to ${args.filepath}`;
-
-      case 'change_tab':
-        eventBus.emit({
-          type: 'AGENT_TAB_SWITCH',
-          payload: {
-            tab: args.tab_name,
-            timestamp
-          }
-        });
-        console.log(`[TheiaAgent] AGENT_TAB_SWITCH emitted: ${args.tab_name}`);
-        return `Switched tab to ${args.tab_name}`;
-
-      case 'toggle_diff_mode':
-        eventBus.emit({
-          type: 'AGENT_DIFF_MODE',
-          payload: {
-            enable: args.enable,
-            timestamp
-          }
-        });
-        console.log(`[TheiaAgent] AGENT_DIFF_MODE emitted: ${args.enable}`);
-        return `Toggled Diff Mode`;
-
-      default:
-        console.warn(`[TheiaAgent] Unknown tool: ${name}`);
-        return "Unknown tool";
-    }
+    const ctx: ToolDispatchContext = {
+      prData,
+      lastUserInteraction: this.lastUserInteraction,
+      fallbackPrData: this.state?.prData,
+    };
+    return dispatchTool(name, args, ctx);
   }
 
   /**
