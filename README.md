@@ -1,114 +1,51 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-
 # Theia — AI Code Review Assistant
 
-**v1.2 — Status: Beta**
+A single-page React app that turns a GitHub pull request into a reviewable workspace: file tree, diff/source viewer, AI chat (two engines — a fast streaming Chat mode and a tool-calling Agent mode), spec traceability, voice, and auto-generated Mermaid diagrams. See [ARCHITECTURE.md](ARCHITECTURE.md) for how it's built.
 
-*Voice-First, Spec-Driven Code Review with L4 Autonomy*
-
-</div>
-
----
-
-## Features
-
-- 🎤 **Voice Mode** — Hands-free code review with natural conversation
-- 📋 **Spec Traceability** — Atomize requirements and verify code against specs
-- 📊 **Diagram Navigation** — Clickable Mermaid diagrams that navigate to code
-- 🌲 **Full Repo Access** — Browse and lazy-load any file in the repository
-- 💬 **AI Chat** — Context-aware assistance powered by Gemini
-
----
-
-## Quick Start
-
-### Prerequisites
-- Node.js 18+
-- npm
-
-### Installation
+## Quick start
 
 ```bash
-# Clone the repository
-git clone <your-repo-url>
-cd My-Code-Review-Assistant
-
-# Install dependencies
 npm install
+npm run dev
 ```
 
-### Environment Setup
+Open http://localhost:5173. Click **Load Sample PR** to explore the app with local fixture data — no API key, no `.env`, no network calls required for this path.
 
-Create a `.env` file in the root directory:
+To review a real GitHub PR, or use the AI chat/voice/diagram features, add a `.env` (see `.env.example`):
 
 ```env
-# Required
-VITE_GEMINI_API_KEY=your_gemini_api_key
-
-# Optional (for enhanced features)
-VITE_GITHUB_TOKEN=your_github_token      # Increases API rate limits
-VITE_LINEAR_API_KEY=your_linear_api_key  # For Linear integration
-
-# For Voice Precision Mode (Google Cloud TTS)
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+VITE_GEMINI_API_KEY=your_gemini_api_key_here   # required for any AI feature
+VITE_GITHUB_TOKEN=your_github_token_here        # optional — raises GitHub API rate limits
+VITE_LINEAR_API_KEY=your_linear_api_key_here    # optional — Linear issue linking
 ```
 
-### Run the App
+See [ARCHITECTURE.md § API keys](ARCHITECTURE.md#api-keys--what-needs-one-and-what-doesnt) for exactly what each key gates.
+
+## Gates
 
 ```bash
-# Development server
-npm run dev
-
-# Build for production
-npm run build
+npm run check
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Runs, in order: typecheck (`tsc --noEmit`), unit tests (`vitest run`), production build (`tsc && vite build`), the relative-import-path checker (`tools/check-paths.mjs`), and the Playwright e2e suite. Stops at the first failure. This is a local command, not a CI workflow — run it before you consider a change done.
 
----
-
-## Testing
+Individual pieces, if you want to run just one:
 
 ```bash
-# Run all tests
-npx playwright test --project=chromium
-
-# Run specific test suite
-npx playwright test tests/full-repo-integration.spec.ts --project=chromium
-
-# Show test report
-npx playwright show-report
+npx tsc --noEmit
+npx vitest run
+npx vite build
+node tools/check-paths.mjs
+npx playwright test
 ```
 
----
+## Tests
 
-## Architecture
+- `tests/unit/` — Vitest unit tests, no browser, no network.
+- `tests/boot-smoke.spec.ts`, `tests/neural-loop.spec.ts` — the Playwright specs Stage E verified pass offline with no API key; these are what `npx playwright test` runs by default.
+- `tests/quarantine/` — 18 older Playwright specs excluded from the default run (real Gemini/Linear/network dependencies, not mocked). See `tests/quarantine/README.md`.
 
-| Component | Technology |
-|-----------|------------|
-| Frontend | React 19 + Vite + TypeScript |
-| Styling | Tailwind CSS |
-| AI Brain | Gemini 3 Pro Preview |
-| Voice | Gemini 2.0 Flash (WebSocket) + Cloud TTS |
-| Diagrams | Mermaid.js |
+## Documentation
 
-See [docs/architecture/system_handover_v0.3.0.md](docs/architecture/system_handover_v0.3.0.md) for detailed architecture.
-See [docs/specs/](docs/specs/) for detailed Requirements and User Stories.
-
----
-
-## Usage
-
-1. **Load a PR** — Paste a GitHub PR URL or click "Load Sample PR"
-2. **Review Files** — Navigate the file tree and view diffs
-3. **Use Voice** — Click "Voice Review" for hands-free mode
-4. **Check Specs** — Link Linear issues or paste markdown specs
-5. **Explore Diagrams** — Auto-generate architectural diagrams
-
----
-
-## License
-
-MIT
-
+- [ARCHITECTURE.md](ARCHITECTURE.md) — entry point, `src/` layout, the EventBus, what Agent mode is, models in use.
+- `docs/archive/` — everything that used to live in `docs/` and `design_docs/`. Kept for history, not deleted, but pre-simplification and unverified against the current code — see `docs/archive/README.md` before trusting anything in there.
