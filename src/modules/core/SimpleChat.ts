@@ -29,6 +29,14 @@ class SimpleChatService {
   private transcript: SimpleTurn[] = [];
   /** FIFO mutex: each turn is chained onto the previous, never overlapping. */
   private turnChain: Promise<void> = Promise.resolve();
+  /**
+   * Bumped by reset()/hydrate() to invalidate any turn already in flight.
+   * runTurn captures its own epoch up front and checks it before every
+   * mutation/emit, so a turn orphaned by a reset or a PR switch stops
+   * touching the transcript and the EventBus instead of leaking into
+   * whatever session comes next.
+   */
+  private epoch = 0;
 
   constructor() {
     eventBus.subscribe('USER_MESSAGE', async (envelope) => {
@@ -60,6 +68,7 @@ class SimpleChatService {
    * break the user/model alternation the stateless turn algorithm relies on.
    */
   public hydrate(messages: ChatMessage[]): void {
+    this.epoch++;
     this.transcript = messages
       .filter(m =>
         (m.role === 'user' || m.role === 'assistant') &&
@@ -71,6 +80,7 @@ class SimpleChatService {
 
   /** Drops the in-memory transcript. */
   public reset(): void {
+    this.epoch++;
     this.transcript = [];
   }
 
@@ -87,6 +97,8 @@ class SimpleChatService {
     model?: string;
     language?: 'English' | 'Hebrew' | 'Auto';
   }): Promise<void> {
+    const myEpoch = this.epoch;
+
     eventBus.emit({
       type: 'AGENT_THINKING',
       payload: { stage: 'started', message: 'Analyzing...', timestamp: Date.now() },
@@ -118,6 +130,8 @@ class SimpleChatService {
       });
 
       for await (const chunk of stream) {
+        if (this.epoch !== myEpoch) return; // stale turn: stop emitting chunks
+
         chunks = mergeGroundingChunks(chunks, chunk.candidates?.[0]?.groundingMetadata?.groundingChunks as any);
 
         if (chunk.text) {
@@ -128,6 +142,8 @@ class SimpleChatService {
           });
         }
       }
+
+      if (this.epoch !== myEpoch) return; // stale turn: don't commit or emit the final answer
 
       const update = buildTranscriptUpdate(rawMessage, fullText);
       if (update.length) {
@@ -158,6 +174,8 @@ class SimpleChatService {
 
     } catch (error: any) {
       console.error('[SimpleChat] Turn failed:', error);
+      if (this.epoch !== myEpoch) return; // stale turn: swallow the error silently
+
       const friendly = describeChatError(error);
       eventBus.emit({
         type: 'AGENT_SPEAK',
@@ -170,10 +188,14 @@ class SimpleChatService {
       });
       // Turn never committed to the transcript — the user can retry cleanly.
     } finally {
-      eventBus.emit({
-        type: 'AGENT_THINKING',
-        payload: { stage: 'completed', timestamp: Date.now() },
-      });
+      // A stale turn's 'completed' would falsely unstick isTyping (and the
+      // persistence effect gated on it) for whatever session runs next.
+      if (this.epoch === myEpoch) {
+        eventBus.emit({
+          type: 'AGENT_THINKING',
+          payload: { stage: 'completed', timestamp: Date.now() },
+        });
+      }
     }
   }
 }
