@@ -21,7 +21,7 @@ import { buildContextEnvelope } from '../../prompts/contextEnvelope';
 import { buildSystemPrompt } from '../../prompts/systemPrompt';
 import { buildSimpleChatConfig, buildTranscriptUpdate, mergeGroundingChunks, describeChatError } from './simpleChatConfig';
 import type { SimpleTurn } from './simpleChatConfig';
-import type { ChatMessage, GroundingChunk } from '../../../types';
+import type { ChatMessage, GroundingChunk } from '../../types/domain';
 
 export type { SimpleTurn };
 

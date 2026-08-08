@@ -9,7 +9,7 @@ const mockGithubInstance = {
 };
 
 // Mock Dependencies — paths must match the actual import specifiers in NavigationService.ts
-vi.mock('../../../services/github', () => {
+vi.mock('../../../src/services/github', () => {
     return {
         GitHubService: vi.fn().mockImplementation(function () {
             return mockGithubInstance;

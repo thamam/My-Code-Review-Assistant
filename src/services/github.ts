@@ -1,4 +1,4 @@
-import { PRData, FileChange, FileStatus, RepoNode } from '../types';
+import { PRData, FileChange, FileStatus, RepoNode } from '../types/domain';
 
 interface GitHubPR {
   number: number;

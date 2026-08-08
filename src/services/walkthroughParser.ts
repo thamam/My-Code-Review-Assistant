@@ -1,5 +1,5 @@
 
-import { Walkthrough, WalkthroughSection } from '../types';
+import { Walkthrough, WalkthroughSection } from '../types/domain';
 
 export class WalkthroughParserError extends Error {
   constructor(message: string) {

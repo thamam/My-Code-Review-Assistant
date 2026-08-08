@@ -1,4 +1,4 @@
-import { PRData, Walkthrough } from '../types';
+import { PRData, Walkthrough } from '../types/domain';
 
 export const SAMPLE_PR: PRData = {
   id: 'PR-123',

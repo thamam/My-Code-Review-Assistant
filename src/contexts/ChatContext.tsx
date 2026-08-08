@@ -6,19 +6,19 @@
  */
 
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef, useCallback } from 'react';
-import { ChatMessage } from '../types';
+import { ChatMessage } from '../types/domain';
 import { usePR } from './PRContext';
 import { getActiveSection } from '../utils/walkthroughUtils';
 import { downloadBlob } from '../utils/downloadUtils';
-import { resolveActiveFileContent, type ContextSnapshot } from '../src/types/context';
+import { resolveActiveFileContent, type ContextSnapshot } from '../types/context';
 // Event-Driven Architecture imports
-import { eventBus } from '../src/modules/core/EventBus';
-import { agent } from '../src/modules/core/Agent'; // Force instantiation (Polyfill enabled)
-import { simpleChat } from '../src/modules/core/SimpleChat'; // Force instantiation (Polyfill enabled)
-import { runtime } from '../src/modules/runtime'; // Force runtime instantiation (Phase 11)
-import { storageService } from '../src/modules/persistence'; // For clearing persisted state
-import { applyAgentSpeak } from '../src/lib/chat/applyAgentSpeak';
-import type { ChatEngine } from '../src/modules/core/types';
+import { eventBus } from '../modules/core/EventBus';
+import { agent } from '../modules/core/Agent'; // Force instantiation (Polyfill enabled)
+import { simpleChat } from '../modules/core/SimpleChat'; // Force instantiation (Polyfill enabled)
+import { runtime } from '../modules/runtime'; // Force runtime instantiation (Phase 11)
+import { storageService } from '../modules/persistence'; // For clearing persisted state
+import { applyAgentSpeak } from '../lib/chat/applyAgentSpeak';
+import type { ChatEngine } from '../modules/core/types';
 
 // Force side-effect execution (prevent tree-shaking)
 void agent;

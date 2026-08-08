@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { FileTreeNode } from '../../types';
+import { FileTreeNode } from '../../types/domain';
 import { getFileColor, getStatusColorClass } from '../../utils/colorUtils';
 import { ChevronRight, ChevronDown, File, Folder, FileJson, FileCode, FileText, Loader2, Check, Eye, Flag, Sparkles } from 'lucide-react';
 import clsx from 'clsx';
 import { usePR } from '../../contexts/PRContext';
 import { arePathsEquivalent } from '../../utils/fileUtils';
 import { getActiveSection } from '../../utils/walkthroughUtils';
-import type { VerificationState } from '../../src/types/review';
+import type { VerificationState } from '../../types/review';
 
 const VERIFICATION_CYCLE: VerificationState[] = ['unreviewed', 'inspected', 'verified', 'flagged'];
 

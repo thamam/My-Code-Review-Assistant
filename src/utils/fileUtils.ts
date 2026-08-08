@@ -1,5 +1,5 @@
 
-import { FileChange, FileTreeNode } from '../types';
+import { FileChange, FileTreeNode } from '../types/domain';
 
 export function normalizePath(path: string): string {
     return path.replace(/\\/g, '/').trim();

@@ -4,12 +4,12 @@ import { GoogleGenAI, LiveServerMessage, Modality, Blob, FunctionDeclaration, Ty
 import { usePR } from './PRContext';
 import { useChat } from './ChatContext';
 import { useSpec } from './SpecContext';
-import { ContextBrief } from '../src/types/contextBrief';
-import { formatBriefAsWhisper, getBrainResponse, generatePrecisionResponse, PrecisionResponse } from '../src/services/DirectorService';
-import { generateDeepInsight } from '../src/services/BrainService';
-import { speakWithCloudTTS } from '../src/modules/voice/TTSService';
-import { voiceService } from '../src/services/VoiceService';
-import { resolveActiveFileContent } from '../src/types/context';
+import { ContextBrief } from '../types/contextBrief';
+import { formatBriefAsWhisper, getBrainResponse, generatePrecisionResponse, PrecisionResponse } from '../services/DirectorService';
+import { generateDeepInsight } from '../services/BrainService';
+import { speakWithCloudTTS } from '../modules/voice/TTSService';
+import { voiceService } from '../services/VoiceService';
+import { resolveActiveFileContent } from '../types/context';
 
 interface LiveContextType {
   isActive: boolean;

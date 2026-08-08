@@ -12,10 +12,10 @@
  */
 
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
-import { SpecDocument, SpecAtom } from '../src/types/SpecTypes';
-import { atomize } from '../src/services/AtomizerService';
-import { createLinearAdapter } from '../src/adapters/LinearAdapter';
-import { pickAndReadSpecFile } from '../src/adapters/FileAdapter';
+import { SpecDocument, SpecAtom } from '../types/SpecTypes';
+import { atomize } from '../services/AtomizerService';
+import { createLinearAdapter } from '../adapters/LinearAdapter';
+import { pickAndReadSpecFile } from '../adapters/FileAdapter';
 
 // --- Types ---
 

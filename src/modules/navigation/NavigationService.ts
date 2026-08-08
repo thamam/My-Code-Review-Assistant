@@ -4,7 +4,7 @@
  * Handles fetching the directory tree and loading file content on-demand.
  */
 
-import { GitHubService } from '../../../services/github';
+import { GitHubService } from '../../services/github';
 import { NavigationState, RepoNode, LazyFile } from './types';
 import { eventBus } from '../core/EventBus';
 import { searchService } from '../search';

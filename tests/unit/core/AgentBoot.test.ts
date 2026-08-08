@@ -63,6 +63,6 @@ describe('TheiaAgent boot without an API key', () => {
     vi.doUnmock('../../../src/modules/core/genaiClient');
 
     expect(import.meta.env.VITE_GEMINI_API_KEY).toBeUndefined();
-    await expect(import('../../../App')).resolves.toBeDefined();
+    await expect(import('../../../src/App')).resolves.toBeDefined();
   });
 });

@@ -1,4 +1,4 @@
-import { LinearIssue } from '../types';
+import { LinearIssue } from '../types/domain';
 
 export class LinearService {
   private static GRAPHQL_URL = 'https://api.linear.app/graphql';

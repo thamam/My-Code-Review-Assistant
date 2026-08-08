@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChatMessage as ChatMessageType } from '../../types';
+import { ChatMessage as ChatMessageType } from '../../types/domain';
 import clsx from 'clsx';
 import { Bot, User, Copy, Check, Volume2, Globe } from 'lucide-react';
 import { MermaidRenderer } from '../Diagrams/MermaidRenderer';

@@ -3,12 +3,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Github, Loader2, PlayCircle, AlertCircle, HelpCircle, CheckSquare, Square, History, Database, RefreshCw, Upload, FileText, Clock, FileJson, Sparkles, BookOpen, Microscope, Crosshair, GitPullRequest } from 'lucide-react';
 import { usePR } from '../contexts/PRContext';
 import { SAMPLE_WALKTHROUGH } from '../mock/samplePR';
-import { PRData, Walkthrough, PRHistoryItem, AppMode } from '../types';
+import { PRData, Walkthrough, PRHistoryItem, AppMode } from '../types/domain';
 import { formatDistanceToNow } from 'date-fns';
 import { parseWalkthroughFile, parseWalkthroughFromText } from '../services/walkthroughParser';
-import { eventBus } from '../src/modules/core/EventBus';
-import { getGitHubToken, saveGitHubToken, clearGitHubToken } from '../src/lib/credentials';
-import { prSourceService } from '../src/modules/ingestion/PRSourceService';
+import { eventBus } from '../modules/core/EventBus';
+import { getGitHubToken, saveGitHubToken, clearGitHubToken } from '../lib/credentials';
+import { prSourceService } from '../modules/ingestion/PRSourceService';
 
 const USER_CONFIG = {
   DEFAULT_PR_URL: import.meta.env.VITE_DEFAULT_PR_URL || '',

@@ -12,7 +12,7 @@ import { searchService } from '../search';
 import { storageService } from '../persistence';
 import { sanitizeForVoice } from "../../utils/VoiceUtils";
 import { formatSearchCommand, formatWriteFileCommand } from "../runtime/ToolUtils";
-import { DiagramAgent } from "../../../services/diagramAgent";
+import { DiagramAgent } from "../../services/diagramAgent";
 import { ContextSnapshot } from "../../types/context";
 import { buildModeSection } from "../../prompts/modeInstructions";
 import { buildContextEnvelope } from "../../prompts/contextEnvelope";

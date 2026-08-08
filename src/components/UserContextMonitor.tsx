@@ -3,8 +3,8 @@ import { usePR } from '../contexts/PRContext';
 import { useChat } from '../contexts/ChatContext';
 import { useLive } from '../contexts/LiveContext';
 import { useSpec } from '../contexts/SpecContext';
-import { generateBrief, DirectorInput } from '../src/services/DirectorService';
-import { eventBus } from '../src/modules/core/EventBus';
+import { generateBrief, DirectorInput } from '../services/DirectorService';
+import { eventBus } from '../modules/core/EventBus';
 
 /**
  * Headless component that observes PRContext changes

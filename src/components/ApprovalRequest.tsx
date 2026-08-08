@@ -7,8 +7,8 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { eventBus } from '../src/modules/core/EventBus';
-import { AgentRequestApprovalEvent } from '../src/modules/core/types';
+import { eventBus } from '../modules/core/EventBus';
+import { AgentRequestApprovalEvent } from '../modules/core/types';
 
 export const ApprovalRequest: React.FC = () => {
     const [request, setRequest] = useState<AgentRequestApprovalEvent['payload'] | null>(null);

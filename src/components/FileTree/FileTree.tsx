@@ -3,7 +3,7 @@ import { usePR } from '../../contexts/PRContext';
 import { buildFileTree } from '../../utils/fileUtils';
 import { FileNode } from './FileNode';
 import { AlertTriangle, FolderOpen, FolderClosed, Loader2, Eye, EyeOff, Brain, FileDown } from 'lucide-react';
-import { FileTreeNode, FileChange, RepoNode } from '../../types';
+import { FileTreeNode, FileChange, RepoNode } from '../../types/domain';
 import clsx from 'clsx';
 
 /**

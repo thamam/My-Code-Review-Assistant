@@ -21,8 +21,8 @@ import { ApprovalRequest } from './components/ApprovalRequest';
 import { Layout, MessageSquare, ArrowLeft, Mic, Loader2, BookMarked, FolderTree, RotateCcw, Link, Pause, FileUp, Target, Workflow, Eye, BrainCircuit, FileText, Terminal, StickyNote } from 'lucide-react';
 import clsx from 'clsx';
 import { parseWalkthroughFile } from './services/walkthroughParser';
-import { voiceService } from './src/services/VoiceService';
-import { eventBus } from './src/modules/core/EventBus';
+import { voiceService } from './services/VoiceService';
+import { eventBus } from './modules/core/EventBus';
 
 // Phase 2: Voice Service Initialization Component
 const VoiceInit = () => {

@@ -1,5 +1,5 @@
 import { useRef, useCallback } from 'react';
-import { registerLine, unregisterLine } from '../../src/modules/navigation/lineRegistry';
+import { registerLine, unregisterLine } from '../../modules/navigation/lineRegistry';
 import { coordAttr, type LineCoord } from './lineCoord';
 
 /**

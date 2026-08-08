@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { usePR } from '../contexts/PRContext';
 import { LinearService } from '../services/linear';
-import { getLinearKey, saveLinearKey } from '../src/lib/credentials';
+import { getLinearKey, saveLinearKey } from '../lib/credentials';
 import { X, Check, Loader2, AlertCircle, Link, Key } from 'lucide-react';
 
 const USER_CONFIG = {

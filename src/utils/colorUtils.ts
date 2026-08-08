@@ -1,4 +1,4 @@
-import { FileChange } from '../types';
+import { FileChange } from '../types/domain';
 
 export function getFileColor(file: FileChange): string {
   if (file.status === 'added') return '#22c55e'; // green-500

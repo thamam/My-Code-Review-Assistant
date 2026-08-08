@@ -7,7 +7,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { eventBus } from '../../src/modules/core/EventBus';
+import { eventBus } from '../../modules/core/EventBus';
 import '@xterm/xterm/css/xterm.css';
 
 export const RuntimePanel: React.FC = () => {

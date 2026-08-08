@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import mermaid from 'mermaid';
 import { ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 import { usePR } from '../../contexts/PRContext';
-import { CodeReference } from '../../types';
-import { buildBindingPlan, resolveRefPaths, DiagramRef } from '../../src/lib/diagramRefs';
+import { CodeReference } from '../../types/domain';
+import { buildBindingPlan, resolveRefPaths, DiagramRef } from '../../lib/diagramRefs';
 
 interface MermaidRendererProps {
   code: string;

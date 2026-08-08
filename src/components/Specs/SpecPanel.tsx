@@ -10,7 +10,7 @@ import React from 'react';
 import { useSpec } from '../../contexts/SpecContext';
 import { AtomItem } from './AtomItem';
 import { FileUp, Link, Loader2, AlertCircle, FileText, X, RefreshCw } from 'lucide-react';
-import { getLinearKey } from '../../src/lib/credentials';
+import { getLinearKey } from '../../lib/credentials';
 import clsx from 'clsx';
 
 interface SpecPanelProps {

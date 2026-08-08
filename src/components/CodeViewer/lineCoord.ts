@@ -1,4 +1,4 @@
-import type { Annotation } from '../../types';
+import type { Annotation } from '../../types/domain';
 
 /**
  * Addressable coordinate for a rendered code line. Normal/added lines are

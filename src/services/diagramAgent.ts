@@ -1,8 +1,8 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { PRData, Diagram, CodeReference, DiagramType } from '../types';
-import { extractRefs, resolveRefPaths, DiagramRef } from '../src/lib/diagramRefs';
-import { getGenAI } from '../src/modules/core/genaiClient';
+import { PRData, Diagram, CodeReference, DiagramType } from '../types/domain';
+import { extractRefs, resolveRefPaths, DiagramRef } from '../lib/diagramRefs';
+import { getGenAI } from '../modules/core/genaiClient';
 
 function toCodeReferences(refs: DiagramRef[], prFiles: string[]): CodeReference[] {
   return resolveRefPaths(refs, prFiles).map(ref => ({

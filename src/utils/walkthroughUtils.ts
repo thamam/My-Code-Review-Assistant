@@ -1,4 +1,4 @@
-import { Walkthrough, WalkthroughSection } from '../types';
+import { Walkthrough, WalkthroughSection } from '../types/domain';
 
 /**
  * Returns the active walkthrough section by ID, or null if not found.

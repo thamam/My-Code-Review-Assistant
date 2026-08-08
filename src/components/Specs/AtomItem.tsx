@@ -6,7 +6,7 @@
  */
 
 import React, { useState } from 'react';
-import { SpecAtom } from '../../src/types/SpecTypes';
+import { SpecAtom } from '../../types/SpecTypes';
 import { Circle, CheckCircle, XCircle, MinusCircle } from 'lucide-react';
 import clsx from 'clsx';
 

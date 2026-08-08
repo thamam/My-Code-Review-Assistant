@@ -5,9 +5,9 @@
  * WelcomeScreen is left with form state and UI wiring only.
  */
 
-import { GitHubService } from '../../../services/github';
-import { PRData, PRHistoryItem } from '../../../types';
-import { SAMPLE_PR } from '../../../mock/samplePR';
+import { GitHubService } from '../../services/github';
+import { PRData, PRHistoryItem } from '../../types/domain';
+import { SAMPLE_PR } from '../../mock/samplePR';
 import { getGitHubToken } from '../../lib/credentials';
 
 const CACHE_PREFIX = 'vcr_cache_';

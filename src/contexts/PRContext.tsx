@@ -5,21 +5,21 @@
  */
 
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef, useCallback, useMemo } from 'react';
-import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue, Diagram, NavigationTarget, Note, AppMode } from '../types';
+import { PRData, FileChange, ViewportState, Walkthrough, SelectionState, Annotation, LinearIssue, Diagram, NavigationTarget, Note, AppMode } from '../types/domain';
 import { resolveFilePath } from '../utils/fileUtils';
 // NEW IMPORTS
-import { useNavigationModule } from '../src/modules/navigation/hooks';
-import { canFetchRemote } from '../src/modules/ingestion/PRSourceService';
-import { RepoNode, LazyFile } from '../src/modules/navigation/types';
-import { waitForLine, findNearestLine } from '../src/modules/navigation/lineRegistry';
-import type { VerificationState } from '../src/types/review';
-import { storageService } from '../src/modules/persistence';
-import { parseSessionText } from '../src/lib/session-parser/index';
-import { scoreFiles } from '../src/lib/risk-scoring/index';
-import type { FileRiskScore } from '../src/lib/risk-scoring/index';
-import { generateReport, renderReportMarkdown } from '../src/lib/report/index';
-import { extractRequirements } from '../src/lib/requirements/index';
-import type { Requirement } from '../src/types/review';
+import { useNavigationModule } from '../modules/navigation/hooks';
+import { canFetchRemote } from '../modules/ingestion/PRSourceService';
+import { RepoNode, LazyFile } from '../modules/navigation/types';
+import { waitForLine, findNearestLine } from '../modules/navigation/lineRegistry';
+import type { VerificationState } from '../types/review';
+import { storageService } from '../modules/persistence';
+import { parseSessionText } from '../lib/session-parser/index';
+import { scoreFiles } from '../lib/risk-scoring/index';
+import type { FileRiskScore } from '../lib/risk-scoring/index';
+import { generateReport, renderReportMarkdown } from '../lib/report/index';
+import { extractRequirements } from '../lib/requirements/index';
+import type { Requirement } from '../types/review';
 import { downloadBlob } from '../utils/downloadUtils';
 
 // Phase 9: Unify Selection Type

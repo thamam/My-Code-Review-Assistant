@@ -7,8 +7,8 @@ import {
   resolveSelectionRange,
   resolveInteractionKind,
   type LineEntry,
-} from '../../../components/CodeViewer/lineCoord';
-import type { Annotation } from '../../../types';
+} from '../../../src/components/CodeViewer/lineCoord';
+import type { Annotation } from '../../../src/types/domain';
 
 describe('coordAttr / parseCoordAttr', () => {
   it('round-trips a new-side coordinate', () => {
