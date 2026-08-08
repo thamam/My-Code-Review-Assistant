@@ -26,6 +26,19 @@
  * / layering lint rules. This script only asserts specifiers resolve on
  * disk — it has no opinion on which module may import which.
  *
+ * KNOWN LIMITATION (read before trusting a green run): this script proves
+ * that a relative specifier resolves to a file ON DISK. It does NOT prove
+ * that a `vi.mock('./foo', ...)` call names the same module the code under
+ * test actually imports — e.g. after a file move, a mock path can still
+ * resolve to *a* file while no longer being the file the moved production
+ * code imports, or two now-differently-relative paths can both resolve
+ * while pointing at different modules than before. vitest does not error
+ * on a "successful but wrong" mock — the test quietly starts exercising
+ * the real implementation instead of the mock, and can still pass. That
+ * failure class is, empirically, the dominant post-move mock failure, and
+ * this tool does not catch it. Passing check-paths is necessary, not
+ * sufficient; still read vitest's own output for behavioral surprises.
+ *
  * Exit 0 = every relative specifier resolved. Exit 1 = at least one did not
  * (details printed to stderr).
  */
@@ -51,6 +64,10 @@ const SKIP_DIRS = new Set([
   '.agent',
   '.gemini',
   '.claude',
+  // Git worktrees for sibling branches live at <repo-root>/.worktrees/. Run
+  // from the primary clone, the walker would otherwise descend into every
+  // sibling branch's working tree too, double- (or N-) counting every file.
+  '.worktrees',
 ]);
 
 /** Recursively collect source files under `dir`. */
@@ -68,12 +85,25 @@ function walk(dir, out = []) {
 }
 
 /**
- * Crude but sufficient comment stripper: blanks out block comments and
+ * String-literal-aware comment stripper: blanks out block comments and
  * line comments so they can't produce spurious specifier matches, while
  * preserving line numbers (replaces comment bodies with spaces, keeps
- * newlines intact). Not string-literal-aware, but false positives from a
- * '//' or '/*' inside a string are rare in practice and the failure mode
- * (a spurious extra specifier to check) fails loud, not silent.
+ * newlines intact).
+ *
+ * Being string-literal aware matters because a comment-start sequence
+ * occurring INSIDE a string or template literal is not a real comment
+ * delimiter, and treating it as one is not a harmless false positive — it
+ * is silent data loss. Concretely: a glob string such as
+ * '**\/node_modules/**' ends in the two characters '/' then '*' (from its
+ * trailing '/**'), which without string awareness looks exactly like the
+ * start of a block comment. The scanner then swallows everything from
+ * there until the next literal '*' + '/' sequence anywhere in the file —
+ * which may not exist — blanking every specifier from that point to EOF
+ * with no error printed. A resolver that silently skips is worse than a
+ * resolver that never ran, because this stage trusts a green run. Hence:
+ * track single-quote, double-quote, and backtick string state (with
+ * backslash-escape handling) and suspend comment detection while inside
+ * one.
  */
 function stripComments(src) {
   let out = '';
@@ -82,6 +112,34 @@ function stripComments(src) {
   while (i < n) {
     const c = src[i];
     const c2 = src[i + 1];
+
+    // Single- and double-quoted strings: copy through verbatim (the
+    // PATTERNS regexes need to see the quotes and specifier text inside),
+    // but track escapes so an escaped quote doesn't end the string early,
+    // and so a '/*' or '//' inside the string can't be mistaken for a
+    // comment start while we're inside it.
+    if (c === "'" || c === '"') {
+      const quote = c;
+      out += c;
+      i++;
+      while (i < n) {
+        if (src[i] === '\\' && i + 1 < n) {
+          out += src[i] + src[i + 1];
+          i += 2;
+          continue;
+        }
+        if (src[i] === '\n') {
+          // Unterminated string literal (invalid JS) — bail out of string
+          // mode at the newline rather than swallowing the rest of the file.
+          break;
+        }
+        out += src[i];
+        if (src[i] === quote) { i++; break; }
+        i++;
+      }
+      continue;
+    }
+
     if (c === '/' && c2 === '/') {
       while (i < n && src[i] !== '\n') { out += ' '; i++; }
       continue;
@@ -99,10 +157,18 @@ function stripComments(src) {
     }
     if (c === '`') {
       // Skip template literals wholesale (they commonly embed code-as-text,
-      // e.g. shell scripts, which is not a real module specifier).
+      // e.g. shell scripts, which is not a real module specifier), but stay
+      // escape-aware so an escaped backtick (\`) doesn't end the literal
+      // early and desynchronize every comment/string decision after it.
       out += ' ';
       i++;
       while (i < n && src[i] !== '`') {
+        if (src[i] === '\\' && i + 1 < n) {
+          out += src[i] === '\n' ? '\n' : ' ';
+          out += src[i + 1] === '\n' ? '\n' : ' ';
+          i += 2;
+          continue;
+        }
         out += src[i] === '\n' ? '\n' : ' ';
         i++;
       }
