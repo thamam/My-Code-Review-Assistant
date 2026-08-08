@@ -25,6 +25,7 @@ import {
   scoreToolOutcome,
   type ToolDispatchContext,
 } from "./agent/toolRegistry";
+import { parsePlanFromText, hasStepsArray } from "./agent/planJsonParser";
 
 // --- Types (re-exported for existing consumers of "./Agent") ---
 export type { AgentState, PendingAction, ToolOutcome, DualTrackResponse };
@@ -664,40 +665,34 @@ Create a RECOVERY PLAN that:
 
       let planData: any;
 
-      try {
-        // STRATEGY 1: Clean Markdown wrappers
-        const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-        planData = JSON.parse(cleanText);
-      } catch (e) {
-        // STRATEGY 2: "Greedy" Regex Search (Find the largest JSON object)
+      const parseOutcome = parsePlanFromText(text);
+      if (parseOutcome.status === 'parsed') {
+        if (parseOutcome.via === 'greedy') {
+          console.warn('[Planner] Standard parse failed, attempting greedy search...');
+        }
+        planData = parseOutcome.data;
+      } else if (parseOutcome.status === 'invalid-json') {
         console.warn('[Planner] Standard parse failed, attempting greedy search...');
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            planData = JSON.parse(jsonMatch[0]);
-          } catch (e2) {
-            console.error('[Planner] Failed to parse Plan JSON even with greedy search.');
-            // Fall back to just speaking the text
-            if (text) {
-              eventBus.emit({
-                type: 'AGENT_SPEAK',
-                payload: { text: formatDualTrack('I have a response for you.', text) }
-              });
-            }
-          }
-        } else {
-          console.error('[Planner] No JSON object found in response.');
-          if (text) {
-            eventBus.emit({
-              type: 'AGENT_SPEAK',
-              payload: { text: formatDualTrack('I have a response for you.', text) }
-            });
-          }
+        console.error('[Planner] Failed to parse Plan JSON even with greedy search.');
+        // Fall back to just speaking the text
+        if (text) {
+          eventBus.emit({
+            type: 'AGENT_SPEAK',
+            payload: { text: formatDualTrack('I have a response for you.', text) }
+          });
+        }
+      } else {
+        console.error('[Planner] No JSON object found in response.');
+        if (text) {
+          eventBus.emit({
+            type: 'AGENT_SPEAK',
+            payload: { text: formatDualTrack('I have a response for you.', text) }
+          });
         }
       }
 
       // Validate and build plan if we successfully parsed the JSON
-      if (planData && planData.steps && Array.isArray(planData.steps)) {
+      if (hasStepsArray(planData)) {
         console.log('[Planner] Greedy parse succeeded! Building plan from raw text.');
         newPlan = {
           id: `plan-${Date.now()}`,
