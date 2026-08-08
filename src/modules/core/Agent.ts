@@ -5,238 +5,29 @@
  */
 
 import { StateGraph, START, END } from "@langchain/langgraph";
-import { GoogleGenAI, FunctionDeclaration, Type, ThinkingLevel, type GenerateContentConfig } from "@google/genai";
+import { GoogleGenAI, FunctionDeclaration, ThinkingLevel, type GenerateContentConfig } from "@google/genai";
 import { eventBus } from "./EventBus";
-import { AgentPlan, PlanStep } from "../planner/types";
-import { searchService } from '../search';
 import { storageService } from '../persistence';
-import { sanitizeForVoice } from "../../utils/VoiceUtils";
-import { formatSearchCommand, formatWriteFileCommand } from "../runtime/ToolUtils";
-import { DiagramAgent } from "../../services/diagramAgent";
 import { ContextSnapshot } from "../../types/context";
-import { buildModeSection } from "../../prompts/modeInstructions";
 import { buildContextEnvelope } from "../../prompts/contextEnvelope";
 import { buildSystemPrompt } from "../../prompts/systemPrompt";
 import { getGenAI } from "./genaiClient";
+import type { AgentState, PendingAction, ToolOutcome } from "./agent/types";
+import { formatDualTrack, type DualTrackResponse } from "./agent/dualTrack";
+import { uiTools, dispatchTool, scoreToolOutcome, type ToolDispatchContext } from "./agent/toolRegistry";
+import { runPlannerNode } from "./agent/plannerNode";
+import { runExecutorNode } from "./agent/executorNode";
 
-// --- Types ---
+// --- Types (re-exported for existing consumers of "./Agent") ---
+export type { AgentState, PendingAction, ToolOutcome, DualTrackResponse };
 
-// Phase 15: Define the structure of an action waiting for approval
-export interface PendingAction {
-  tool: string;
-  args: any;
-  rationale: string; // "I need to edit this file to fix the bug..."
-}
-
-/**
- * The Judge's verdict for one tool invocation.
- * Success is decided structurally, not by sniffing the output string: a tool that
- * throws can never be scored as exit 0.
- */
-interface ToolOutcome {
-  /** Human-readable output — shown to the user and fed back to the Planner on repair. */
-  output: string;
-  /** True only when the tool returned without throwing and reported no non-zero exit code. */
-  ok: boolean;
-  /** Exit code from an `[Exit Code: N]` marker; null when the tool threw or emitted no marker. */
-  exitCode: number | null;
-}
-
-export interface AgentState {
-  messages: { role: string; content: string }[];
-  context: ContextSnapshot | null; // The UserContextState passed from UI
-  prData: any;  // PR metadata
-  plan?: AgentPlan; // The Cortex - Deliberative Reasoning
-  lastError?: string; // Phase 13: The reason for failure (Trauma Memory)
-  pendingAction?: PendingAction; // Phase 15: The "Held" action awaiting approval
-}
-
-// --- FR-038: Dual-Track Protocol (Voice-First) ---
-// The "News Anchor" pattern: voice track for TTS, screen track for UI
-export interface DualTrackResponse {
-  voice: string;  // Spoken summary - NO code, NO markdown, natural English only
-  screen: string; // Visual detail - Markdown, Code, Mermaid diagrams
-}
-
-/**
- * Helper: Formats a message into Dual-Track JSON format.
- * Voice track is sanitized for TTS (no code, no special chars).
- * Screen track retains full markdown/code formatting.
- */
-function formatDualTrack(voice: string, screen?: string): string {
-  const cleanVoice = sanitizeForVoice(voice).substring(0, 200); // Max 2 sentences (~200 chars)
-
-  const response: DualTrackResponse = {
-    voice: cleanVoice || 'Action completed.',
-    screen: screen || voice
-  };
-  return JSON.stringify(response);
-}
-
-// --- Planner Tools (Forces Structured Output) ---
-const plannerTools: FunctionDeclaration[] = [
-  {
-    name: "submit_plan",
-    description: "Submit a step-by-step plan to achieve the user's goal.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        goal: { type: Type.STRING, description: "The high-level goal." },
-        steps: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              description: { type: Type.STRING, description: "What to do in this step." },
-              tool: { type: Type.STRING, description: "The tool to use (e.g., run_terminal_command, navigate_to_code)." }
-            },
-            required: ["description"]
-          }
-        }
-      },
-      required: ["goal", "steps"]
-    }
-  }
-];
-
-// --- Executor Tools (The Hands) ---
-const uiTools: FunctionDeclaration[] = [
-  {
-    name: "navigate_to_code",
-    description: "Navigate to a specific file and line number in the code viewer.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        filepath: { type: Type.STRING, description: "The file path to navigate to" },
-        line: { type: Type.NUMBER, description: "The line number to jump to" }
-      },
-      required: ["filepath"]
-    }
-  },
-  {
-    name: "change_tab",
-    description: "Switch the application sidebar tab.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        tab_name: { type: Type.STRING, enum: ["files", "annotations", "issue", "diagrams", "terminal"] }
-      },
-      required: ["tab_name"]
-    }
-  },
-  {
-    name: "toggle_diff_mode",
-    description: "Enable or disable diff mode to show/hide code changes.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        enable: { type: Type.BOOLEAN, description: "True to show diff, false to hide" }
-      },
-      required: ["enable"]
-    }
-  },
-  {
-    name: "run_terminal_command",
-    description: "Execute a shell command in the runtime terminal. Use this to run tests, install packages, check node version, or verify builds.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        command: { type: Type.STRING, description: "The command to run (e.g., 'npm', 'node', 'ls')" },
-        args: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Arguments for the command" }
-      },
-      required: ["command"]
-    }
-  },
-  {
-    name: "write_file",
-    description: "Create or overwrite a file with the specified content. Use this to create new files or modify existing ones.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        path: { type: Type.STRING, description: "The file path relative to the project root (e.g., 'src/test.txt')" },
-        content: { type: Type.STRING, description: "The content to write to the file" }
-      },
-      required: ["path", "content"]
-    }
-  }
-];
-
-// --- Knowledge Tools (The Librarian - Phase 14) ---
-const knowledgeTools: FunctionDeclaration[] = [
-  // Tool 1: Surface Search (MiniSearch) - Finds files by name
-  {
-    name: "find_file",
-    description: "Find a file by its name. Use this to locate files when you know part of the filename.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        name: { type: Type.STRING, description: "The filename fragment (e.g., 'Agent', 'Service')" }
-      },
-      required: ["name"]
-    }
-  },
-  // Tool 2: Deep Search (Grep) - Searches file content
-  {
-    name: "search_text",
-    description: "Search for a text string or symbol inside ALL files. Use this to find where a class, function, or variable is defined.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        query: { type: Type.STRING, description: "The exact string to search for (e.g., 'interface AgentState', 'function run')" }
-      },
-      required: ["query"]
-    }
-  },
-  // Tool 3: Diagram Generation (Phase 8)
-  {
-    name: "propose_diagrams",
-    description: "Generate high-value Mermaid.js diagrams for the current PR or codebase. Use this when the user asks for architecture, flow, or visualization.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        prompt: { type: Type.STRING, description: "Specific instructions for the diagram (optional)" }
-      }
-    }
-  }
-];
-
-// Combined Tools for Executor (The Full Toolset)
-const executorTools = [...uiTools, ...knowledgeTools];
-
-// Phase 15: The Gatekeeper - Sensitive tools require human approval
-const SENSITIVE_TOOLS = ['run_terminal_command', 'write_file'];
-
-// Terminal commands that only read. This list was dead until the executor started
-// forwarding the model's real arguments — `args.command` was always undefined, so
-// every terminal command fell through into the approval modal.
-const READ_ONLY_COMMANDS = ['ls', 'find', 'grep', 'cat'];
-
-// `find` can run arbitrary programs, delete files, or write output via its own
-// primitives (-exec, -delete, -fprintf, -fls, ...). Deny-listing each mutating flag
-// individually is a losing game, so only known-safe filtering/traversal flags are
-// permitted; anything else re-arms the approval gate.
-const FIND_SAFE_FLAGS = new Set(['-name', '-iname', '-type', '-maxdepth', '-path']);
-
-/**
- * True when a terminal invocation is safe to run without asking the user.
- * Both the executable AND its arguments must be read-only: WebContainer spawns
- * (command, argv) directly with no shell, so argv is the only remaining escape hatch.
- */
-function isReadOnlyInvocation(name: string, args: any): boolean {
-  if (name !== 'run_terminal_command') return false;
-  if (!READ_ONLY_COMMANDS.includes(args?.command)) return false;
-
-  // A non-array `args.args` isn't a shape the scan below understands — fail closed
-  // rather than silently treating it as "no arguments" and skipping the scan.
-  if (args?.args !== undefined && !Array.isArray(args.args)) return false;
-  const argv: unknown[] = Array.isArray(args?.args) ? args.args : [];
-
-  if (args.command === 'find') {
-    return !argv.some(a => typeof a === 'string' && a.startsWith('-') && !FIND_SAFE_FLAGS.has(a));
-  }
-
-  return true;
-}
+// The Planner (submit_plan tool + plan-recovery JSON parsing) and the
+// Executor (the eight-tool loop + Gatekeeper) now live in
+// ./agent/plannerNode.ts and ./agent/executorNode.ts respectively
+// (Concern 3, Stage F) — TheiaAgent.plannerNode/executorNode below are thin
+// delegators. `uiTools` (imported above) is still needed here directly —
+// it's used by the disconnected `reasoningNode` further down, which was
+// out of scope for this decomposition (see Stage F report).
 
 export class TheiaAgent {
   // Lazy: constructing GoogleGenAI eagerly throws when no API key is set,
@@ -254,7 +45,6 @@ export class TheiaAgent {
   private model: string = 'gemini-3.1-pro-preview';
   private chatSession: any = null;
   private workflow: any;
-  private unsubscribeTemp: (() => void) | null = null;
   private state: AgentState | null = null; // Phase 15.2: Persisted state for resumption
   private lastUserInteraction: number = 0; // Phase 17: User Activity Tracker (FR-041/FR-042)
   private isBusy: boolean = false;
@@ -666,512 +456,35 @@ export class TheiaAgent {
   }
 
   /**
-   * Node: Planner (The "Architect" - Phase 12.2 + Phase 13.2 Repair Mode)
-   * Analyzes user request and creates a step-by-step plan.
-   * In REPAIR MODE: Generates a fix-oriented plan based on the last error.
+   * Node: Planner (The "Architect" - Phase 12.2 + Phase 13.2 Repair Mode).
+   * Thin delegator to ./agent/plannerNode (Concern 3, Stage F) — assembles
+   * the small PlannerRuntime contract (ai/model/getModelConfig) from this
+   * instance's own state and hands off. The Planner and Executor share
+   * nothing else; see plannerNode.ts's file comment.
    */
   private async plannerNode(state: AgentState) {
-    const { context, prData, plan, lastError } = state;
-    const userMsg = state.messages[state.messages.length - 1];
-
-    console.log('[Agent] Planner Active.');
-
-    // Safety check
-    if (!userMsg || !userMsg.content) {
-      console.error('[TheiaAgent] No user message found in state');
-      return { plan: undefined };
-    }
-
-    // DETECT MODE: Standard vs. Repair
-    const isRepairMode = plan && plan.status === 'failed';
-
-    let systemInstruction = `You are Theia's Planner (Level 5 Architect).
-Your job is to analyze the user request and break it down into atomic, executable steps.
-DO NOT execute the steps. Just plan them.
-
-Available Tools:
-- find_file: Use when you need to open a specific file (e.g., "Open the Agent class").
-- search_text: Use when you need to find a Code Symbol (e.g., "Where is AgentState defined?").
-- run_terminal_command: Use for general shell tasks (e.g., "npm install", "npm test").
-- navigate_to_code: Use to navigate to a specific file and line number.
-- change_tab: Use to switch sidebar tabs.
-
-CRITICAL: You will receive a [SYSTEM_CONTEXT] block. This is the GROUND TRUTH about the reviewer's current location.
-- ACTIVE_FILE: the file currently open. "this file" always means this.
-- VISIBLE_LINES: the line range currently on screen — use this when the user says "here", "this section", "what I'm looking at".
-- FOCUSED_LINE: the exact line scrolled to — use this for "this line".
-- SELECTED_CODE: code the user highlighted — use this for "this code", "this function", "explain this".
-- VIEW_MODE: diff or source — line numbers differ between modes.
-- [ACTIVE FILE CONTENT] block: the actual source of ACTIVE_FILE, when available — read code from here instead of guessing or asking the user to paste it.
-NEVER guess filenames or line numbers. Use the context.
-
-Context: File: ${context?.activeFile || 'None'}, Lines: ${context?.viewportStartLine ?? '?'}–${context?.viewportEndLine ?? '?'}, Repo: ${prData?.title || 'Unknown'}
-
-${buildModeSection(context?.appMode ?? 'pr', context?.customReviewGoal)}`;
-
-    let prompt = userMsg.content;
-
-    // INJECT REPAIR CONTEXT (FR-009: Improved Repair Mode)
-    if (isRepairMode) {
-      console.log('[Planner] Entering REPAIR MODE.');
-
-      eventBus.emit({
-        type: 'REPAIR_MODE',
-        payload: { originalGoal: plan.goal, lastError, timestamp: Date.now() }
-      });
-
-      // Extract failed step details for context
-      const failedStep = plan.steps[plan.activeStepIndex];
-      const failedTool = failedStep?.tool || 'Unknown';
-      const failedDescription = failedStep?.description || 'Unknown';
-
-      systemInstruction += `
-
-╔══════════════════════════════════════════════════════════════╗
-║                    🔴 REPAIR MODE ACTIVE 🔴                    ║
-╚══════════════════════════════════════════════════════════════╝
-
-The previous plan FAILED and you must create a RECOVERY PLAN.
-
-━━━━━━━━━━━━━━━━━━ FAILURE ANALYSIS ━━━━━━━━━━━━━━━━━━
-Failed Step: "${failedDescription}"
-Failed Tool: ${failedTool}
-Error Output:
-"""
-${lastError}
-"""
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-⚠️ CRITICAL CONSTRAINTS:
-1. You MUST NOT repeat the exact same tool with the same arguments that caused the error.
-2. You MUST analyze WHY the step failed before attempting a fix.
-3. The first step of your new plan MUST be a DIAGNOSTIC action.
-
-💡 RECOVERY STRATEGIES:
-- If "File Not Found": Use \`run_terminal_command\` with "ls -la" or "ls -R" to discover actual file paths.
-- If "Command Failed": Check if required dependencies exist first (e.g., "npm install").
-- If "Permission Denied": Try an alternative approach or report the limitation.
-- If "Timeout": Break the operation into smaller steps.
-
-YOUR MISSION:
-1. Analyze the error message above.
-2. Identify the root cause (wrong path? missing file? syntax error?).
-3. Create a NEW plan with diagnostic/fix steps FIRST.
-4. Achieve the original goal: "${plan.goal}"`;
-
-      // Override the prompt to focus the LLM on the fix
-      prompt = `REPAIR REQUIRED: The previous plan failed.
-
-Original Goal: "${plan.goal}"
-Failed Step: "${failedDescription}"
-Error: ${lastError}
-
-Create a RECOVERY PLAN that:
-1. First diagnoses the issue (e.g., list files to find correct paths)
-2. Then attempts to achieve the goal using a DIFFERENT strategy`;
-    }
-
-    // 1. Ask for the Plan using models.generateContent (standard project pattern)
-    const response = await this.ai.models.generateContent({
+    return runPlannerNode(state, {
+      ai: this.ai,
       model: this.model,
-      config: {
-        systemInstruction,
-        ...this.getModelConfig(plannerTools)
-      },
-      contents: [{ role: 'user', parts: [{ text: prompt }] }]
+      getModelConfig: this.getModelConfig.bind(this),
     });
-
-    if (!response) {
-      console.error('[Planner] No response received from model');
-      return { plan: undefined, lastError: 'No response from AI model' };
-    }
-
-    // 3. Extract the Plan (Function Call)
-    // Check all parts for a function call named 'submit_plan'
-    let submitPlanCall = null;
-    const parts = response.candidates?.[0]?.content?.parts || [];
-    
-    for (const part of parts) {
-      if (part.functionCall && part.functionCall.name === 'submit_plan') {
-        submitPlanCall = part.functionCall;
-        break;
-      }
-    }
-
-    let newPlan: AgentPlan | undefined;
-
-    if (submitPlanCall) {
-      const args = submitPlanCall.args as any;
-      newPlan = {
-        id: `plan-${Date.now()}`, // New ID
-        goal: args.goal,
-        steps: args.steps.map((s: any, i: number): PlanStep => ({
-          id: `step-${i}`,
-          description: s.description,
-          tool: s.tool,
-          status: 'pending'
-        })),
-        activeStepIndex: 0, // Reset pointer
-        status: 'executing', // Ready to run immediately
-        generatedAt: Date.now()
-      };
-
-      // Broadcast the thought
-      eventBus.emit({
-        type: 'AGENT_PLAN_CREATED',
-        payload: { plan: newPlan }
-      });
-
-      // UX feedback (context-aware)
-      const speakText = isRepairMode
-        ? `Plan failed. I have created a new repair plan: ${newPlan.goal}`
-        : `I have created a plan with ${newPlan.steps.length} steps: ${newPlan.goal}`;
-
-      eventBus.emit({
-        type: 'AGENT_SPEAK',
-        payload: { text: formatDualTrack(speakText, `**Plan Created:** ${newPlan.goal}\n\n**Steps:** ${newPlan.steps.length}`) }
-      });
-
-      console.log('[Agent] Plan created:', newPlan);
-    } else {
-      // LLM returned text instead of a plan - attempt "Greedy" parse
-      let text = '';
-      for (const part of parts) {
-        if (part.text) text += part.text;
-      }
-      console.log('[Planner] Raw Output:', text); // Log this to see what the model actually said
-
-      let planData: any;
-
-      try {
-        // STRATEGY 1: Clean Markdown wrappers
-        const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-        planData = JSON.parse(cleanText);
-      } catch (e) {
-        // STRATEGY 2: "Greedy" Regex Search (Find the largest JSON object)
-        console.warn('[Planner] Standard parse failed, attempting greedy search...');
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            planData = JSON.parse(jsonMatch[0]);
-          } catch (e2) {
-            console.error('[Planner] Failed to parse Plan JSON even with greedy search.');
-            // Fall back to just speaking the text
-            if (text) {
-              eventBus.emit({
-                type: 'AGENT_SPEAK',
-                payload: { text: formatDualTrack('I have a response for you.', text) }
-              });
-            }
-          }
-        } else {
-          console.error('[Planner] No JSON object found in response.');
-          if (text) {
-            eventBus.emit({
-              type: 'AGENT_SPEAK',
-              payload: { text: formatDualTrack('I have a response for you.', text) }
-            });
-          }
-        }
-      }
-
-      // Validate and build plan if we successfully parsed the JSON
-      if (planData && planData.steps && Array.isArray(planData.steps)) {
-        console.log('[Planner] Greedy parse succeeded! Building plan from raw text.');
-        newPlan = {
-          id: `plan-${Date.now()}`,
-          goal: planData.goal || 'User Request',
-          steps: planData.steps.map((s: any, i: number): PlanStep => ({
-            id: `step-${i}`,
-            description: s.description,
-            tool: s.tool,
-            status: 'pending'
-          })),
-          activeStepIndex: 0,
-          status: 'executing',
-          generatedAt: Date.now()
-        };
-
-        // Broadcast the thought
-        eventBus.emit({
-          type: 'AGENT_PLAN_CREATED',
-          payload: { plan: newPlan }
-        });
-
-        eventBus.emit({
-          type: 'AGENT_SPEAK',
-          payload: { text: formatDualTrack(`I have created a plan with ${newPlan.steps.length} steps.`, `**Plan Created:** ${newPlan.goal}\n\n**Steps:** ${newPlan.steps.length}`) }
-        });
-
-        console.log('[Agent] Plan created via greedy parse:', newPlan);
-      }
-    }
-
-    // Return state update (overwrite the old plan, clear error after replanning)
-    return { plan: newPlan, lastError: undefined };
   }
 
   /**
-   * Node: Executor
-   * Takes the current step from the plan and executes it.
+   * Node: Executor. Thin delegator to ./agent/executorNode (Concern 3,
+   * Stage F) — assembles the small ExecutorRuntime contract
+   * (ai/model/getModelConfig/runTool) from this instance's own state and
+   * hands off. `runTool` is `this.runTool` (not the registry's dispatch
+   * directly) so `vi.spyOn(inst, 'executeTool')` in
+   * tests/unit/core/AgentExecutor.test.ts keeps intercepting dispatch.
    */
   private async executorNode(state: AgentState) {
-    console.log('[Agent] Executing Step...');
-    const { plan, context, prData } = state;
-
-    // Safety check
-    if (!plan || plan.activeStepIndex >= plan.steps.length) {
-      return { plan: { ...plan, status: 'completed' } };
-    }
-
-    const currentStep = plan.steps[plan.activeStepIndex];
-
-    let response;
-    try {
-      // 1. Create Execution Session using models.generateContent (standard project pattern)
-      console.log('[Executor] Calling Gemini API for tool selection...');
-      
-      const timeoutMs = 30000;
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`API call timed out after ${timeoutMs}ms`)), timeoutMs)
-      );
-
-      response = await Promise.race([
-        this.ai.models.generateContent({
-          model: this.model,
-          config: {
-            systemInstruction: `You are Theia's Executor.
-Your Goal: Complete the current step of the plan.
-Plan Goal: "${plan.goal}"
-Current Step (${plan.activeStepIndex + 1}/${plan.steps.length}): "${currentStep.description}"
-Suggested Tool: ${currentStep.tool || 'Decide best tool'}
-Context: ${context?.activeFile}
-
-FORCE: You MUST call a tool. DO NOT reply with text.
-PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_code) over run_terminal_command when possible.`,
-            ...this.getModelConfig(executorTools)
-          },
-          contents: [{ role: 'user', parts: [{ text: "EXECUTE_NOW" }] }]
-        }),
-        timeoutPromise
-      ]) as any;
-    } catch (error: any) {
-      // SCENARIO A: API EXPLOSION (Quota, Net, Auth)
-      console.error('[Executor] API Error:', error);
-
-      eventBus.emit({
-        type: 'AGENT_SPEAK',
-        payload: { text: formatDualTrack('An API error occurred.', `**API Error:** ${error.message}`) }
-      });
-      eventBus.emit({
-        type: 'AGENT_THINKING',
-        payload: { stage: 'completed', timestamp: Date.now() }
-      });
-
-      return {
-        plan: {
-          ...plan,
-          status: 'failed' as const,
-          // Mark current step as failed with the API error message
-          steps: plan.steps.map((s, i) => i === plan.activeStepIndex ?
-            { ...s, status: 'failed' as const, result: `API Error: ${error.message}` } : s)
-        },
-        lastError: `Critical API Failure: ${error.message}`
-      };
-    }
-
-    if (!response) {
-      console.error('[Executor] No response received from model');
-      return { 
-        plan: { ...plan, status: 'failed' as const }, 
-        lastError: 'No response from AI model during execution' 
-      };
-    }
-
-    // 3. ANALYZE RESPONSE
-    const parts = response.candidates?.[0]?.content?.parts || [];
-    let functionCall = null;
-    let rawText = '';
-
-    for (const part of parts) {
-      if (part.functionCall) {
-        functionCall = part.functionCall;
-      }
-      if (part.text) {
-        rawText += part.text;
-      }
-    }
-
-    console.log('[Executor Debug] Raw Model Text:', rawText);
-    if (functionCall) {
-      console.log('[Executor Debug] Tool Detected:', functionCall.name, 'Args:', JSON.stringify(functionCall.args));
-    } else {
-      console.warn('[Executor Debug] NO TOOL CALL DETECTED. Model outputted text instead.');
-    }
-
-    // SCENARIO B: MODEL HALLUCINATION (The "Chatty" Trap)
-    if (!functionCall) {
-      console.warn('[Executor] No tool call detected. Model chatted instead.');
-
-      eventBus.emit({
-        type: 'AGENT_SPEAK',
-        payload: { text: formatDualTrack('The executor encountered an issue.', 'Executor failed: Model returned text instead of tool call') }
-      });
-      eventBus.emit({
-        type: 'AGENT_THINKING',
-        payload: { stage: 'completed', timestamp: Date.now() }
-      });
-
-      return {
-        plan: {
-          ...plan,
-          status: 'failed' as const,
-          steps: plan.steps.map((s, i) => i === plan.activeStepIndex ?
-            { ...s, status: 'failed' as const, result: `Error: Model returned text instead of tool: ${rawText.substring(0, 100)}` } : s)
-        },
-        lastError: `Executor Expectation Failed. Model said: ${rawText.substring(0, 200)}`
-      };
-    }
-
-    // SCENARIO C: SUCCESS (Proceed to Gatekeeper)
-    // Take the tool AND its arguments from the call the model was just forced to make.
-    // The plan step is not a source of arguments: submit_plan's schema declares only
-    // `description` and `tool`, so `currentStep.args` is structurally always undefined.
-    // `currentStep.tool` remains a fallback for a call that arrives without a name.
-    const name = functionCall.name || currentStep.tool;
-    const args = (functionCall.args || {}) as Record<string, any>;
-
-    if (!name) {
-      console.warn('[Executor] Function call carried no tool name and the step suggested none.');
-      return {
-        plan: {
-          ...plan,
-          status: 'failed' as const,
-          steps: plan.steps.map((s, i) => i === plan.activeStepIndex ?
-            { ...s, status: 'failed' as const, result: 'Error: Tool call had no resolvable name.' } : s)
-        },
-        lastError: 'Executor received a function call with no tool name.'
-      };
-    }
-
-    // Phase 15: The Gatekeeper - Sensitive tools require human approval
-    // FR-011: Interception Logic
-    // Optimization: Read-only commands are SAFE
-    const isSensitive = SENSITIVE_TOOLS.includes(name) && !isReadOnlyInvocation(name, args);
-
-    if (isSensitive) {
-      console.log(`[Gatekeeper] Intercepting sensitive tool: ${name}`);
-
-      // Emit event to UI
-      eventBus.emit({
-        type: 'AGENT_REQUEST_APPROVAL',
-        payload: { tool: name, args }
-      });
-
-      // PAUSE EXECUTION
-      return {
-        pendingAction: {
-          tool: name,
-          args,
-          rationale: `Action requires user approval: ${currentStep.description}`
-        }
-      };
-    }
-    // -----------------------------------
-
-    // 4. Execute Tool (if not sensitive or already approved)
-    console.log(`[Executor] Calling ${name} with`, args);
-
-    eventBus.emit({
-      type: 'AGENT_SPEAK',
-      payload: { text: formatDualTrack(`Running ${name}.`, `Running: \`${name}\``) }
+    return runExecutorNode(state, {
+      ai: this.ai,
+      model: this.model,
+      getModelConfig: this.getModelConfig.bind(this),
+      runTool: this.runTool.bind(this),
     });
-
-    const outcome = await this.runTool(name, args, prData);
-    const stepResult = outcome.output;
-
-    // UX: Tell the user what we got
-    eventBus.emit({
-      type: 'AGENT_SPEAK',
-      payload: {
-        text: formatDualTrack(`Step ${plan.activeStepIndex + 1} result received.`, `**Step ${plan.activeStepIndex + 1}:**\n${stepResult}`)
-      }
-    });
-
-    // 5. Analyze Result (The Judge) — already scored structurally by runTool.
-    const isSuccess = outcome.ok;
-    const stepStatus: PlanStep['status'] = isSuccess ? 'completed' : 'failed';
-    const failureReason = outcome.exitCode === null ? 'tool error' : `Exit Code: ${outcome.exitCode}`;
-
-    if (!isSuccess) {
-      console.log(`[Executor] Step failed (${failureReason}). Emitting tool_error.`);
-      eventBus.emit({
-        type: 'AGENT_THINKING',
-        payload: {
-          stage: 'tool_error',
-          message: `Step failed (${failureReason}).`,
-          timestamp: Date.now(),
-          error: stepResult
-        }
-      });
-    }
-
-    const newSteps = [...plan.steps];
-    newSteps[plan.activeStepIndex] = {
-      ...currentStep,
-      status: stepStatus,
-      result: stepResult
-    };
-
-    let nextStatus: AgentPlan['status'] = plan.status;
-    let nextIndex = plan.activeStepIndex;
-
-    if (isSuccess) {
-      nextIndex++;
-      if (nextIndex >= plan.steps.length) {
-        nextStatus = 'completed';
-      }
-    } else {
-      console.warn(`[Executor] Step ${plan.activeStepIndex + 1} Failed (${failureReason}). Stopping.`);
-      nextStatus = 'failed';
-    }
-
-    const updatedPlan: AgentPlan = {
-      ...plan,
-      steps: newSteps,
-      activeStepIndex: nextIndex,
-      status: nextStatus
-    };
-
-    if (!isSuccess) {
-      eventBus.emit({
-        type: 'AGENT_THINKING',
-        payload: { stage: 'tool_error', message: 'Step failed. Analyzing error...', timestamp: Date.now(), error: stepResult }
-      });
-      eventBus.emit({
-        type: 'AGENT_SPEAK',
-        payload: { text: formatDualTrack('This step failed.', `**Step Failed:**\n${stepResult}`) }
-      });
-    }
-
-    // Emit completion signal when plan ends (success or failure)
-    if (updatedPlan.status === 'completed' || updatedPlan.status === 'failed') {
-      eventBus.emit({
-        type: 'AGENT_THINKING',
-        payload: { stage: 'completed', timestamp: Date.now() }
-      });
-      if (updatedPlan.status === 'completed') {
-        eventBus.emit({
-          type: 'AGENT_SPEAK',
-          payload: { text: formatDualTrack('The plan has been completed successfully.', `**Plan Completed:** ${plan.goal}`) }
-        });
-      }
-    }
-
-    return {
-      plan: updatedPlan,
-      lastError: isSuccess ? undefined : stepResult // Capture error on failure
-    };
   }
 
   /**
@@ -1285,70 +598,16 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
   }
 
   /**
-   * Helper: Executes a runtime command and waits for the exit signal.
-   * Captures stdout/stderr into a single string.
-   */
-  private async executeCommandAndWait(command: string, args: string[]): Promise<string> {
-    const TIMEOUT_MS = 15000; // 15s timeout for any shell command
-
-    return new Promise((resolve) => {
-      let outputBuffer = '';
-      let timer: any;
-
-      // Definition of handlers
-      const onOutput = (envelope: any) => {
-        const event = envelope.event || envelope;
-        if (event.type === 'RUNTIME_OUTPUT') {
-          outputBuffer += event.payload.data;
-        }
-      };
-
-      const onExit = (envelope: any) => {
-        const event = envelope.event || envelope;
-        if (event.type === 'RUNTIME_EXIT') {
-          cleanup();
-          const exitMsg = event.payload.exitCode === 0 ? '' : `\n[Exit Code: ${event.payload.exitCode}]`;
-          resolve(outputBuffer + exitMsg);
-        }
-      };
-
-      // Cleanup to prevent memory leaks
-      const cleanup = () => {
-        this.unsubscribeTemp?.();
-        clearTimeout(timer);
-      };
-
-      // Subscribe to EventBus (using wildcard to catch all events)
-      const unsubOutput = eventBus.subscribe('RUNTIME_OUTPUT', onOutput);
-      const unsubExit = eventBus.subscribe('RUNTIME_EXIT', onExit);
-
-      this.unsubscribeTemp = () => {
-        unsubOutput();
-        unsubExit();
-      };
-
-      // Safety Timeout
-      timer = setTimeout(() => {
-        console.warn(`[Agent] Command timed out: ${command} ${args.join(' ')}`);
-        cleanup();
-        resolve(outputBuffer + `\n[Error: Command timed out after ${TIMEOUT_MS}ms]`);
-      }, TIMEOUT_MS);
-
-      // Trigger the Nervous System
-      eventBus.emit({
-        type: 'AGENT_EXEC_CMD',
-        payload: { command, args, timestamp: Date.now() }
-      });
-    });
-  }
-
-  /**
    * Runs a tool and scores the outcome (The Judge).
    *
    * The score is structural, not textual. A tool that throws is a failure by
    * construction — it never reaches the exit-code parser, so it can no longer be
    * silently read as exit 0 and marked `completed`. Only a clean return is eligible
    * for success, and an explicit `[Exit Code: N]` marker downgrades it when N != 0.
+   *
+   * Deliberately calls `this.executeTool` (not the registry's `dispatchTool`
+   * directly) so a test that does `vi.spyOn(inst, 'executeTool')` still
+   * intercepts dispatch — see tests/unit/core/AgentExecutor.test.ts.
    */
   private async runTool(name: string, args: any, prData?: any): Promise<ToolOutcome> {
     let output: string;
@@ -1357,127 +616,23 @@ PRIORITY: Always prefer specialized tools (search_text, find_file, navigate_to_c
     } catch (err: any) {
       return { output: `Error: ${err?.message ?? String(err)}`, ok: false, exitCode: null };
     }
-
-    // A safety-timeout resolves (it does not throw) so the partial output survives,
-    // but it must never be scored as success — the command never actually finished.
-    if (output.includes('[Error: Command timed out')) {
-      return { output, ok: false, exitCode: null };
-    }
-
-    const exitCodeMatch = output.match(/\[Exit Code: (\d+)\]/);
-    const exitCode = exitCodeMatch ? parseInt(exitCodeMatch[1], 10) : null;
-    return { output, ok: exitCode === null || exitCode === 0, exitCode };
+    return scoreToolOutcome(output);
   }
 
   /**
-   * Execute a tool by emitting the corresponding event
-   * Returns a Promise<string> for async tools like terminal commands
+   * Execute a tool by name. Thin delegator to ./agent/toolRegistry's
+   * dispatchTool — the schema+handler registry for all eight Executor tools
+   * (Concern 1, Stage F). Kept as an instance method (rather than calling
+   * dispatchTool directly from executorNode/resolvePendingAction) so it
+   * remains spy-able in tests.
    */
   private async executeTool(name: string, args: any, prData?: any): Promise<string> {
-    const timestamp = Date.now();
-
-    // 1. Runtime Tools (Async/Observed)
-    if (name === 'run_terminal_command') {
-      return this.executeCommandAndWait(args.command, args.args || []);
-    }
-
-    // 2. Knowledge Tools (The Librarian - Phase 14)
-
-    // Layer 1 (Surface Search): find_file -> Uses MiniSearch (UI) to find filenames
-    if (name === 'find_file') {
-      // Map 'name' arg to 'query' for searchService
-      const results = searchService.search(args.name);
-
-      if (results.length === 0) {
-        return "No files found with that name.";
-      }
-
-      return `Found files:\n` + results.map(r => `- ${r.id}`).join('\n');
-    }
-
-    // Layer 2 (Deep Search): search_text -> Uses Node.js (Runtime) to find code symbols
-    if (name === 'search_text') {
-      const nodeScript = formatSearchCommand(args.query);
-      return this.executeCommandAndWait('node', ['-e', nodeScript]);
-    }
-
-    // Tool 3: Diagram Generation (Phase 8)
-    if (name === 'propose_diagrams') {
-      const diagramAgent = new DiagramAgent();
-      try {
-        const targetPR = prData || this.state?.prData;
-        if (!targetPR) return "Error: No PR data available for diagram generation.";
-        
-        let diagrams = [];
-        if (args.prompt) {
-          const custom = await diagramAgent.generateCustomDiagram(targetPR, args.prompt);
-          diagrams = [custom];
-        } else {
-          diagrams = await diagramAgent.proposeDiagrams(targetPR);
-        }
-
-        const mermaidBlocks = diagrams.map(d => `### ${d.title}\n${d.description}\n\n\`\`\`mermaid\n${d.mermaidCode}\n\`\`\``).join('\n\n');
-        return `Generated ${diagrams.length} diagrams:\n\n${mermaidBlocks}`;
-      } catch (e: any) {
-        return `Diagram generation failed: ${e.message}`;
-      }
-    }
-
-    // Phase 15: write_file tool - Creates/overwrites files via Node.js
-    if (name === 'write_file') {
-      const nodeScript = formatWriteFileCommand(args.path, args.content);
-      return this.executeCommandAndWait('node', ['-e', nodeScript]);
-    }
-
-    // 2. UI Tools (Sync/Fire-and-Forget)
-    switch (name) {
-      case 'navigate_to_code':
-        // FR-042: Focus Lock - Don't steal focus if user was active in last 3 seconds
-        if (Date.now() - this.lastUserInteraction < 3000) {
-          console.log('[Focus Lock] Navigation skipped - user is active');
-          return 'Navigation skipped (Focus Locked by User)';
-        }
-        eventBus.emit({
-          type: 'AGENT_NAVIGATE',
-          payload: {
-            target: {
-              file: args.filepath,
-              line: args.line || 1
-            },
-            reason: 'Tool execution',
-            highlight: true,
-            timestamp
-          }
-        });
-        console.log(`[TheiaAgent] AGENT_NAVIGATE emitted: ${args.filepath}:${args.line || 1}`);
-        return `Mapped to ${args.filepath}`;
-
-      case 'change_tab':
-        eventBus.emit({
-          type: 'AGENT_TAB_SWITCH',
-          payload: {
-            tab: args.tab_name,
-            timestamp
-          }
-        });
-        console.log(`[TheiaAgent] AGENT_TAB_SWITCH emitted: ${args.tab_name}`);
-        return `Switched tab to ${args.tab_name}`;
-
-      case 'toggle_diff_mode':
-        eventBus.emit({
-          type: 'AGENT_DIFF_MODE',
-          payload: {
-            enable: args.enable,
-            timestamp
-          }
-        });
-        console.log(`[TheiaAgent] AGENT_DIFF_MODE emitted: ${args.enable}`);
-        return `Toggled Diff Mode`;
-
-      default:
-        console.warn(`[TheiaAgent] Unknown tool: ${name}`);
-        return "Unknown tool";
-    }
+    const ctx: ToolDispatchContext = {
+      prData,
+      lastUserInteraction: this.lastUserInteraction,
+      fallbackPrData: this.state?.prData,
+    };
+    return dispatchTool(name, args, ctx);
   }
 
   /**
