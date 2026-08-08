@@ -13,6 +13,10 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './tests',
+  /* Exclude the vitest unit suite living under tests/unit/ — Playwright's
+   * default testMatch would otherwise pick up those files too, and they
+   * throw on import because they use vitest's ESM-only API. */
+  testIgnore: '**/tests/unit/**',
   /* Global timeout for each test - 60 seconds to accommodate LLM latency */
   timeout: 60000,
   /* Expect assertion timeout - 30 seconds for AI-generated content */
