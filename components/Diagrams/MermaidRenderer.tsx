@@ -11,6 +11,57 @@ interface MermaidRendererProps {
   references?: CodeReference[];
 }
 
+// Mermaid renders sequence messages as .messageLine0, .messageLine1, etc.
+// (unchanged since v8). Flowchart/class/state diagrams route through
+// mermaid's dagre-wrapper, which in v10 emits `g.edgePaths > path` for edges
+// (not the v8 `.edgePath .path`) — and since diagramAgent.ts places
+// §file:line refs on NODE labels for those three diagram types, not on
+// edges, `g.nodes > g.node` must be included too or those refs have no
+// hit-area to bind to at all.
+// Exported for tests/unit/components/Diagrams/MermaidRenderer.hitAreas.test.ts.
+export const HIT_CANDIDATE_SELECTOR = '[class^="messageLine"], g.edgePaths > path, g.nodes > g.node';
+
+// Extracts the rendered label text for a hit-area candidate (a `<g class="node">`
+// group or an edge `<path>`/`<line>`). Mermaid v10 renders node labels as HTML
+// inside a foreignObject (span.nodeLabel), not a native SVG <text> node. Class
+// diagram titles are additionally wrapped in a .classTitle container — checked
+// first because a class node with attributes/methods carries one extra
+// .nodeLabel span per member row, which would otherwise make the "exactly one
+// .nodeLabel" check below ambiguous.
+// Exported for tests/unit/components/Diagrams/MermaidRenderer.hitAreas.test.ts.
+export function extractLabelText(el: Element): string {
+  const group = el.closest('g') ?? el.parentElement;
+  if (!group) return '';
+
+  const titleLabel = group.querySelector('.classTitle .nodeLabel');
+  if (titleLabel) return titleLabel.textContent?.trim() ?? '';
+
+  const htmlLabels = Array.from(group.querySelectorAll('.nodeLabel'))
+    .map(node => node.textContent?.trim() ?? '')
+    .filter(Boolean);
+  if (htmlLabels.length === 1) return htmlLabels[0];
+
+  const texts = group.querySelectorAll('text');
+  return texts.length === 1 ? (texts[0].textContent ?? '') : '';
+}
+
+// Selects the ordered candidate list that buildBindingPlan's ordinal fallback
+// binds against. Prefers nodes over edges when any nodes are present:
+// diagramAgent.ts only ever places §refs on NODE labels for flowchart/class/
+// state, and edge paths render before nodes in mermaid's DOM order while
+// carrying no label text — if edges stayed in the candidate list, the
+// ordinal fallback would land on an edge (empty label) for any ref whose
+// description isn't uniquely identifying, silently misrouting navigation to
+// the wrong file. Sequence diagrams have no `g.nodes > g.node` elements, so
+// they fall through to the full selector unchanged (messageLine only).
+// Exported for tests/unit/components/Diagrams/MermaidRenderer.hitAreas.test.ts.
+export function getHitCandidates(svgEl: SVGElement | Element): Element[] {
+  const nodeEls = Array.from(svgEl.querySelectorAll('g.nodes > g.node'));
+  return nodeEls.length
+    ? [...Array.from(svgEl.querySelectorAll('[class^="messageLine"]')), ...nodeEls]
+    : Array.from(svgEl.querySelectorAll(HIT_CANDIDATE_SELECTOR));
+}
+
 export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id = "", references = [] }) => {
   const contentRef = useRef<HTMLDivElement>(null);
   const { navigateToCode, prData } = usePR();
@@ -61,23 +112,12 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id 
     if (svgEl.hasAttribute('data-theia-enhanced')) return;
     if (!references || references.length === 0) return;
 
-    // Mermaid renders sequence messages as .messageLine0, .messageLine1, etc.
-    // Flowcharts use .edgePath .path
-    const messagePaths = Array.from(svgEl.querySelectorAll('[class^="messageLine"], .edgePath .path'));
+    const hitCandidates = getHitCandidates(svgEl);
 
     // Bind by the rendered label text (falling back to position only when
     // counts line up) instead of trusting DOM order, which Mermaid can
-    // reorder or drop elements from. Only trust a group's <text> as *this*
-    // path's label when the group has exactly one — a group with zero or
-    // several (shared/degenerate, e.g. identical text repeated) can't be
-    // attributed to one specific path, so it's left blank for the ordinal
-    // fallback to handle instead of risking a misbind.
-    const svgLabels = messagePaths.map(path => {
-      const group = path.closest('g') ?? path.parentElement;
-      if (!group) return '';
-      const texts = group.querySelectorAll('text');
-      return texts.length === 1 ? (texts[0].textContent ?? '') : '';
-    });
+    // reorder or drop elements from.
+    const svgLabels = hitCandidates.map(extractLabelText);
 
     const diagramRefs: DiagramRef[] = references.map((ref, index) => ({
       id: ref.id,
@@ -98,22 +138,10 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id 
       const resolvedPath = ref.resolvedPath;
       if (!resolvedPath) return; // File no longer resolvable — skip rather than misroute.
 
-      const path = messagePaths[labelIndex];
-
-      // Clone the path to create a wide, invisible hit area
-      const hitArea = path.cloneNode(true) as SVGElement;
-      hitArea.setAttribute('stroke-width', '20'); // Wide hit area
-      hitArea.setAttribute('stroke', 'transparent');
-      hitArea.setAttribute('fill', 'none');
-      hitArea.style.cursor = 'pointer';
-      hitArea.style.pointerEvents = 'stroke'; // Only capture clicks on the stroke
-      hitArea.classList.add('clickable-ref');
-
-      // Insert after the visible path so it is on top and captures clicks reliably
-      path.parentNode?.insertBefore(hitArea, path.nextSibling);
+      const el = hitCandidates[labelIndex] as SVGElement;
 
       // Attach React Handler (No window globals!)
-      hitArea.onclick = (e) => {
+      const handleClick = (e: MouseEvent) => {
         e.stopPropagation();
         navigateToCode({
           filepath: resolvedPath,
@@ -124,14 +152,53 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ code = "", id 
         });
       };
 
+      if (el.tagName.toLowerCase() === 'g') {
+        // Node hit area: the group is already a solid shape (rect/polygon),
+        // so unlike a thin edge path it needs no cloned/expanded hit area —
+        // just pointer-events enabled and handlers on the group itself.
+        el.style.cursor = 'pointer';
+        el.style.pointerEvents = 'all';
+        el.classList.add('clickable-ref');
+
+        const shape = el.querySelector('rect, polygon, circle, ellipse') as SVGElement | null;
+        el.onclick = handleClick;
+        el.onmouseenter = () => {
+          if (shape) {
+            shape.style.stroke = '#60a5fa'; // Blue highlight
+            shape.style.strokeWidth = '3px';
+          }
+        };
+        el.onmouseleave = () => {
+          if (shape) {
+            shape.style.stroke = ''; // Reset
+            shape.style.strokeWidth = '';
+          }
+        };
+        return;
+      }
+
+      // Edge hit area: clone the path to create a wide, invisible hit area
+      const hitArea = el.cloneNode(true) as SVGElement;
+      hitArea.setAttribute('stroke-width', '20'); // Wide hit area
+      hitArea.setAttribute('stroke', 'transparent');
+      hitArea.setAttribute('fill', 'none');
+      hitArea.style.cursor = 'pointer';
+      hitArea.style.pointerEvents = 'stroke'; // Only capture clicks on the stroke
+      hitArea.classList.add('clickable-ref');
+
+      // Insert after the visible path so it is on top and captures clicks reliably
+      el.parentNode?.insertBefore(hitArea, el.nextSibling);
+
+      hitArea.onclick = handleClick;
+
       // Visual Feedback on Hover (Optional: manipulate the visible path)
       hitArea.onmouseenter = () => {
-        (path as SVGElement).style.stroke = '#60a5fa'; // Blue highlight
-        (path as SVGElement).style.strokeWidth = '3px';
+        el.style.stroke = '#60a5fa'; // Blue highlight
+        el.style.strokeWidth = '3px';
       };
       hitArea.onmouseleave = () => {
-        (path as SVGElement).style.stroke = ''; // Reset
-        (path as SVGElement).style.strokeWidth = '';
+        el.style.stroke = ''; // Reset
+        el.style.strokeWidth = '';
       };
     });
 
