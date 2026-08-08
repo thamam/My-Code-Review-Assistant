@@ -39,6 +39,15 @@ describe('TheiaAgent boot without an API key', () => {
       }),
     }));
 
+    // Positive control: prove the mock actually installed and is the same
+    // module instance Agent.ts will resolve, before trusting the negative
+    // assertion below. Without this, a mock that silently failed to
+    // intercept (e.g. a wrong specifier after a file move) would make the
+    // "not.toThrow()" pass vacuously, green-lighting the exact regression
+    // this test exists to catch.
+    const { getGenAI } = await import('../../../src/modules/core/genaiClient');
+    expect(() => getGenAI()).toThrow('getGenAI() must not be called eagerly at construction time');
+
     const { TheiaAgent } = await import('../../../src/modules/core/Agent');
     expect(() => new TheiaAgent()).not.toThrow();
   });
