@@ -35,6 +35,15 @@ describe('TheiaAgent boot without an API key', () => {
   });
 
   it("imports the app's module graph (App.tsx) without VITE_GEMINI_API_KEY set", async () => {
+    // vi.resetModules() (in beforeEach) clears the module registry but does
+    // NOT clear mock registrations, so the doMock from the previous test
+    // would otherwise leak in here and this test would import App.tsx
+    // against a stubbed genaiClient instead of the real one — silently
+    // passing regardless of whether the real genaiClient.ts throws at
+    // module scope. Explicitly unmock it so this test exercises the real
+    // module graph, which is the entire point of this boot gate.
+    vi.doUnmock('../../../src/modules/core/genaiClient');
+
     expect(import.meta.env.VITE_GEMINI_API_KEY).toBeUndefined();
     await expect(import('../../../App')).resolves.toBeDefined();
   });
