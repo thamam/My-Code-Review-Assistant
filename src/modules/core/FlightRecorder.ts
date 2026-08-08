@@ -10,17 +10,20 @@ import { FlightRecorder, TraceEntry } from "./types";
 export class LocalFlightRecorder implements FlightRecorder {
     private entries: TraceEntry[] = [];
     private readonly MAX_ENTRIES = 500;
+    private readonly FLUSH_INTERVAL_MS = 1000;
+    private flushTimer: ReturnType<typeof setTimeout> | null = null;
+    private dirty = false;
 
     async record(entry: TraceEntry): Promise<void> {
         this.entries.push(entry);
-        
+
         // Ring buffer logic for memory safety
         if (this.entries.length > this.MAX_ENTRIES) {
             this.entries.shift();
         }
-        
-        // Optional: Persist to LocalStorage for "session permanence"
-        this.persistToDisk();
+
+        // Persist to LocalStorage for "session permanence" — coalesced, not per-record
+        this.scheduleFlush();
     }
 
     async getEntries(): Promise<TraceEntry[]> {
@@ -29,16 +32,42 @@ export class LocalFlightRecorder implements FlightRecorder {
 
     async clear(): Promise<void> {
         this.entries = [];
+        if (this.flushTimer !== null) {
+            clearTimeout(this.flushTimer);
+            this.flushTimer = null;
+        }
+        this.dirty = false;
         localStorage.removeItem('theia_flight_log');
+    }
+
+    /**
+     * Coalesces bursts of record() calls into a single write: marks dirty and,
+     * if a flush isn't already pending, schedules one. Because the timer reads
+     * `this.entries` at fire time (not a snapshot taken at schedule time), any
+     * records that arrive while the timer is pending are captured by that same
+     * flush — no record is ever dropped.
+     */
+    private scheduleFlush() {
+        this.dirty = true;
+        if (this.flushTimer !== null) {
+            return;
+        }
+        this.flushTimer = setTimeout(() => {
+            this.flushTimer = null;
+            if (this.dirty) {
+                this.dirty = false;
+                this.persistToDisk();
+            }
+        }, this.FLUSH_INTERVAL_MS);
     }
 
     private persistToDisk() {
         try {
             // Persist frequently for traceability (especially in E2E tests)
-            // In a real high-throughput prod app, we'd debounce this.
             localStorage.setItem('theia_flight_log', JSON.stringify(this.entries.slice(-100)));
         } catch (e) {
-            // LocalStorage might be full or unavailable
+            // LocalStorage may be full (QuotaExceededError) or unavailable — don't lose the failure silently.
+            console.warn('[LocalFlightRecorder] Failed to persist flight log to localStorage:', e);
         }
     }
 
