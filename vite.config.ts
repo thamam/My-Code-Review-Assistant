@@ -15,7 +15,6 @@ export default defineConfig(() => {
     plugins: [react()],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
         // Neural Patch: Route node:async_hooks to browser polyfill
         'node:async_hooks': path.resolve(__dirname, 'src/polyfills/async_hooks.ts'),
       }
