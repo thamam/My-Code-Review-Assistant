@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "codegraph": {
+      "type": "stdio",
+      "command": "/Users/tomerhamam/.hermes/node/bin/codegraph",
+      "args": ["serve", "--mcp"]
+    }
+  }
+}
