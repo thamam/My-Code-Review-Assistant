@@ -41,3 +41,6 @@ userConfig.ts
 /tmp
 /TO_BE_DELETED
 .worktrees/
+
+# CodeGraph local index (rebuildable)
+.codegraph/
