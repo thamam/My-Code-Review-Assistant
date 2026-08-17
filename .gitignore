@@ -47,3 +47,4 @@ userConfig.ts
 
 # Local-only agent scratch files
 .claude/*.local.md
+.claude/resilient-flows/
