@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useChat } from '../../contexts/ChatContext';
 import { ChatMessage } from './ChatMessage';
-import { Send, Sparkles, BrainCircuit, Zap, Globe, FileJson, BookOpen, Microscope, Crosshair, GitPullRequest, MessageSquare, Wrench } from 'lucide-react';
+import { Send, BrainCircuit, Zap, Globe, FileJson, BookOpen, Microscope, Crosshair, GitPullRequest, MessageSquare, Wrench } from 'lucide-react';
 import { usePR } from '../../contexts/PRContext';
 import { LanguagePreference } from '../../contexts/ChatContext';
 

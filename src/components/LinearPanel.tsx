@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { usePR } from '../contexts/PRContext';
 import { useChat } from '../contexts/ChatContext';
 import { useLive } from '../contexts/LiveContext';
-import { Link, AlertCircle, ExternalLink, RefreshCw, Check, Target, HelpCircle } from 'lucide-react';
+import { Link, ExternalLink, RefreshCw, Check, Target, HelpCircle } from 'lucide-react';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import clsx from 'clsx';
 
