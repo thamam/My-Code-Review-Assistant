@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Github, Loader2, PlayCircle, AlertCircle, HelpCircle, CheckSquare, Square, History, Database, RefreshCw, Upload, FileText, Clock, FileJson, Sparkles, BookOpen, Microscope, Crosshair, GitPullRequest } from 'lucide-react';
+import { Github, Loader2, PlayCircle, AlertCircle, HelpCircle, CheckSquare, Square, History, Database, RefreshCw, Upload, FileText, Clock, BookOpen, Microscope, Crosshair, GitPullRequest } from 'lucide-react';
 import { usePR } from '../contexts/PRContext';
 import { SAMPLE_WALKTHROUGH } from '../mock/samplePR';
 import { PRData, Walkthrough, PRHistoryItem, AppMode } from '../types/domain';

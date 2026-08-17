@@ -5,9 +5,8 @@ import { usePR } from './PRContext';
 import { useChat } from './ChatContext';
 import { useSpec } from './SpecContext';
 import { ContextBrief } from '../types/contextBrief';
-import { formatBriefAsWhisper, getBrainResponse, generatePrecisionResponse, PrecisionResponse } from '../services/DirectorService';
+import { formatBriefAsWhisper } from '../services/DirectorService';
 import { generateDeepInsight } from '../services/BrainService';
-import { speakWithCloudTTS } from '../modules/voice/TTSService';
 import { voiceService } from '../services/VoiceService';
 import { resolveActiveFileContent } from '../types/context';
 

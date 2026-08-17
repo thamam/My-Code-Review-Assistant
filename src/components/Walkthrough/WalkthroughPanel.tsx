@@ -1,9 +1,8 @@
 
 import React, { useState } from 'react';
 import { usePR } from '../../contexts/PRContext';
-import { Map, ChevronDown, ChevronUp, Expand, Minimize2 } from 'lucide-react';
+import { Map, Expand, Minimize2 } from 'lucide-react';
 import clsx from 'clsx';
-import { arePathsEquivalent } from '../../utils/fileUtils';
 import { getActiveSection } from '../../utils/walkthroughUtils';
 
 export const WalkthroughPanel: React.FC = () => {
