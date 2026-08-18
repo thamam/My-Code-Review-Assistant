@@ -102,15 +102,3 @@ export async function atomize(input: AtomizerInput): Promise<AtomizerResult> {
         return { success: false, error: error.message || 'Atomization failed' };
     }
 }
-
-/**
- * Re-atomizes an existing SpecDocument (useful after content updates).
- */
-export async function reatomize(existingSpec: SpecDocument): Promise<AtomizerResult> {
-    return atomize({
-        content: existingSpec.rawContent,
-        sourceId: existingSpec.id,
-        sourceType: existingSpec.source,
-        title: existingSpec.title,
-    });
-}
