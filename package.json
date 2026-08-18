@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@google/genai": "^1.34.0",
     "@langchain/core": "^1.1.8",
     "@langchain/langgraph": "^1.0.7",
     "@webcontainer/api": "^1.6.1",
@@ -34,7 +35,6 @@
     "check": "npm run typecheck && npm run test:unit && npm run build && npm run check:paths && npm run test:e2e"
   },
   "devDependencies": {
-    "@google/genai": "^1.34.0",
     "@playwright/test": "^1.57.0",
     "@tailwindcss/typography": "^0.5.20",
     "@types/diff": "^5.0.9",
