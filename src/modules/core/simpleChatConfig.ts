@@ -82,9 +82,10 @@ export function mergeGroundingChunks(
  * Classifies a caught error into a user-facing message. No retries, no
  * repair mode — SimpleChat surfaces the failure once and stops.
  */
-export function describeChatError(error: any): string {
-  const status = error?.status;
-  const message: string = error?.message || String(error);
+export function describeChatError(error: unknown): string {
+  const e = error as { status?: number; message?: string } | null | undefined;
+  const status = e?.status;
+  const message: string = e?.message || String(error);
 
   if (status === 429 || /RESOURCE_EXHAUSTED/i.test(message)) {
     return 'Rate limited by the Gemini API. Wait a moment and retry, or switch to a lighter model.';
