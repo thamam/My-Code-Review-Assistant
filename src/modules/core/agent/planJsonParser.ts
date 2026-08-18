@@ -56,6 +56,7 @@ export function parsePlanFromText(text: string): PlanParseOutcome {
 }
 
 /** True when a parsed value has the `steps: [...]` shape a plan needs. */
-export function hasStepsArray(data: any): data is { steps: any[]; goal?: string } {
-  return !!(data && Array.isArray(data.steps));
+export function hasStepsArray(data: unknown): data is { steps: any[]; goal?: string } {
+  const d = data as { steps?: unknown } | null | undefined;
+  return !!(d && Array.isArray(d.steps));
 }
