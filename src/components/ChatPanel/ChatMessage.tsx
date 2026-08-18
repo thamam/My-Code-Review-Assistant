@@ -50,18 +50,14 @@ export const ChatMessage: React.FC<{ message: ChatMessageType }> = ({ message })
     }
   }
 
-  console.log('[ChatMessage] displayContent:', displayContent);
-
   // Simple parser to detect code blocks
   const renderContent = (text: string) => {
-    console.log('[ChatMessage] Parsing content length:', text.length);
     // Split by triple backticks, capturing the optional language tag
     // More flexible regex: allows optional whitespace after backticks
     const parts = text.split(/```(\w+)?\s*\n?([\s\S]*?)```/g);
 
     if (parts.length === 1) return <span className="whitespace-pre-wrap">{text}</span>;
 
-    console.log('[ChatMessage] Split into parts:', parts.length);
     const results = [];
     let i = 0;
 
@@ -73,7 +69,6 @@ export const ChatMessage: React.FC<{ message: ChatMessageType }> = ({ message })
       if (i + 2 < parts.length) {
         const lang = (parts[i + 1] || 'text').trim().toLowerCase();
         const content = parts[i + 2];
-        console.log(`[ChatMessage] Detected code block: lang=${lang}, content length=${content.length}`);
 
         if (lang === 'mermaid') {
           results.push(
