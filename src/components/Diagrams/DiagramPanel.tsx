@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { usePR } from '../../contexts/PRContext';
 import { DiagramAgent } from '../../services/diagramAgent';
-import { DiagramType } from '../../types/domain';
+import { Diagram, DiagramType } from '../../types/domain';
 import { Plus, Trash2, Download, Workflow, MessageSquarePlus, Loader2, RotateCcw } from 'lucide-react';
 import clsx from 'clsx';
 import { downloadBlob } from '../../utils/downloadUtils';
@@ -64,7 +64,7 @@ export const DiagramPanel: React.FC = () => {
         await handleAutoGenerate();
     };
 
-    const handleExport = (diagram: any) => {
+    const handleExport = (diagram: Diagram) => {
         downloadBlob(new Blob([diagram.mermaidCode], { type: 'text/plain' }), `${diagram.title.replace(/\s+/g, '_')}.mmd`);
     };
 
