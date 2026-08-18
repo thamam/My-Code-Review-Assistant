@@ -16,14 +16,6 @@ export interface RuntimeConfig {
     env: Record<string, string>;
 }
 
-export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
-    bootTimeout: 30000,
-    workDir: '/app',
-    env: {
-        NODE_ENV: 'development',
-    },
-};
-
 // ============================================================================
 // RUNTIME STATE
 // ============================================================================
@@ -42,14 +34,6 @@ export interface RuntimeState {
     lastExitCode: number | null;
     bootedAt: number | null;
 }
-
-export const INITIAL_RUNTIME_STATE: RuntimeState = {
-    status: 'idle',
-    serverUrl: null,
-    currentCommand: null,
-    lastExitCode: null,
-    bootedAt: null,
-};
 
 // ============================================================================
 // COMMAND EXECUTION
