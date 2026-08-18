@@ -80,7 +80,9 @@ export function buildContextEnvelope(message: string, context: ContextSnapshot |
 
   const contextHeader = `[SYSTEM_CONTEXT]\n${lines.join('\n')}\n[/SYSTEM_CONTEXT]`;
 
-  console.log('[MIDDLEWARE_PROBE] Final Prompt Injection:', contextHeader);
+  if (import.meta.env.DEV) {
+    console.log('[MIDDLEWARE_PROBE] Final Prompt Injection:', contextHeader);
+  }
 
   return `${contextHeader}\n\nUSER_QUERY: ${message}`;
 }
