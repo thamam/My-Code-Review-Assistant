@@ -8,7 +8,7 @@ describe('buildSystemPrompt', () => {
   describe('engine: agent (regression lock)', () => {
     it('is byte-identical to Agent.buildSystemPrompt for the same inputs', () => {
       const context = { activeFile: 'src/main.ts', activeTab: 'files' as const, isDiffMode: true, appMode: 'pr' as const };
-      const prData = { title: 'My PR', author: 'tomer' };
+      const prData = { title: 'My PR', author: 'tomer' } as any;
 
       const direct = buildSystemPrompt({ context: context as any, prData, engine: 'agent' });
       const viaDelegate = agentAny.buildSystemPrompt(context, prData);
@@ -19,7 +19,7 @@ describe('buildSystemPrompt', () => {
     it('never contains the no-tools constraint or manifest', () => {
       const prompt = buildSystemPrompt({
         context: { activeFile: 'f.ts' } as any,
-        prData: { title: 'PR', author: 'me', files: [{ path: 'a.ts', status: 'modified' }] },
+        prData: { title: 'PR', author: 'me', files: [{ path: 'a.ts', status: 'modified' }] } as any,
         engine: 'agent',
       });
       expect(prompt).not.toContain('CANNOT navigate');
@@ -29,7 +29,7 @@ describe('buildSystemPrompt', () => {
     it('ignores the language input entirely', () => {
       const prompt = buildSystemPrompt({
         context: { activeFile: 'f.ts' } as any,
-        prData: { title: 'PR', author: 'me' },
+        prData: { title: 'PR', author: 'me' } as any,
         engine: 'agent',
         language: 'Hebrew',
       });
@@ -42,7 +42,7 @@ describe('buildSystemPrompt', () => {
     it('contains the no-tools constraint and no tool-instruction language', () => {
       const prompt = buildSystemPrompt({
         context: { activeFile: 'f.ts' } as any,
-        prData: { title: 'PR', author: 'me' },
+        prData: { title: 'PR', author: 'me' } as any,
         engine: 'simple',
       });
       expect(prompt).toContain('CANNOT navigate');
@@ -58,7 +58,7 @@ describe('buildSystemPrompt', () => {
           title: 'PR',
           author: 'me',
           files: [{ path: 'src/a.ts', status: 'modified' }, { path: 'src/b.ts', status: 'added' }],
-        },
+        } as any,
         engine: 'simple',
       });
       expect(prompt).toContain('## PR FILES');
@@ -70,7 +70,7 @@ describe('buildSystemPrompt', () => {
       const files = Array.from({ length: 400 }, (_, i) => ({ path: `file-${i}.ts`, status: 'modified' }));
       const prompt = buildSystemPrompt({
         context: { activeFile: 'f.ts' } as any,
-        prData: { title: 'PR', author: 'me', files },
+        prData: { title: 'PR', author: 'me', files } as any,
         engine: 'simple',
       });
       expect(prompt).toContain('- file-0.ts (modified)');
@@ -82,7 +82,7 @@ describe('buildSystemPrompt', () => {
     it('omits the manifest section entirely when prData has no files', () => {
       const prompt = buildSystemPrompt({
         context: { activeFile: 'f.ts' } as any,
-        prData: { title: 'PR', author: 'me' },
+        prData: { title: 'PR', author: 'me' } as any,
         engine: 'simple',
       });
       expect(prompt).not.toContain('## PR FILES');
@@ -103,7 +103,7 @@ describe('buildSystemPrompt', () => {
         it(`includes ${expectedLabel[mode]} for engine=${engine}`, () => {
           const prompt = buildSystemPrompt({
             context: { activeFile: 'f.ts', appMode: mode } as any,
-            prData: { title: 'PR', author: 'me' },
+            prData: { title: 'PR', author: 'me' } as any,
             engine,
           });
           expect(prompt).toContain(expectedLabel[mode]);
@@ -116,7 +116,7 @@ describe('buildSystemPrompt', () => {
     it('Hebrew produces a strict-language instruction', () => {
       const prompt = buildSystemPrompt({
         context: { activeFile: 'f.ts' } as any,
-        prData: { title: 'PR', author: 'me' },
+        prData: { title: 'PR', author: 'me' } as any,
         engine: 'simple',
         language: 'Hebrew',
       });
@@ -126,7 +126,7 @@ describe('buildSystemPrompt', () => {
     it('Auto produces the auto-detect sentence', () => {
       const prompt = buildSystemPrompt({
         context: { activeFile: 'f.ts' } as any,
-        prData: { title: 'PR', author: 'me' },
+        prData: { title: 'PR', author: 'me' } as any,
         engine: 'simple',
         language: 'Auto',
       });
@@ -136,7 +136,7 @@ describe('buildSystemPrompt', () => {
     it('defaults to the auto-detect sentence when language is omitted', () => {
       const prompt = buildSystemPrompt({
         context: { activeFile: 'f.ts' } as any,
-        prData: { title: 'PR', author: 'me' },
+        prData: { title: 'PR', author: 'me' } as any,
         engine: 'simple',
       });
       expect(prompt).toContain('Respond in the same language the user uses');

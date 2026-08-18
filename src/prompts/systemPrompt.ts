@@ -8,17 +8,18 @@
  */
 import { buildModeSection } from './modeInstructions';
 import type { ContextSnapshot } from '../types/context';
+import type { PRData } from '../types/domain';
 
 export interface SystemPromptInput {
   context: ContextSnapshot | null;
-  prData: any;
+  prData: PRData | null | undefined;
   engine: 'simple' | 'agent';
   language?: 'English' | 'Hebrew' | 'Auto';
 }
 
 const MAX_MANIFEST_FILES = 300;
 
-function buildPrManifest(prData: any): string {
+function buildPrManifest(prData: PRData | null | undefined): string {
   const files: Array<{ path: string; status: string }> = prData?.files ?? [];
   if (!files.length) return '';
 
