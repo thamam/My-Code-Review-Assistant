@@ -235,7 +235,7 @@ const MainLayout = () => {
                             // otherwise it stays live in SimpleChat/Agent and leaks into
                             // whatever the user loads next.
                             eventBus.emit({ type: 'SESSION_RESET', payload: { reason: 'user_reset' } });
-                            setPRData(null as any);
+                            setPRData(null);
                         }}
                         className="text-gray-500 hover:text-white transition-colors shrink-0"
                         title="Exit Review"
