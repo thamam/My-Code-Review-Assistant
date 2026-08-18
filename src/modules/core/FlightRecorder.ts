@@ -1,6 +1,8 @@
 
 import { FlightRecorder, TraceEntry } from "./types";
 
+const FLIGHT_LOG_KEY = 'theia_flight_log';
+
 /**
  * LocalFlightRecorder
  * 
@@ -37,7 +39,7 @@ export class LocalFlightRecorder implements FlightRecorder {
             this.flushTimer = null;
         }
         this.dirty = false;
-        localStorage.removeItem('theia_flight_log');
+        localStorage.removeItem(FLIGHT_LOG_KEY);
     }
 
     /**
@@ -64,7 +66,7 @@ export class LocalFlightRecorder implements FlightRecorder {
     private persistToDisk() {
         try {
             // Persist frequently for traceability (especially in E2E tests)
-            localStorage.setItem('theia_flight_log', JSON.stringify(this.entries.slice(-100)));
+            localStorage.setItem(FLIGHT_LOG_KEY, JSON.stringify(this.entries.slice(-100)));
         } catch (e) {
             // LocalStorage may be full (QuotaExceededError) or unavailable — don't lose the failure silently.
             console.warn('[LocalFlightRecorder] Failed to persist flight log to localStorage:', e);
@@ -77,11 +79,20 @@ export class LocalFlightRecorder implements FlightRecorder {
     public static loadFromDisk(): LocalFlightRecorder {
         const recorder = new LocalFlightRecorder();
         try {
-            const saved = localStorage.getItem('theia_flight_log');
+            const saved = localStorage.getItem(FLIGHT_LOG_KEY);
             if (saved) {
-                recorder.entries = JSON.parse(saved);
+                const parsed = JSON.parse(saved);
+                // A non-array value would break entries.push/shift at runtime — treat it as no persisted log.
+                if (Array.isArray(parsed)) {
+                    recorder.entries = parsed;
+                } else {
+                    console.warn('[LocalFlightRecorder] Persisted flight log is not an array; starting with an empty log.');
+                }
             }
-        } catch (e) {}
+        } catch (e) {
+            // Corrupt JSON or unavailable localStorage — don't lose the failure silently.
+            console.warn('[LocalFlightRecorder] Failed to load flight log from localStorage:', e);
+        }
         return recorder;
     }
 }
