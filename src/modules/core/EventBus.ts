@@ -87,7 +87,9 @@ class EventBus {
             });
         }
 
-        console.log(`[EventBus] Emitted: ${event.type}`, envelope);
+        if (import.meta.env.DEV) {
+            console.log(`[EventBus] Emitted: ${event.type}`, envelope);
+        }
     }
 
     // --- History / Observability API ---
