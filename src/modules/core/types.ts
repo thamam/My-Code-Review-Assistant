@@ -276,19 +276,6 @@ export type SystemEvent = RuntimeOutputEvent | RuntimeReadyEvent | RuntimeExitEv
 
 export type TheiaEvent = UserIntent | AgentAction | SystemEvent;
 
-// Type guard helpers
-export function isUserIntent(event: TheiaEvent): event is UserIntent {
-    return ['USER_MESSAGE', 'UI_INTERACTION', 'CODE_CHANGE', 'USER_APPROVAL', 'USER_ACTIVITY', 'VOICE_INPUT'].includes(event.type);
-}
-
-export function isAgentAction(event: TheiaEvent): event is AgentAction {
-    return ['AGENT_SPEAK', 'AGENT_NAVIGATE', 'AGENT_THINKING', 'AGENT_TAB_SWITCH', 'AGENT_DIFF_MODE', 'AGENT_EXEC_CMD', 'AGENT_PLAN_CREATED', 'AGENT_REQUEST_APPROVAL', 'AGENT_SESSION_RESTORED', 'AGENT_YIELD', 'REPAIR_MODE'].includes(event.type);
-}
-
-export function isSystemEvent(event: TheiaEvent): event is SystemEvent {
-    return ['RUNTIME_OUTPUT', 'RUNTIME_READY', 'RUNTIME_EXIT', 'SYSTEM_FILE_SYNC', 'SESSION_RESET'].includes(event.type);
-}
-
 // = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = =
 // EVENT METADATA (for Black Box logging)
 // = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = =
