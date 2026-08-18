@@ -34,7 +34,7 @@ interface FocusedLocation {
 
 interface PRContextType {
   prData: PRData | null;
-  setPRData: (data: PRData) => void;
+  setPRData: (data: PRData | null) => void;
   selectedFile: SelectedFile | null;
   selectFile: (file: SelectedFile) => void;
   viewportState: ViewportState;
