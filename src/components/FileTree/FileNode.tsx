@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { FileTreeNode } from '../../types/domain';
-import { getFileColor, getStatusColorClass } from '../../utils/colorUtils';
+import { getStatusColorClass } from '../../utils/colorUtils';
 import { ChevronRight, ChevronDown, File, Folder, FileJson, FileCode, FileText, Loader2, Check, Eye, Flag, Sparkles } from 'lucide-react';
 import clsx from 'clsx';
 import { usePR } from '../../contexts/PRContext';
