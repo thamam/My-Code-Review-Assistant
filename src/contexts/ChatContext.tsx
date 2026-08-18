@@ -25,6 +25,13 @@ void agent;
 void simpleChat;
 void runtime;
 
+// FR-042 Focus Lock: suppress agent-driven focus changes if the user was
+// active within this window. Note: src/modules/core/agent/toolRegistry.ts
+// (~line 191) hardcodes this same value independently.
+const FOCUS_LOCK_WINDOW_MS = 3000;
+
+const CHAT_ENGINE_STORAGE_KEY = 'theia_chat_engine';
+
 export type LanguagePreference = 'English' | 'Hebrew' | 'Auto';
 
 export interface UserContextState {
@@ -80,7 +87,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Persisted globally (not per-PR), default 'simple'.
   const [engine, setEngine] = useState<ChatEngine>(() => {
     try {
-      const saved = localStorage.getItem('theia_chat_engine');
+      const saved = localStorage.getItem(CHAT_ENGINE_STORAGE_KEY);
       if (saved === 'simple' || saved === 'agent') return saved;
     } catch (e) {
       console.warn('[ChatContext] Failed to read persisted engine preference');
@@ -136,7 +143,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (event.type === 'AGENT_NAVIGATE') {
         // FR-042: Focus Lock - Don't steal focus if user was active in last 3 seconds
         const timeSinceActivity = Date.now() - lastUserInteractionRef.current;
-        if (timeSinceActivity < 3000) {
+        if (timeSinceActivity < FOCUS_LOCK_WINDOW_MS) {
           console.log(`[ChatContext] AGENT_NAVIGATE suppressed (Focus Lock active: ${timeSinceActivity}ms)`);
           return;
         }
@@ -154,7 +161,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (event.type === 'AGENT_TAB_SWITCH') {
         // Apply focus lock here too? Requirement says "navigation", but tab switch is also jarring.
         const timeSinceActivity = Date.now() - lastUserInteractionRef.current;
-        if (timeSinceActivity < 3000) {
+        if (timeSinceActivity < FOCUS_LOCK_WINDOW_MS) {
           console.log('[ChatContext] AGENT_TAB_SWITCH suppressed (Focus Lock active)');
           return;
         }
@@ -244,7 +251,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const prevEngineRef = useRef<ChatEngine | null>(null);
   useEffect(() => {
     try {
-      localStorage.setItem('theia_chat_engine', engine);
+      localStorage.setItem(CHAT_ENGINE_STORAGE_KEY, engine);
     } catch (e) {
       console.warn('[ChatContext] Failed to persist engine preference');
     }
