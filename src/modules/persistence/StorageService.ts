@@ -16,6 +16,7 @@ const STORAGE_KEY = 'THEIA_AGENT_STATE_V1';
 const REVIEW_STATE_PREFIX = 'THEIA_REVIEW_STATE_V1_';
 const DIAGRAMS_PREFIX = 'THEIA_DIAGRAMS_V1_';
 const CHAT_PREFIX = 'THEIA_CHAT_V1_';
+const NOTES_PREFIX = 'THEIA_NOTES_V1_';
 
 class StorageService {
 
@@ -188,12 +189,10 @@ class StorageService {
 
     // ─── F5: Whiteboard Notes Persistence ─────────────────────────────────────
 
-    private readonly NOTES_PREFIX = 'THEIA_NOTES_V1_';
-
     /** Save whiteboard notes for a specific PR. */
     public saveNotes(prId: string, notes: Note[]): void {
         try {
-            localStorage.setItem(`${this.NOTES_PREFIX}${prId}`, JSON.stringify(notes));
+            localStorage.setItem(`${NOTES_PREFIX}${prId}`, JSON.stringify(notes));
         } catch (err) {
             console.error('[Storage] Failed to save notes:', err);
         }
@@ -202,7 +201,7 @@ class StorageService {
     /** Load whiteboard notes for a specific PR. Returns empty array if nothing saved. */
     public loadNotes(prId: string): Note[] {
         try {
-            const raw = localStorage.getItem(`${this.NOTES_PREFIX}${prId}`);
+            const raw = localStorage.getItem(`${NOTES_PREFIX}${prId}`);
             if (!raw) return [];
             return JSON.parse(raw) as Note[];
         } catch (err) {
