@@ -409,7 +409,9 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       customReviewGoal: customReviewGoalRef.current,
     };
 
-    console.log('[UI_PROBE] Context snapshot:', contextSnapshot);
+    if (import.meta.env.DEV) {
+      console.log('[UI_PROBE] Context snapshot:', contextSnapshot);
+    }
 
     eventBus.emit({
       type: 'USER_MESSAGE',
